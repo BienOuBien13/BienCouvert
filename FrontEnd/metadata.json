@@ -1,0 +1,7 @@
+{
+  "name": "AssurClair",
+  "description": "Gestion intelligente d'assurances : centralisation des contrats, chatbot expert et détection automatique des doublons de garanties.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
