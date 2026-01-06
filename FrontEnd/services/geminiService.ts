@@ -49,13 +49,24 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
  */
 export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
   try {
-    const res = await fetch(`${API_BASE}/api/policies/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, type, name }) });
-    const body = await res.json();
-    if (!res.ok) return { summary: 'La recherche a échoué.', sourceUrl: undefined, detectedFormulas: [] };
+    const res = await fetch(`${API_BASE}/api/policies/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, type, name })
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.error('Search failed:', errBody);
+      return { summary: 'La recherche a échoué.', sourceUrl: undefined, detectedFormulas: [] };
+    }
+
+    const body = await res.json().catch(() => ({}));
     return { summary: body.summary || '', sourceUrl: body.sourceUrl, detectedFormulas: body.formulas || [] } as WebSearchResult;
   } catch (error) {
     console.error('Error searching policy info (client->backend):', error);
     return { summary: 'Erreur réseau lors de la recherche.', sourceUrl: undefined, detectedFormulas: [] };
+  }
 };
 
 /**

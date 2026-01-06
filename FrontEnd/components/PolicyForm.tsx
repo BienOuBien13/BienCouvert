@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, Loader2, CheckCircle, Plus, Save, X, Globe, Search, AlertCircle, ArrowRight, RotateCcw } from 'lucide-react';
 import { Policy, PolicyType, WebSearchResult } from '../types';
+import { uuid } from '../utils/uuid';
 import { summarizePolicy, searchPolicyInfo } from '../services/geminiService';
 
 interface Props {
@@ -182,7 +183,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     if (initialData) {
       onUpdatePolicy({ ...initialData, ...policyData } as Policy);
     } else {
-      onAddPolicy({ id: crypto.randomUUID(), ...policyData, addedAt: Date.now() } as Omit<Policy, 'userId'>);
+      onAddPolicy({ id: uuid(), ...policyData, addedAt: Date.now() } as Omit<Policy, 'userId'>);
     }
     if (!initialData) resetForm();
     else setShowWebValidation(false);

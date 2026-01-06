@@ -1,5 +1,4 @@
 import dotenv from 'dotenv';
-import { GoogleGenAI, Type } from '@google/genai';
 import { WebSearchResult, DuplicateFinding, Policy, Message } from '../types';
 
 dotenv.config();
@@ -9,7 +8,20 @@ let client: any | null = null;
 
 function getAiClient() {
   if (!GEMINI_KEY) return null;
-  if (!client) client = new GoogleGenAI({ apiKey: GEMINI_KEY });
+  if (!client) {
+    try {
+      const mod = require('@google/genai');
+      const GoogleGenAI = mod?.GoogleGenAI || mod?.default?.GoogleGenAI || mod?.default;
+      if (!GoogleGenAI) {
+        console.error('Loaded @google/genai but could not find GoogleGenAI export.');
+        return null;
+      }
+      client = new GoogleGenAI({ apiKey: GEMINI_KEY });
+    } catch (e) {
+      console.error('Failed to require @google/genai - AI features will be disabled. Install @google/genai to enable them.', e);
+      return null;
+    }
+  }
   return client;
 }
 
@@ -74,15 +86,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
       contents: { parts: [{ text: prompt }] },
       config: {
         tools: [{ googleSearch: {} }],
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            formulas: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ['summary', 'formulas']
-        }
+        responseMimeType: 'application/json'
       }
     });
 
@@ -127,20 +131,7 @@ export const detectDuplicates = async (policies: Policy[]): Promise<DuplicateFin
       model: 'gemini-3-flash-preview',
       contents: { parts },
       config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              description: { type: Type.STRING },
-              severity: { type: Type.STRING, enum: ['low', 'medium', 'high'] },
-              involvedPolicies: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ['title', 'description', 'severity', 'involvedPolicies']
-          }
-        }
+        responseMimeType: 'application/json'
       }
     });
 
