@@ -30,14 +30,25 @@ function App() {
 
   useEffect(() => {
     const currentUser = authService.getCurrentUser();
-    if (currentUser) handleLogin(currentUser);
-    setIsLoading(false);
+    if (currentUser) {
+      (async () => {
+        await handleLogin(currentUser);
+        setIsLoading(false);
+      })();
+    } else {
+      setIsLoading(false);
+    }
   }, []);
 
-  const handleLogin = (loggedInUser: User) => {
+  const handleLogin = async (loggedInUser: User) => {
     setUser(loggedInUser);
-    const userPolicies = storageService.getPolicies(loggedInUser.id);
-    setPolicies(userPolicies);
+    try {
+      const userPolicies = await storageService.getPolicies(loggedInUser.id);
+      setPolicies(userPolicies);
+    } catch (err) {
+      console.error('Failed to load policies after login', err);
+      setPolicies([]);
+    }
     setMessages([]);
     setActiveView('policies');
     setShowAuth(false);
@@ -51,17 +62,26 @@ function App() {
     setShowAuth(false);
   };
 
-  const handleAddPolicy = (policy: Omit<Policy, 'userId'>) => {
+  const handleAddPolicy = async (policy: Omit<Policy, 'userId'> & { file?: File | null; fileData?: string | null; fileName?: string | null }) => {
     if (!user) return;
-    const policyWithUser: Policy = { ...policy, userId: user.id };
-    storageService.savePolicy(policyWithUser);
-    setPolicies(prev => [policyWithUser, ...prev]);
+    const policyWithUser: any = { ...policy, userId: user.id };
+    try {
+      const created = await storageService.savePolicy(policyWithUser);
+      // Use returned created policy (may include summary, fileData, id)
+      setPolicies(prev => [created, ...prev]);
+    } catch (err) {
+      console.error('Failed to save policy', err);
+    }
   };
 
-  const handleUpdatePolicy = (updatedPolicy: Policy) => {
-    storageService.updatePolicy(updatedPolicy);
-    setPolicies(prev => prev.map(p => p.id === updatedPolicy.id ? updatedPolicy : p));
-    setEditingPolicy(null);
+  const handleUpdatePolicy = async (updatedPolicy: Policy & { file?: File | null; fileData?: string | null; fileName?: string | null }) => {
+    try {
+      const updated = await storageService.updatePolicy(updatedPolicy);
+      setPolicies(prev => prev.map(p => p.id === updated.id ? updated : p));
+      setEditingPolicy(null);
+    } catch (err) {
+      console.error('Failed to update policy', err);
+    }
   };
 
   const handleDeletePolicy = (id: string) => {

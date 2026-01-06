@@ -2,13 +2,11 @@
 import { GoogleGenAI, Type, LiveServerMessage, Modality, Blob } from "@google/genai";
 import { Policy, DuplicateFinding, Message, WebSearchResult } from "../types";
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:4000';
+
 const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.error("API_KEY is missing from environment variables.");
-    throw new Error("Clé API manquante. Veuillez configurer votre clé API.");
-  }
-  return new GoogleGenAI({ apiKey });
+  // In browser we prefer to call the backend endpoints rather than embed an API key.
+  return null;
 };
 
 /* --- HELPER: Generate System Instruction from Policies --- */
@@ -35,32 +33,13 @@ const generateSystemInstruction = (policies: Policy[]): string => {
  * Generates a brief summary of the uploaded insurance policy.
  */
 export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
-  const ai = getAiClient();
-  
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: fileBase64
-            }
-          },
-          {
-            text: "Analyse ce document d'assurance. Extrais en français : le nom de l'assureur, le type de contrat, et une liste à puces très concise des garanties majeures. Limite la réponse à 150 mots."
-          }
-        ]
-      },
-      config: {
-        thinkingConfig: { thinkingBudget: 0 }
-      }
-    });
-    
-    return response.text || "Impossible de générer un résumé.";
+    const res = await fetch(`${API_BASE}/api/policies/summarize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileBase64, mimeType }) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.message || 'Summarize failed');
+    return body.summary as string;
   } catch (error) {
-    console.error("Error summarizing policy:", error);
+    console.error('Error summarizing policy (client->backend):', error);
     throw error;
   }
 };
@@ -69,76 +48,14 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
  * Searches for the policy conditions online with improved grounding and extraction.
  */
 export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
-  const ai = getAiClient();
-  
-  const prompt = `Recherche les conditions générales et les garanties types pour ce produit d'assurance :
-  Assureur: ${provider}
-  Catégorie: ${type}
-  Nom commercial approximatif: ${name}
-  
-  Instructions :
-  1. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur.
-  2. Liste les noms exacts des formules commerciales (ex: "Essentiel", "Confort", "Sérénité", "Tiers Plus", "Tous Risques").
-  3. Fournis un résumé structuré des plafonds et franchises types si disponibles.
-  
-  Réponds EXCLUSIVEMENT sous forme d'un objet JSON.
-  {
-    "summary": "Texte détaillé des garanties en français",
-    "formulas": ["Nom Formule A", "Nom Formule B", ...]
-  }`;
-
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [{ text: prompt }]
-      },
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            formulas: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING } 
-            }
-          },
-          required: ["summary", "formulas"]
-        }
-      }
-    });
-    
-    let jsonResponse;
-    try {
-      jsonResponse = JSON.parse(response.text);
-    } catch (e) {
-      console.warn("JSON Parse failed for search result", e);
-      jsonResponse = { summary: response.text, formulas: [] };
-    }
-    
-    const summary = jsonResponse.summary || "Aucun résumé structuré disponible.";
-    const detectedFormulas = Array.isArray(jsonResponse.formulas) ? jsonResponse.formulas : [];
-    
-    let sourceUrl = undefined;
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (chunks && chunks.length > 0) {
-      const webChunk = chunks.find((c: any) => c.web?.uri);
-      if (webChunk) {
-        sourceUrl = webChunk.web.uri;
-      }
-    }
-
-    return { summary, sourceUrl, detectedFormulas };
+    const res = await fetch(`${API_BASE}/api/policies/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, type, name }) });
+    const body = await res.json();
+    if (!res.ok) return { summary: 'La recherche a échoué.', sourceUrl: undefined, detectedFormulas: [] };
+    return { summary: body.summary || '', sourceUrl: body.sourceUrl, detectedFormulas: body.formulas || [] } as WebSearchResult;
   } catch (error) {
-    console.error("Error searching policy info:", error);
-    return { 
-      summary: "La recherche automatique n'a pas pu aboutir. Veuillez essayer avec un nom d'assureur plus précis ou uploader un document.", 
-      sourceUrl: undefined,
-      detectedFormulas: []
-    };
-  }
+    console.error('Error searching policy info (client->backend):', error);
+    return { summary: 'Erreur réseau lors de la recherche.', sourceUrl: undefined, detectedFormulas: [] };
 };
 
 /**
@@ -146,48 +63,13 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
  */
 export const detectDuplicates = async (policies: Policy[]): Promise<DuplicateFinding[]> => {
   if (policies.length < 2) return [];
-
-  const ai = getAiClient();
-
-  const parts: any[] = [
-    {
-      text: `Analyse ces contrats d'assurance et identifie les doublons (chevauchements de garanties). 
-      Exemple : "Protection Juridique" présente dans deux contrats différents.
-      Retourne un tableau JSON.`
-    }
-  ];
-
-  policies.forEach(p => {
-    parts.push({
-      text: `Contrat ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail || 'Non spécifiée'}. Résumé : ${p.summary}`
-    });
-  });
-
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              description: { type: Type.STRING },
-              severity: { type: Type.STRING, enum: ["low", "medium", "high"] },
-              involvedPolicies: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["title", "description", "severity", "involvedPolicies"]
-          }
-        }
-      }
-    });
-
-    return JSON.parse(response.text) as DuplicateFinding[];
+    const res = await fetch(`${API_BASE}/api/policies/detect-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ policies }) });
+    const body = await res.json();
+    if (!res.ok) throw new Error('Detect duplicates failed');
+    return body as DuplicateFinding[];
   } catch (error) {
-    console.error("Error detecting duplicates:", error);
+    console.error('Error detectDuplicates (client->backend):', error);
     throw error;
   }
 };
@@ -200,28 +82,14 @@ export const sendMessageToAssistant = async (
   policies: Policy[], 
   history: Message[]
 ): Promise<string> => {
-  const ai = getAiClient();
-  const systemInstruction = generateSystemInstruction(policies);
-
   try {
-    const finalParts = [
-      ...history.map(h => ({ text: `${h.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${h.text}` })),
-      { text: message }
-    ];
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: { parts: finalParts },
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }]
-      }
-    });
-
-    return response.text || "Désolé, je n'ai pas pu analyser cette demande.";
+    const res = await fetch(`${API_BASE}/api/ai/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, policies, history }) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.message || 'Chat failed');
+    return body.reply as string;
   } catch (error) {
-    console.error("Error in chat:", error);
-    return "Une erreur technique est survenue.";
+    console.error('Error in chat (client->backend):', error);
+    return 'Une erreur technique est survenue.';
   }
 };
 
@@ -287,6 +155,7 @@ export const connectLiveSession = async (
   onTurnComplete: () => void
 ) => {
   const ai = getAiClient();
+  if (!ai) throw new Error('Live audio sessions require direct Gemini client support; configure GEMINI_API_KEY or use server-side live endpoint.');
   const systemInstruction = generateSystemInstruction(policies);
 
   const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
