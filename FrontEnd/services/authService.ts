@@ -3,39 +3,49 @@ import { User } from '../types';
 
 const SESSION_KEY = 'assurclair_session';
 const TOKEN_KEY = 'assurclair_token';
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:4000';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
 
 export const authService = {
-  login: (email: string, password: string): Promise<User> => {
-    return fetch(`${API_BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.message || 'Login failed');
-        localStorage.setItem(TOKEN_KEY, body.token);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(body.user));
-        return body.user as User;
-      });
+  login: async (email: string, password: string): Promise<User> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'Login failed');
+      localStorage.setItem(TOKEN_KEY, body.token);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(body.user));
+      return body.user as User;
+    } catch (err: any) {
+      // Network errors or CORS issues surface here as TypeError / 'Failed to fetch'
+      if (err instanceof TypeError) throw new Error('Network error: unable to reach backend. Is the backend running and CORS configured?');
+      throw err;
+    }
   },
 
-  register: (email: string, password: string): Promise<User> => {
-    return fetch(`${API_BASE}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
-      .then(async r => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.message || 'Register failed');
-        localStorage.setItem(TOKEN_KEY, body.token);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(body.user));
-        return body.user as User;
-      });
+  register: async (email: string, password: string): Promise<User> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'Register failed');
+      localStorage.setItem(TOKEN_KEY, body.token);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(body.user));
+      return body.user as User;
+    } catch (err: any) {
+      if (err instanceof TypeError) throw new Error('Network error: unable to reach backend. Is the backend running and CORS configured?');
+      throw err;
+    }
   },
 
-  resetPassword: (email: string, newPassword: string): Promise<void> => {
-    return fetch(`${API_BASE}/api/auth/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, newPassword }) })
-      .then(async r => {
-        if (!r.ok) {
-          const body = await r.json();
-          throw new Error(body.message || 'Reset failed');
-        }
-      });
+  resetPassword: async (email: string, newPassword: string): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, newPassword }) });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || 'Reset failed');
+      }
+    } catch (err: any) {
+      if (err instanceof TypeError) throw new Error('Network error: unable to reach backend. Is the backend running and CORS configured?');
+      throw err;
+    }
   },
 
   updateUser: async (userId: string, data: { name: string; email: string; password?: string }): Promise<User> => {

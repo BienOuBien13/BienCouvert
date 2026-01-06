@@ -1,7 +1,7 @@
 import { Policy } from '../types';
 import { authService } from './authService';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:4000';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
 
 export const storageService = {
   getPolicies: async (userId: string): Promise<Policy[]> => {

@@ -10,7 +10,23 @@ import path from 'path';
 dotenv.config();
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN || '*' }));
+
+// Support a single origin or a comma-separated list in FRONTEND_ORIGIN
+const frontendOrigin = process.env.FRONTEND_ORIGIN || '*';
+let corsOptions: any = { origin: '*' };
+if (frontendOrigin && frontendOrigin !== '*') {
+  const allowed = frontendOrigin.split(',').map(s => s.trim()).filter(Boolean);
+  corsOptions = {
+    origin: (origin: any, callback: any) => {
+      // Allow browser direct requests with no origin (curl/postman) by returning true when origin is undefined
+      if (!origin) return callback(null, true);
+      if (allowed.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'), false);
+    }
+  };
+}
+
+app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
