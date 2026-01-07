@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------------
+// Profil Utilisateur
+// - Permet de modifier le nom, l'email et le mot de passe de l'utilisateur.
+// - Utilise `authService.updateUser` et gère l'état local du formulaire.
+// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';

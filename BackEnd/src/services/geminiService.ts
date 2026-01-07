@@ -1,11 +1,22 @@
 import dotenv from 'dotenv';
 import { WebSearchResult, DuplicateFinding, Policy, Message } from '../types';
 
+// -----------------------------------------------------------------------------
+// Service AI (Gemini) - wrapper minimal
+// Ce service encapsule l'accès à l'API Gemini (librairie `@google/genai`). Si la
+// clé `GEMINI_API_KEY` n'est pas définie, les fonctions retournent des valeurs
+// simulées, ce qui facilite le prototypage local sans accès à Gemini.
+// -----------------------------------------------------------------------------
+
 dotenv.config();
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 let client: any | null = null;
 
+/**
+ * Crée et met en cache un client Gemini si la clé est disponible.
+ * Retourne `null` si la clé est absente ou si l'import échoue.
+ */
 function getAiClient() {
   if (!GEMINI_KEY) return null;
   if (!client) {
@@ -24,7 +35,6 @@ function getAiClient() {
   }
   return client;
 }
-
 const generateSystemInstruction = (policies: Policy[] = []) => {
   let context = "Tu es AssurClair, un assistant personnel expert en assurances. Ton but est d'aider l'utilisateur à comprendre ses couvertures. ";
   context += "Voici la liste des contrats de l'utilisateur (analyse-les pour répondre) :\n";
@@ -39,12 +49,16 @@ const generateSystemInstruction = (policies: Policy[] = []) => {
 };
 
 export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
+  // Tente d'obtenir un résumé via Gemini. Si le client AI n'est pas dispo
+  // (clé manquante ou lib non installée), on retourne un message simulé
+  // pour que l'UX reste cohérente en environnement de développement.
   const ai = getAiClient();
   if (!ai) {
     return `Résumé simulé (${mimeType}) : impossible d'accéder à Gemini, configurez GEMINI_API_KEY.`;
   }
 
   try {
+    // On envoie d'abord le fichier (inlineData) puis l'instruction de résumé.
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
@@ -65,8 +79,10 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
       }
     });
 
+    // response.text contient le texte renvoyé par Gemini (ou undefined)
     return response.text || 'Impossible de générer un résumé.';
   } catch (err) {
+    // Log détaillé pour faciliter le débogage en dev
     console.error('gemini summarize error', err);
     throw err;
   }

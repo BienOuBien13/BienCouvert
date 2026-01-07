@@ -4,6 +4,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../types';
 
+// -----------------------------------------------------------------------------
+// Routes d'authentification
+// - Inscription, connexion, réinitialisation de mot de passe, lecture/mise à jour
+//   du profil utilisateur. Les mots de passe sont hachés avec bcrypt et les
+//   tokens d'accès sont des JWT signés avec `JWT_SECRET`.
+// -----------------------------------------------------------------------------
+
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
@@ -12,11 +19,13 @@ function signToken(user: User) {
 }
 
 function authMiddleware(req: any, res: any, next: any) {
+  // Middleware qui vérifie la présence d'un header Authorization: Bearer <token>
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ message: 'Missing authorization' });
   const parts = auth.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') return res.status(401).json({ message: 'Invalid auth' });
   try {
+    // Vérification du JWT et injection du payload dans req.user
     const payload = jwt.verify(parts[1], JWT_SECRET) as any;
     req.user = payload;
     next();
@@ -28,15 +37,21 @@ function authMiddleware(req: any, res: any, next: any) {
 router.post('/register', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
+
+  // On vérifie que l'email n'est pas déjà utilisé (comparaison case-insensitive)
   const users = storage.readUsers();
   if (users.find((u: any) => u.email.toLowerCase() === email.toLowerCase())) {
     return res.status(400).json({ message: 'Email is already used' });
   }
+
+  // Hachage du mot de passe et insertion dans users.json
   const hashed = await bcrypt.hash(password, 10);
   const displayName = email.split('@')[0].split('.').map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
   const newUser = { id: cryptoId(), email, name: displayName, password: hashed };
   users.push(newUser);
   storage.writeUsers(users);
+
+  // Retourne un token JWT au client pour simplifier la démo
   const token = signToken(newUser);
   res.json({ token, user: { id: newUser.id, email: newUser.email, name: newUser.name } });
 });

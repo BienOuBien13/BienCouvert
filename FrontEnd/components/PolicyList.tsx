@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------------
+// Liste des contrats affichés dans l'UI
+// - Affiche un résumé, badge de type, actions (modifier/supprimer) et source
+// - Composant présentational : se contente d'afficher les données fournies
+// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { 
   FileText, Trash2, Pencil, Globe, ExternalLink, 

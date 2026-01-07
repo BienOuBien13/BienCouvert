@@ -3,22 +3,31 @@ import multer from 'multer';
 import { storage } from '../storage';
 import { summarizePolicy, searchPolicyInfo, detectDuplicates } from '../services/geminiService';
 
+// -----------------------------------------------------------------------------
+// Routes /policies
+// - Gestion des polices/contrats : création, lecture, mise à jour, suppression.
+// - Supporte l'upload de fichier (multipart/form-data) ou l'envoi direct
+//   de `fileData` encodé en base64 (utile pour l'API depuis le client).
+// -----------------------------------------------------------------------------
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
 
-// List policies for a user
+// Liste les polices pour un utilisateur (filtre optionnel par userId)
 router.get('/', (req: any, res) => {
   const userId = req.query.userId as string | undefined;
   const policies = storage.readPolicies();
   if (userId) return res.json(policies.filter((p: any) => p.userId === userId));
   res.json(policies);
 });
-
 // Create with either file or web data
 router.post('/', upload.single('file'), async (req: any, res) => {
   try {
     const body = req.body;
+    // On lit l'état actuel des polices (stockage local JSON)
     const policies = storage.readPolicies();
+
+    // Construction de l'objet de police à partir du body ou du fichier uploadé
     const newPolicy: any = {
       id: cryptoId(),
       userId: body.userId || 'anonymous',
@@ -34,28 +43,36 @@ router.post('/', upload.single('file'), async (req: any, res) => {
       addedAt: Date.now()
     };
 
+    // Si un fichier a été uploadé via multipart/form-data, on encode en base64
+    // et on tente d'en extraire un résumé via le service AI (silencieux en échec).
     if (req.file) {
       newPolicy.fileData = req.file.buffer.toString('base64');
       newPolicy.fileName = req.file.originalname;
       newPolicy.mimeType = req.file.mimetype;
-      // try summarizing
+      // Tentative de résumé : on n'échoue pas la requête si l'AI n'est pas dispo
       try {
         newPolicy.summary = await summarizePolicy(newPolicy.fileData, newPolicy.mimeType);
-      } catch (e) {}
+      } catch (e) {
+        // On log l'erreur serveur coté AI mais on continue l'opération
+        console.warn('Résumé automatique échoué pour upload de fichier', e);
+      }
     } else if (body.fileData && body.fileName) {
+      // Support pour client qui envoie directement du base64 (PolicyForm)
       newPolicy.fileData = body.fileData;
       newPolicy.fileName = body.fileName;
       newPolicy.mimeType = body.mimeType || newPolicy.mimeType;
       if (!newPolicy.summary) {
-        try { newPolicy.summary = await summarizePolicy(newPolicy.fileData, newPolicy.mimeType); } catch (e) {}
+        try { newPolicy.summary = await summarizePolicy(newPolicy.fileData, newPolicy.mimeType); } catch (e) { console.warn('Résumé automatique échoué pour fileData', e); }
       }
     }
 
+    // Ajout et persistance
     policies.push(newPolicy);
     storage.writePolicies(policies);
     res.json(newPolicy);
   } catch (err) {
     console.error(err);
+    // Erreur générale : on renvoie 500
     res.status(500).json({ message: 'Server error' });
   }
 });

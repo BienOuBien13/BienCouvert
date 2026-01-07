@@ -1,4 +1,9 @@
 
+// -----------------------------------------------------------------------------
+// Types partagés Frontend
+// Ce fichier décrit les interfaces et enums utilisées par l'UI pour typer les
+// polices, utilisateurs, messages et autres entités métier.
+// -----------------------------------------------------------------------------
 export enum PolicyType {
   AUTO = 'Automobile',
   HOME = 'Habitation',
