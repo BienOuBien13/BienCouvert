@@ -1,4 +1,10 @@
 
+// -----------------------------------------------------------------------------
+// Écran d'authentification
+// - Gère les modes : connexion, inscription, mot de passe oublié, réinitialisation
+// - Utilise `authService` pour communiquer avec le backend et pour stocker la
+//   session côté client.
+// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLeft, Send, MailCheck, ExternalLink, ChevronLeft } from 'lucide-react';
 import { authService } from '../services/authService';

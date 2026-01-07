@@ -1,4 +1,11 @@
 
+// -----------------------------------------------------------------------------
+// App principal - FrontEnd
+// Ce composant gère l'état global de l'application (utilisateur connecté,
+// liste des contrats, messages de l'assistant, vue active, etc.). Les actions
+// CRUD sur les polices utilisent `storageService` et l'authentification
+// utilise `authService`.
+// -----------------------------------------------------------------------------
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { PolicyForm } from './components/PolicyForm';
@@ -29,6 +36,9 @@ function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
+    // Au démarrage, on vérifie si une session est stockée localement et on
+    // restaure l'état utilisateur + ses polices. L'initialisation se termine
+    // en désactivant l'écran de chargement.
     const currentUser = authService.getCurrentUser();
     if (currentUser) {
       (async () => {
@@ -41,14 +51,17 @@ function App() {
   }, []);
 
   const handleLogin = async (loggedInUser: User) => {
+    // Stocke l'utilisateur et récupère ses polices depuis l'API (backend)
     setUser(loggedInUser);
     try {
       const userPolicies = await storageService.getPolicies(loggedInUser.id);
       setPolicies(userPolicies);
     } catch (err) {
+      // En cas d'erreur réseau, on log et on continue avec une liste vide
       console.error('Failed to load policies after login', err);
       setPolicies([]);
     }
+    // Reset du chat et navigation vers la vue contrats
     setMessages([]);
     setActiveView('policies');
     setShowAuth(false);

@@ -1,3 +1,9 @@
+// -----------------------------------------------------------------------------
+// Générateur d'UUID v4 (utilisé côté client)
+// - Tente d'utiliser l'API native `crypto.randomUUID` ou `crypto.getRandomValues`.
+// - Si aucune API crypto n'est disponible, utilise une méthode de secours
+//   basée sur Math.random().
+// -----------------------------------------------------------------------------
 export function uuid(): string {
   try {
     if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
@@ -10,7 +16,6 @@ export function uuid(): string {
         for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
         return arr;
       };
-
     const bytes = new Uint8Array(16);
     getRandomValues(bytes);
     // Per RFC4122 v4

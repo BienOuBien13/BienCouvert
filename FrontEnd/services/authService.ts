@@ -1,6 +1,12 @@
 
 import { User } from '../types';
 
+// -------------------------------------------------------------
+// Service d'authentification côté client
+// - Gère la connexion / inscription / déconnexion et la persistance
+//   de la session et du token dans localStorage.
+// - Utilise l'API backend `/api/auth`.
+// -------------------------------------------------------------
 const SESSION_KEY = 'assurclair_session';
 const TOKEN_KEY = 'assurclair_token';
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');

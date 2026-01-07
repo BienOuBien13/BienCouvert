@@ -1,4 +1,9 @@
 
+// -----------------------------------------------------------------------------
+// Formulaire d'ajout / modification d'une police
+// - Supporte deux modes : import de fichier (PDF) ou recherche web (provider/name)
+// - Sauvegarde automatique d'un brouillon côté client pour éviter les pertes
+// -----------------------------------------------------------------------------
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, Loader2, CheckCircle, Plus, Save, X, Globe, Search, AlertCircle, ArrowRight, RotateCcw } from 'lucide-react';
 import { Policy, PolicyType, WebSearchResult } from '../types';
@@ -135,16 +140,21 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       let sourceUrl = undefined;
 
       if (file) {
+        // Lecture du fichier côté client et conversion en base64 (data URL)
         const reader = new FileReader();
         const filePromise = new Promise<void>((resolve, reject) => {
           reader.onload = async () => {
              const base64String = reader.result as string;
+             // data:<mime>;base64,<data> -> on prend la partie après la virgule
              base64Content = base64String.split(',')[1];
              fileName = file.name;
              mimeType = file.type;
+
+             // Tentative d'analyse / résumé (appel backend qui utilise Gemini si dispo)
              try {
                summary = await summarizePolicy(base64Content, mimeType);
              } catch (err) {
+               // Si l'analyse échoue, on fournit un message lisible au user
                summary = "Analyse PDF échouée.";
              }
              resolve();

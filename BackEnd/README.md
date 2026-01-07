@@ -27,3 +27,15 @@ Available endpoints:
 Notes:
 - Storage is simple file-based JSON under `BackEnd/data` for prototyping.
 - AI helpers use GEMINI_API_KEY (if present) or return simulated responses.
+
+---
+
+FR — Documentation du stockage des données
+- Emplacement des fichiers de données : `BackEnd/data/` (créé automatiquement à l'exécution).
+- Fichiers principaux : `users.json` (liste d'utilisateurs) et `policies.json` (liste de polices/contrats).
+- Format : JSON (tableaux d'objets). Pour préserver la compatibilité, ces fichiers restent valides JSON (pas de commentaires in-file). Les commentaires et le schéma sont documentés ci‑dessous.
+- Schéma simplifié :
+  - users.json : [{ "id": string, "email": string, "passwordHash": string, "name"?: string, "createdAt": number }]
+  - policies.json : [{ "id": string, "userId": string, "name": string, "provider": string, "type": string, "fileData"?: string|null, "fileName"?: string|null, "mimeType"?: string, "summary"?: string, "addedAt": number }]
+- Sécurité et limitations : Ce stockage par fichier est adapté pour le prototypage mais n'est pas destiné à la production (pas de verrouillage des accès, pas de journalisation des modifications, pas de sauvegardes automatisées). Pour la production, migrer vers une base de données (SQLite/Postgres/MongoDB) et chiffrer/hasher les données sensibles.
+- Besoin d'aide pour migrer ? Dites‑moi quelle base de données vous préférez et je peux fournir un plan de migration et les scripts nécessaires.

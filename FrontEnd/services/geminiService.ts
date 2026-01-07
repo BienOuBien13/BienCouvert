@@ -1,11 +1,20 @@
 
+// -----------------------------------------------------------------------------
+// Service client pour fonctionnalités AI
+// - Ce module délègue les appels AI au backend (endpoints `/api/ai`), ce qui
+//   évite d'exposer une clé API dans le navigateur. Les fonctions retournent
+//   des données simples (résumé, recherche, détection de doublons) provenant
+//   du backend.
+// -----------------------------------------------------------------------------
 import { GoogleGenAI, Type, LiveServerMessage, Modality, Blob } from "@google/genai";
 import { Policy, DuplicateFinding, Message, WebSearchResult } from "../types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
 
 const getAiClient = () => {
-  // In browser we prefer to call the backend endpoints rather than embed an API key.
+  // Dans le navigateur, on utilise l'API backend pour appeler Gemini afin de
+  // ne pas exposer de clé au client. Renvoie `null` car le client natif n'est
+  // pas utilisé côté front.
   return null;
 };
 

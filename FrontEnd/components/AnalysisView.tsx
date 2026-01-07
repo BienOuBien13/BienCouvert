@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------------
+// Vue d'analyse / détection de doublons
+// - Lance une analyse via `detectDuplicates` (backend) et affiche les
+//   résultats structurés (sévérité, description, polices impliquées).
+// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { AlertTriangle, Search, CheckCircle2, Info, AlertOctagon } from 'lucide-react';
 import { Policy, DuplicateFinding } from '../types';
@@ -13,13 +18,16 @@ export const AnalysisView: React.FC<Props> = ({ policies }) => {
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
 
   const handleAnalyze = async () => {
+    // L'analyse nécessite au moins 2 contrats pour trouver des chevauchements
     if (policies.length < 2) return;
     setIsAnalyzing(true);
     try {
+      // Appel backend qui exécute un pipeline AI pour détecter chevauchements
       const results = await detectDuplicates(policies);
       setFindings(results);
       setHasAnalyzed(true);
     } catch (error) {
+      // On log l'erreur et on laisse l'UI montrer un état vide
       console.error("Analysis failed", error);
     } finally {
       setIsAnalyzing(false);

@@ -1,4 +1,9 @@
 
+// -----------------------------------------------------------------------------
+// Barre latérale de navigation
+// - Gère l'état d'affichage (compact / développé) et affiche les éléments de
+//   navigation principaux de l'application. Les actions modifient la vue active.
+// -----------------------------------------------------------------------------
 import React from 'react';
 import { 
   ShieldCheck, 

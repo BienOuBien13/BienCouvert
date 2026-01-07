@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+// Service d'accès aux polices (API client)
+// - Fournit des fonctions pour lister, créer, mettre à jour et supprimer des
+//   polices en appelant les endpoints du backend (`/api/policies`).
+// - Gère l'envoi de fichiers via FormData et ajoute les entêtes d'auth si
+//   l'utilisateur est connecté.
+// -----------------------------------------------------------------------------
 import { Policy } from '../types';
 import { authService } from './authService';
 
@@ -12,6 +19,7 @@ export const storageService = {
 
   savePolicy: async (policy: Omit<Policy, 'userId'> & { userId?: string; file?: File | null }) => {
     const token = authService.getToken();
+    // Construction du FormData pour supporter upload fichier et champs textuels
     const fd = new FormData();
     fd.append('name', policy.name);
     fd.append('provider', policy.provider);
@@ -21,8 +29,9 @@ export const storageService = {
     if (policy.summary) fd.append('summary', policy.summary);
     if (policy.mimeType) fd.append('mimeType', policy.mimeType);
     fd.append('userId', policy.userId || 'anonymous');
+    // Si un File est fourni (upload multipart), on l'ajoute directement
     if ((policy as any).file) fd.append('file', (policy as any).file as File);
-    // Support client-side base64 upload paths (PolicyForm currently may attach fileData/fileName)
+    // Support pour chemins alternatifs où le client fournit déjà du base64
     if ((policy as any).fileData) fd.append('fileData', (policy as any).fileData as string);
     if ((policy as any).fileName) fd.append('fileName', (policy as any).fileName as string);
 
@@ -36,6 +45,7 @@ export const storageService = {
 
   updatePolicy: async (policy: Policy & { file?: File | null }) => {
     const token = authService.getToken();
+    // Similaire à savePolicy : on prépare un FormData et on envoie en PUT
     const fd = new FormData();
     fd.append('name', policy.name);
     fd.append('provider', policy.provider);

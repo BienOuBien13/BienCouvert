@@ -1,3 +1,10 @@
+// -----------------------------------------------------------------------------
+// Interface de chat / assistant
+// - Permet d'envoyer des messages textuels à l'assistant et de recevoir des
+//   réponses générées côté serveur.
+// - Support expérimental de sessions vocales 'live' : transcription en temps
+//   réel et lecture audio.
+// -----------------------------------------------------------------------------
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
@@ -48,6 +55,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
+    // On ajoute immédiatement le message utilisateur en UI (optimistic update)
     const userMessage: Message = {
       id: uuid(),
       role: 'user',
@@ -60,6 +68,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     setIsLoading(true);
 
     try {
+      // Appel backend qui s'occupe d'interroger l'AI / pipeline
       const responseText = await sendMessageToAssistant(userMessage.text, policies, messages);
       
       const botMessage: Message = {
@@ -69,8 +78,10 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         timestamp: Date.now(),
       };
 
+      // Ajout de la réponse du bot
       setMessages(prev => [...prev, botMessage]);
     } catch (error) {
+      // En cas d'erreur, on informe l'utilisateur via un message du bot
       const errorMessage: Message = {
         id: uuid(),
         role: 'model',
@@ -85,7 +96,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
 
   const toggleLiveSession = async () => {
     if (isLive) {
-      // Stop Session
+      // Stop Session: nettoyage des callbacks et état local
       if (cleanupLiveSession.current) cleanupLiveSession.current();
       cleanupLiveSession.current = null;
       setIsLive(false);
@@ -94,7 +105,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
       liveUserTextRef.current = '';
       liveModelTextRef.current = '';
     } else {
-      // Start Session
+      // Start Session: initialise l'état et démarre la connexion live
       setIsLive(true);
       setLiveUserText('');
       setLiveModelText('');
@@ -105,15 +116,17 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         const cleanup = await connectLiveSession(
           policies,
           (inputText) => {
+             // Transcription partielle utilisateur (affichée en temps réel)
              setLiveUserText(prev => prev + inputText);
              liveUserTextRef.current += inputText;
           },
           (outputText) => {
+             // Transcription partielle assistant
              setLiveModelText(prev => prev + outputText);
              liveModelTextRef.current += outputText;
           },
           () => {
-             // Turn Complete
+             // Fin d'un tour : on presse les transcriptions dans l'historique
              const finalUserText = liveUserTextRef.current;
              const finalModelText = liveModelTextRef.current;
 
