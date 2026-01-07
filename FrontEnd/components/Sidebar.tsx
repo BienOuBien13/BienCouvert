@@ -1,9 +1,4 @@
 
-// -----------------------------------------------------------------------------
-// Barre latérale de navigation
-// - Gère l'état d'affichage (compact / développé) et affiche les éléments de
-//   navigation principaux de l'application. Les actions modifient la vue active.
-// -----------------------------------------------------------------------------
 import React from 'react';
 import { 
   ShieldCheck, 
@@ -43,7 +38,7 @@ export const Sidebar: React.FC<Props> = ({
   const menuItems = [
     { id: 'policies' as AppView, label: 'Mes Contrats', icon: Files },
     { id: 'chat' as AppView, label: 'Assistant IA', icon: MessageSquare },
-    { id: 'analysis' as AppView, label: 'Analyse Doublons', icon: Zap },
+    { id: 'analysis' as AppView, label: 'Optimisation', icon: Zap },
     { id: 'experts' as AppView, label: 'Experts Humains', icon: Users },
   ];
 
@@ -53,35 +48,10 @@ export const Sidebar: React.FC<Props> = ({
     ${isCollapsed ? 'lg:w-20' : 'lg:w-64'}
   `;
 
-  const NavItem = ({ item }: { item: typeof menuItems[0] }) => {
-    const Icon = item.icon;
-    const isActive = activeView === item.id;
-    return (
-      <button
-        key={item.id}
-        onClick={() => {
-          setActiveView(item.id);
-          if (window.innerWidth < 1024) onCloseMobile();
-        }}
-        title={isCollapsed ? item.label : ''}
-        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all relative ${
-          isActive 
-            ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/20' 
-            : 'hover:bg-slate-800 hover:text-white'
-        }`}
-      >
-        <Icon className="w-5 h-5 flex-shrink-0" />
-        <span className={`font-medium whitespace-nowrap transition-opacity duration-200 ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
-          {item.label}
-        </span>
-        {isCollapsed && isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-l-full hidden lg:block" />}
-      </button>
-    );
-  };
+  // NavItem logic is now inlined in the map below to fix the type error with 'key' prop
 
   return (
     <>
-      {/* Overlay Mobile */}
       {isMobileOpen && (
         <div 
           className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden"
@@ -90,7 +60,6 @@ export const Sidebar: React.FC<Props> = ({
       )}
 
       <aside className={sidebarClasses}>
-        {/* Header */}
         <div className="p-6 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="bg-primary-600 p-2 rounded-lg flex-shrink-0">
@@ -113,12 +82,35 @@ export const Sidebar: React.FC<Props> = ({
           </button>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-hide">
-          {menuItems.map((item) => <NavItem key={item.id} item={item} />)}
+          {/* Inlined NavItem logic here to fix the TypeScript error on 'key' prop */}
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeView === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveView(item.id);
+                  if (window.innerWidth < 1024) onCloseMobile();
+                }}
+                title={isCollapsed ? item.label : ''}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all relative ${
+                  isActive 
+                    ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/20' 
+                    : 'hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span className={`font-medium whitespace-nowrap transition-opacity duration-200 ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
+                  {item.label}
+                </span>
+                {isCollapsed && isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-l-full hidden lg:block" />}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Footer */}
         <div className="p-4 border-t border-slate-800 space-y-2">
           <button
             onClick={() => {

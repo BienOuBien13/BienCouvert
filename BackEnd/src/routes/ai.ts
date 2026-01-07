@@ -3,6 +3,8 @@ import { sendMessageToAssistant } from '../services/geminiService';
 
 const router = Router();
 
+// Endpoint chat utilisé par le frontend : envoie un message, le contexte des
+// polices et l'historique. Réponse : `{ reply: string }`.
 router.post('/chat', async (req, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });

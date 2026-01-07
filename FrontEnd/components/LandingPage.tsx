@@ -28,7 +28,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-primary-100 selection:text-primary-900">
-      {/* Header / Nav */}
       <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md z-50 border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -46,12 +45,11 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </header>
 
-      {/* Hero Section */}
       <section className="pt-40 pb-24 px-6">
         <div className="max-w-7xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-sm font-bold mb-8 animate-fadeIn">
             <SparklesIcon className="w-4 h-4" />
-            Propulsé par Gemini 10.0 Pro
+            Propulsé par Gemini 3.0 Pro
           </div>
           <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 max-w-4xl mx-auto leading-[1.1]">
             L'assurance qui s'éclaire enfin par <span className="text-primary-600">l'IA générative</span>.
@@ -64,7 +62,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
               onClick={onStart}
               className="w-full sm:w-auto px-10 py-5 bg-primary-600 text-white rounded-2xl font-bold text-lg hover:bg-primary-700 transition-all shadow-xl shadow-primary-900/20 flex items-center justify-center gap-3 group"
             >
-              Démarrer gratuitement
+              C'est parti !
               <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
             </button>
             <button 
@@ -77,7 +75,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* Social Proof / Stats */}
       <section className="py-12 border-y border-slate-100 bg-slate-50/50">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="text-center">
@@ -99,7 +96,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* Main Features Grid */}
       <section id="concept" className="py-24 px-6 scroll-mt-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
@@ -120,8 +116,8 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
             />
             <FeatureCard 
               icon={<Zap className="w-6 h-6" />}
-              title="Détection de Doublons"
-              description="Notre IA analyse vos contrats croisés pour identifier les garanties payées deux fois (CB vs Habitation)."
+              title="Optimisation IA"
+              description="Analyse croisée de vos contrats et de votre profil pour détecter doublons et manques."
             />
             <FeatureCard 
               icon={<Users className="w-6 h-6" />}
@@ -132,7 +128,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* How it works */}
       <section className="py-24 px-6 bg-slate-900 text-white rounded-[3rem] mx-4 mb-24 overflow-hidden relative">
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary-600/20 blur-[120px] rounded-full -translate-y-1/2 translate-x-1/2" />
         <div className="max-w-7xl mx-auto relative z-10">
@@ -182,7 +177,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* Security Section */}
       <section className="py-24 px-6 bg-slate-50">
         <div className="max-w-3xl mx-auto text-center">
           <div className="w-20 h-20 bg-white rounded-3xl shadow-sm border border-slate-200 flex items-center justify-center mx-auto mb-8">
@@ -206,14 +200,13 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* Footer CTA */}
       <footer className="py-24 px-6 text-center border-t border-slate-100">
         <h2 className="text-4xl font-bold text-slate-900 mb-8">Prêt à y voir plus clair ?</h2>
         <button 
           onClick={onStart}
           className="px-12 py-5 bg-primary-600 text-white rounded-2xl font-bold text-xl hover:bg-primary-700 transition-all shadow-xl shadow-primary-900/20"
         >
-          Créer mon compte gratuit
+          C'est parti !
         </button>
         <p className="mt-8 text-slate-400 text-sm">© 2025 AssurClair. Tous droits réservés.</p>
       </footer>

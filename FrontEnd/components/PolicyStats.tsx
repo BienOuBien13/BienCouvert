@@ -1,8 +1,3 @@
-// -----------------------------------------------------------------------------
-// Statistiques des polices
-// - Composant purement présentational qui calcule et affiche une visualisation
-//   simple (diagramme circulaire CSS) de la répartition des contrats par type.
-// -----------------------------------------------------------------------------
 import React from 'react';
 import { Policy, PolicyType } from '../types';
 import { PieChart } from 'lucide-react';

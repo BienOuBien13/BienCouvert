@@ -1,13 +1,7 @@
 
-// -----------------------------------------------------------------------------
-// Formulaire d'ajout / modification d'une police
-// - Supporte deux modes : import de fichier (PDF) ou recherche web (provider/name)
-// - Sauvegarde automatique d'un brouillon côté client pour éviter les pertes
-// -----------------------------------------------------------------------------
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Loader2, CheckCircle, Plus, Save, X, Globe, Search, AlertCircle, ArrowRight, RotateCcw } from 'lucide-react';
+import { Upload, FileText, Loader2, CheckCircle, Plus, Save, X, Globe, Search, ArrowRight, RotateCcw, Car, Home, Heart, Scale, Briefcase, Shield, AlertCircle, CreditCard, Smartphone, Banknote, Tag } from 'lucide-react';
 import { Policy, PolicyType, WebSearchResult } from '../types';
-import { uuid } from '../utils/uuid';
 import { summarizePolicy, searchPolicyInfo } from '../services/geminiService';
 
 interface Props {
@@ -26,40 +20,52 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   const [provider, setProvider] = useState('');
   const [type, setType] = useState<PolicyType>(PolicyType.AUTO);
   const [coverageDetail, setCoverageDetail] = useState('');
+  const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState('');
+  const [showLongWaitOption, setShowLongWaitOption] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State for Web Search Validation Modal
   const [showWebValidation, setShowWebValidation] = useState(false);
   const [webSearchResult, setWebSearchResult] = useState<WebSearchResult | null>(null);
   const [selectedFormula, setSelectedFormula] = useState<string>('');
   const [customFormula, setCustomFormula] = useState('');
+  const [newOption, setNewOption] = useState('');
 
-  // Initial Load & Draft recovery
+  useEffect(() => {
+    let timer: any;
+    if (isAnalyzing && mode === 'web') {
+      timer = setTimeout(() => {
+        setShowLongWaitOption(true);
+      }, 12000);
+    } else {
+      setShowLongWaitOption(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isAnalyzing, mode]);
+
   useEffect(() => {
     if (initialData) {
       setName(initialData.name);
       setProvider(initialData.provider);
       setType(initialData.type);
       setCoverageDetail(initialData.coverageDetail || '');
+      setSelectedOptions(initialData.options || []);
       setMode(initialData.sourceUrl ? 'web' : 'file');
     } else {
       const draft = localStorage.getItem(DRAFT_KEY);
-      if (draft) {
-        setHasDraft(true);
-      }
+      if (draft) setHasDraft(true);
     }
   }, [initialData]);
 
-  // Auto-save draft
   useEffect(() => {
     if (!initialData && (name || provider || coverageDetail)) {
-      const draft = { name, provider, type, mode, coverageDetail };
+      const draft = { name, provider, type, mode, coverageDetail, selectedOptions };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     }
-  }, [name, provider, type, mode, coverageDetail, initialData]);
+  }, [name, provider, type, mode, coverageDetail, selectedOptions, initialData]);
 
   const restoreDraft = () => {
     const draftStr = localStorage.getItem(DRAFT_KEY);
@@ -70,6 +76,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       setType(draft.type || PolicyType.AUTO);
       setMode(draft.mode || 'web');
       setCoverageDetail(draft.coverageDetail || '');
+      setSelectedOptions(draft.selectedOptions || []);
     }
     setHasDraft(false);
   };
@@ -80,32 +87,20 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   };
 
   const resetForm = () => {
-    setName('');
-    setProvider('');
-    setType(PolicyType.AUTO);
-    setCoverageDetail('');
-    setFile(null);
-    setMode('web');
+    setName(''); setProvider(''); setType(PolicyType.AUTO); setCoverageDetail(''); setSelectedOptions([]); setFile(null); setMode('web');
     if (fileInputRef.current) fileInputRef.current.value = '';
-    setShowWebValidation(false);
-    setWebSearchResult(null);
-    setSelectedFormula('');
-    setCustomFormula('');
+    setShowWebValidation(false); setWebSearchResult(null); setSelectedFormula(''); setCustomFormula('');
+    setAnalysisStatus('');
     clearDraft();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-    }
   };
 
   const handleInitialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mode === 'file' && !initialData && !file) return;
     if (mode === 'web' && (!provider || !name)) return;
-
+    
     setIsAnalyzing(true);
+    setAnalysisStatus(mode === 'web' ? 'Consultation des sites assureurs...' : 'Analyse du document PDF...');
 
     try {
       if (mode === 'file') {
@@ -113,313 +108,231 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       } else {
         const result = await searchPolicyInfo(provider, type, name);
         setWebSearchResult(result);
-        if (initialData && initialData.coverageDetail) {
-          if (result.detectedFormulas.includes(initialData.coverageDetail)) {
-             setSelectedFormula(initialData.coverageDetail);
-          } else {
-             setSelectedFormula('custom');
-             setCustomFormula(initialData.coverageDetail);
-          }
-        } else {
-          setSelectedFormula('');
-        }
         setShowWebValidation(true);
       }
     } catch (error) {
-      console.error("Error processing policy", error);
+      handleManualEntryFallback();
     } finally {
       setIsAnalyzing(false);
     }
   };
 
+  const handleManualEntryFallback = () => {
+    setWebSearchResult({
+      summary: "Données web inaccessibles. Veuillez saisir votre formule manuellement.",
+      detectedFormulas: ["Standard", "Plus", "Premium", "Excellence"],
+      availableOptions: ["Protection Juridique", "Assistance 0km", "Objets de valeur"]
+    });
+    setShowWebValidation(true);
+    setIsAnalyzing(false);
+  };
+
   const processFileSubmission = async () => {
-      let base64Content = initialData?.fileData || null;
-      let fileName = initialData?.fileName || null;
-      let mimeType = initialData?.mimeType || 'application/pdf';
-      let summary = initialData?.summary || '';
-      let sourceUrl = undefined;
-
-      if (file) {
-        // Lecture du fichier côté client et conversion en base64 (data URL)
-        const reader = new FileReader();
-        const filePromise = new Promise<void>((resolve, reject) => {
-          reader.onload = async () => {
-             const base64String = reader.result as string;
-             // data:<mime>;base64,<data> -> on prend la partie après la virgule
-             base64Content = base64String.split(',')[1];
-             fileName = file.name;
-             mimeType = file.type;
-
-             // Tentative d'analyse / résumé (appel backend qui utilise Gemini si dispo)
-             try {
-               summary = await summarizePolicy(base64Content, mimeType);
-             } catch (err) {
-               // Si l'analyse échoue, on fournit un message lisible au user
-               summary = "Analyse PDF échouée.";
-             }
-             resolve();
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        await filePromise;
-      }
-
-      savePolicyData({
-        fileData: base64Content,
-        fileName,
-        mimeType,
-        summary,
-        sourceUrl,
-        coverageDetail
+    let base64Content = initialData?.fileData || null;
+    let fileName = initialData?.fileName || null;
+    let mimeType = initialData?.mimeType || 'application/pdf';
+    let summary = initialData?.summary || '';
+    if (file) {
+      const reader = new FileReader();
+      await new Promise<void>((resolve) => {
+        reader.onload = async () => {
+          const base64String = reader.result as string;
+          base64Content = base64String.split(',')[1];
+          fileName = file.name; mimeType = file.type;
+          try { summary = await summarizePolicy(base64Content, mimeType); } catch (e) {}
+          resolve();
+        };
+        reader.readAsDataURL(file);
       });
+    }
+    savePolicyData({ fileData: base64Content, fileName, mimeType, summary, coverageDetail, options: selectedOptions });
   };
 
   const handleWebValidationSubmit = () => {
     if (!webSearchResult) return;
     const finalCoverage = selectedFormula === 'custom' ? customFormula : selectedFormula;
-    savePolicyData({
-      fileData: null,
-      fileName: null,
-      mimeType: 'text/html',
-      summary: webSearchResult.summary,
-      sourceUrl: webSearchResult.sourceUrl,
-      coverageDetail: finalCoverage
+    savePolicyData({ 
+      fileData: null, 
+      fileName: null, 
+      mimeType: 'text/html', 
+      summary: webSearchResult.summary, 
+      sourceUrl: webSearchResult.sourceUrl, 
+      coverageDetail: finalCoverage,
+      options: selectedOptions
     });
   };
 
   const savePolicyData = (data: Partial<Policy>) => {
     const policyData = { name, provider, type, ...data };
-    if (initialData) {
-      onUpdatePolicy({ ...initialData, ...policyData } as Policy);
-    } else {
-      onAddPolicy({ id: uuid(), ...policyData, addedAt: Date.now() } as Omit<Policy, 'userId'>);
-    }
-    if (!initialData) resetForm();
-    else setShowWebValidation(false);
+    if (initialData) onUpdatePolicy({ ...initialData, ...policyData } as Policy);
+    else onAddPolicy({ id: crypto.randomUUID(), ...policyData, addedAt: Date.now() } as Omit<Policy, 'userId'>);
+    if (!initialData) resetForm(); else setShowWebValidation(false);
     clearDraft();
   };
 
-  const isEditMode = !!initialData;
+  const toggleOption = (opt: string) => {
+    setSelectedOptions(prev => 
+      prev.includes(opt) ? prev.filter(o => o !== opt) : [...prev, opt]
+    );
+  };
+
+  const addCustomOption = () => {
+    if (newOption.trim() && !selectedOptions.includes(newOption.trim())) {
+      setSelectedOptions(prev => [...prev, newOption.trim()]);
+      setNewOption('');
+    }
+  };
+
+  const typeIcons = {
+    [PolicyType.AUTO]: <Car className="w-5 h-5" />,
+    [PolicyType.HOME]: <Home className="w-5 h-5" />,
+    [PolicyType.HEALTH]: <Heart className="w-5 h-5" />,
+    [PolicyType.LEGAL]: <Scale className="w-5 h-5" />,
+    [PolicyType.LIFE]: <Briefcase className="w-5 h-5" />,
+    [PolicyType.BANK_CARD]: <CreditCard className="w-5 h-5" />,
+    [PolicyType.LOAN]: <Banknote className="w-5 h-5" />,
+    [PolicyType.MOBILE]: <Smartphone className="w-5 h-5" />,
+    [PolicyType.OTHER]: <Shield className="w-5 h-5" />,
+  };
 
   return (
-    <>
-      <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-6 ${isEditMode ? 'border-primary-200 ring-4 ring-primary-50' : ''}`}>
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-            {isEditMode ? <Save className="w-5 h-5 text-primary-600" /> : <Plus className="w-5 h-5 text-primary-600" />}
-            {isEditMode ? 'Modifier le contrat' : 'Ajouter un contrat'}
-          </h2>
-          {isEditMode && onCancelEdit && (
-            <button onClick={onCancelEdit} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-
-        {hasDraft && !isEditMode && (
-          <div className="mb-6 p-3 bg-primary-50 border border-primary-100 rounded-lg flex items-center justify-between animate-fadeIn">
-            <div className="flex items-center gap-2 text-sm text-primary-800">
-              <RotateCcw className="w-4 h-4" />
-              <span>Brouillon détecté</span>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={clearDraft} className="text-xs text-slate-500 hover:text-red-600 font-medium px-2 py-1">Ignorer</button>
-              <button onClick={restoreDraft} className="text-xs bg-primary-600 text-white px-3 py-1 rounded-md font-bold hover:bg-primary-700">Restaurer</button>
-            </div>
-          </div>
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          {initialData ? <Save className="w-5 h-5 text-primary-600" /> : <Plus className="w-5 h-5 text-primary-600" />}
+          {initialData ? 'Modifier le contrat' : 'Nouveau contrat'}
+        </h2>
+        {initialData && onCancelEdit && (
+          <button onClick={onCancelEdit} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="w-5 h-5" /></button>
         )}
-
-        <div className="flex p-1 bg-slate-100 rounded-lg mb-6 w-full sm:w-fit">
-          <button
-            type="button"
-            onClick={() => setMode('web')}
-            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
-              mode === 'web' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Globe className="w-4 h-4" />
-            Recherche Web
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('file')}
-            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
-              mode === 'file' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Upload className="w-4 h-4" />
-            Import PDF
-          </button>
-        </div>
-        
-        <form onSubmit={handleInitialSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nom du contrat</label>
-              <input
-                type="text"
-                required
-                className="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
-                placeholder="Ex: Assurance Auto Twingo"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Assureur</label>
-              <input
-                type="text"
-                required
-                className="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
-                placeholder="Ex: AXA, Allianz..."
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Catégorie</label>
-              <select
-                className="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
-                value={type}
-                onChange={(e) => setType(e.target.value as PolicyType)}
-              >
-                {Object.values(PolicyType).map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            {mode === 'file' && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Formule / Niveau</label>
-                <input
-                  type="text"
-                  className="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
-                  placeholder="Ex: Tous risques, Tiers étendu..."
-                  value={coverageDetail}
-                  onChange={(e) => setCoverageDetail(e.target.value)}
-                />
-              </div>
-            )}
-          </div>
-
-          {mode === 'file' ? (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                {isEditMode ? 'Remplacer le fichier (Optionnel)' : 'Conditions Générales (PDF)'}
-              </label>
-              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-300 border-dashed rounded-lg hover:bg-slate-50 transition-colors cursor-pointer relative"
-                  onClick={() => fileInputRef.current?.click()}>
-                <div className="space-y-1 text-center">
-                  {file ? (
-                    <div className="flex flex-col items-center text-primary-600">
-                      <FileText className="mx-auto h-10 w-10" />
-                      <p className="text-sm font-medium">{file.name}</p>
-                    </div>
-                  ) : (
-                    <>
-                      {isEditMode && initialData?.fileName ? (
-                        <div className="flex flex-col items-center text-slate-600">
-                          <FileText className="mx-auto h-10 w-10 text-slate-400" />
-                          <p className="text-sm font-medium">Fichier actuel : {initialData.fileName}</p>
-                        </div>
-                      ) : (
-                        <>
-                          <Upload className="mx-auto h-10 w-10 text-slate-400" />
-                          <span className="font-medium text-primary-600 hover:text-primary-500">Téléchargez un fichier</span>
-                          <p className="text-xs text-slate-500">PDF jusqu'à 10MB</p>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-                <input ref={fileInputRef} type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} required={!isEditMode && mode === 'file'} />
-              </div>
-            </div>
-          ) : (
-            <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-               <div className="flex gap-3">
-                 <Search className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                 <div>
-                   <h4 className="text-sm font-medium text-blue-900">Analyse de garanties via IA</h4>
-                   <p className="text-sm text-blue-700 mt-1">
-                     L'IA va simuler la lecture du contrat standard de <strong>{provider || "l'assureur"}</strong>.
-                   </p>
-                 </div>
-               </div>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={(mode === 'file' && !file && !isEditMode) || isAnalyzing}
-            className={`w-full flex justify-center items-center gap-2 py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white 
-              ${(mode === 'file' && !file && !isEditMode) || isAnalyzing ? 'bg-primary-400 cursor-not-allowed' : 'bg-primary-600 hover:bg-primary-700'} transition-all`}
-          >
-            {isAnalyzing ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Optimisation de la recherche...
-              </>
-            ) : (
-              mode === 'web' ? <><Search className="w-5 h-5" /> Vérifier les garanties</> : <><CheckCircle className="w-5 h-5" /> {isEditMode ? 'Enregistrer' : 'Ajouter'}</>
-            )}
-          </button>
-        </form>
       </div>
 
+      <div className="flex gap-4 mb-8">
+        <button onClick={() => setMode('web')} className={`flex-1 py-3 px-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${mode === 'web' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
+          <Globe className="w-6 h-6" />
+          <span className="text-sm font-bold">Recherche IA</span>
+        </button>
+        <button onClick={() => setMode('file')} className={`flex-1 py-3 px-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${mode === 'file' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
+          <Upload className="w-6 h-6" />
+          <span className="text-sm font-bold">Import PDF</span>
+        </button>
+      </div>
+
+      <form onSubmit={handleInitialSubmit} className="space-y-6">
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-3">Catégorie</label>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+            {Object.values(PolicyType).map((t) => (
+              <button key={t} type="button" onClick={() => setType(t)} className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all ${type === t ? 'border-primary-500 bg-primary-50 text-primary-600 ring-1 ring-primary-500' : 'border-slate-200 text-slate-500 hover:border-primary-200'}`}>
+                {typeIcons[t]}
+                <span className="text-[9px] font-bold uppercase truncate w-full text-center leading-tight">{t.split('/')[0]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Nom du contrat</label>
+            <input type="text" required className="w-full rounded-xl border-slate-300 border px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 outline-none" placeholder="Ex: Visa Premier / Auto Zen" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Assureur / Banque</label>
+            <input type="text" required className="w-full rounded-xl border-slate-300 border px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 outline-none" placeholder="Ex: Boursorama, AXA..." value={provider} onChange={(e) => setProvider(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <button type="submit" disabled={isAnalyzing} className="w-full py-4 bg-primary-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-primary-700 transition-all shadow-lg shadow-primary-900/10">
+            {isAnalyzing ? <><Loader2 className="animate-spin w-5 h-5" /> {analysisStatus}</> : 'Continuer'}
+          </button>
+          {showLongWaitOption && isAnalyzing && (
+             <button type="button" onClick={handleManualEntryFallback} className="w-full py-2 text-xs text-slate-500 hover:text-primary-600 transition-colors">Passer la recherche IA</button>
+          )}
+        </div>
+      </form>
+
       {showWebValidation && webSearchResult && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto flex flex-col">
-            <div className="p-6 border-b border-slate-200 bg-primary-50 rounded-t-xl">
-               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                 <CheckCircle className="w-6 h-6 text-primary-600" />
-                 Validation des Garanties
-               </h3>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-scaleIn max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Personnalisez votre contrat</h3>
+              <button onClick={() => setShowWebValidation(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-6 space-y-6">
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm text-slate-600">
-                <Globe className="w-4 h-4 inline mr-2" />
-                Source détectée : {webSearchResult.sourceUrl || 'Analyse sémantique IA'}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-900 mb-3">Sélectionnez votre formule</label>
-                <div className="grid grid-cols-1 gap-2">
-                  {webSearchResult.detectedFormulas.length > 0 ? (
-                    webSearchResult.detectedFormulas.map((formula, idx) => (
-                      <button key={idx} type="button" onClick={() => { setSelectedFormula(formula); setCustomFormula(''); }}
-                        className={`text-left px-4 py-3 rounded-lg border transition-all ${selectedFormula === formula ? 'bg-primary-50 border-primary-500 ring-1 ring-primary-500 font-semibold' : 'bg-white border-slate-200 hover:border-primary-300'}`}>
-                        {formula}
-                      </button>
-                    ))
-                  ) : (
-                    <p className="text-xs text-slate-500 italic mb-2 text-center">Aucune formule détectée, saisissez-la manuellement :</p>
-                  )}
-                  <button type="button" onClick={() => setSelectedFormula('custom')}
-                    className={`text-left px-4 py-3 rounded-lg border transition-all ${selectedFormula === 'custom' ? 'bg-primary-50 border-primary-500 ring-1 ring-primary-500 font-semibold' : 'bg-white border-slate-200 hover:border-primary-300'}`}>
-                    Formule spécifique / Personnalisée
+            
+            <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+              {/* Formules section */}
+              <section>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Formule principale</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {webSearchResult.detectedFormulas.map(f => (
+                    <button key={f} onClick={() => { setSelectedFormula(f); setCustomFormula(''); }} className={`text-left p-3 rounded-xl border text-sm font-medium transition-all ${selectedFormula === f ? 'border-primary-500 bg-primary-50 text-primary-700 ring-1 ring-primary-500' : 'border-slate-100 bg-slate-50 hover:border-primary-200'}`}>
+                      {f}
+                    </button>
+                  ))}
+                  <button onClick={() => setSelectedFormula('custom')} className={`text-left p-3 rounded-xl border text-sm font-medium transition-all ${selectedFormula === 'custom' ? 'border-primary-500 bg-primary-50 text-primary-700 ring-1 ring-primary-500' : 'border-slate-100 bg-slate-50 hover:border-primary-200'}`}>
+                    Autre...
                   </button>
                 </div>
-                {(selectedFormula === 'custom' || webSearchResult.detectedFormulas.length === 0) && (
-                  <input type="text" value={customFormula} onChange={(e) => { setCustomFormula(e.target.value); setSelectedFormula('custom'); }} placeholder="Ex: Formule Intégrale" className="mt-3 w-full rounded-lg border-slate-300 border px-3 py-2 text-sm outline-none shadow-inner" />
+                {selectedFormula === 'custom' && (
+                  <input type="text" className="w-full mt-2 p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500" placeholder="Précisez la formule" value={customFormula} onChange={e => setCustomFormula(e.target.value)} />
                 )}
-              </div>
+              </section>
 
-              <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
-                 <h4 className="text-xs font-bold text-emerald-800 uppercase mb-2">Résumé extrait :</h4>
-                 <p className="text-xs text-emerald-700 leading-relaxed italic line-clamp-4">{webSearchResult.summary}</p>
-              </div>
+              {/* Options section */}
+              <section>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <Tag className="w-3 h-3" /> Options souscrites
+                </label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {webSearchResult.availableOptions?.map(opt => (
+                    <button 
+                      key={opt} 
+                      onClick={() => toggleOption(opt)} 
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${selectedOptions.includes(opt) ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-slate-500 border-slate-200 hover:border-primary-200'}`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+                
+                {/* Manual option entry */}
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    className="flex-grow p-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500" 
+                    placeholder="Ajouter une option (ex: Jardin+)" 
+                    value={newOption}
+                    onChange={e => setNewOption(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addCustomOption()}
+                  />
+                  <button type="button" onClick={addCustomOption} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                {selectedOptions.filter(o => !webSearchResult.availableOptions?.includes(o)).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                     {selectedOptions.filter(o => !webSearchResult.availableOptions?.includes(o)).map(o => (
+                       <span key={o} className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-bold border border-slate-200">
+                         {o}
+                         <X className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => toggleOption(o)} />
+                       </span>
+                     ))}
+                  </div>
+                )}
+              </section>
             </div>
-            <div className="p-6 border-t border-slate-200 bg-slate-50 rounded-b-xl flex justify-end gap-3">
-              <button onClick={() => setShowWebValidation(false)} className="px-4 py-2 text-sm text-slate-700 bg-white border rounded-lg hover:bg-slate-50 transition-colors">Retour</button>
-              <button onClick={handleWebValidationSubmit} disabled={!selectedFormula || (selectedFormula === 'custom' && !customFormula)} className="px-6 py-2 text-sm font-bold text-white bg-primary-600 rounded-lg disabled:opacity-50 shadow-lg shadow-primary-900/10">Confirmer</button>
+
+            <div className="flex gap-3 pt-6 border-t border-slate-100 mt-6">
+              <button onClick={() => setShowWebValidation(false)} className="flex-1 py-3 rounded-xl border font-bold text-slate-600 hover:bg-slate-50">Annuler</button>
+              <button onClick={handleWebValidationSubmit} disabled={!selectedFormula} className="flex-1 py-3 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 shadow-lg shadow-primary-900/10 disabled:opacity-50">
+                Enregistrer
+              </button>
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
