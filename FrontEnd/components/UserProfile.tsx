@@ -1,8 +1,3 @@
-// -----------------------------------------------------------------------------
-// Profil Utilisateur
-// - Permet de modifier le nom, l'email et le mot de passe de l'utilisateur.
-// - Utilise `authService.updateUser` et gère l'état local du formulaire.
-// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
@@ -29,7 +24,7 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser }) => {
       // Simulate delay
       await new Promise(resolve => setTimeout(resolve, 800));
       
-      const updatedUser = await authService.updateUser(user.id, {
+      const updatedUser = authService.updateUser(user.id, {
         name,
         email,
         password: password || undefined

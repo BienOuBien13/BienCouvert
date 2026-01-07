@@ -1,11 +1,4 @@
 
-// -----------------------------------------------------------------------------
-// App principal - FrontEnd
-// Ce composant gère l'état global de l'application (utilisateur connecté,
-// liste des contrats, messages de l'assistant, vue active, etc.). Les actions
-// CRUD sur les polices utilisent `storageService` et l'authentification
-// utilise `authService`.
-// -----------------------------------------------------------------------------
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { PolicyForm } from './components/PolicyForm';
@@ -17,7 +10,7 @@ import { LandingPage } from './components/LandingPage';
 import { PolicyStats } from './components/PolicyStats';
 import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
-import { Policy, Message, User, AppView } from './types';
+import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { Menu, ShieldCheck } from 'lucide-react';
@@ -31,37 +24,28 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   
-  // UI State for Navigation
+  const [userProfile, setUserProfile] = useState<UserProfileData>({
+    childrenCount: 0,
+    healthNeeds: [],
+    expensiveEquipment: [],
+    hasPool: false,
+    hasGarden: false
+  });
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    // Au démarrage, on vérifie si une session est stockée localement et on
-    // restaure l'état utilisateur + ses polices. L'initialisation se termine
-    // en désactivant l'écran de chargement.
     const currentUser = authService.getCurrentUser();
-    if (currentUser) {
-      (async () => {
-        await handleLogin(currentUser);
-        setIsLoading(false);
-      })();
-    } else {
-      setIsLoading(false);
-    }
+    if (currentUser) handleLogin(currentUser);
+    setIsLoading(false);
   }, []);
 
-  const handleLogin = async (loggedInUser: User) => {
-    // Stocke l'utilisateur et récupère ses polices depuis l'API (backend)
+  const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
-    try {
-      const userPolicies = await storageService.getPolicies(loggedInUser.id);
-      setPolicies(userPolicies);
-    } catch (err) {
-      // En cas d'erreur réseau, on log et on continue avec une liste vide
-      console.error('Failed to load policies after login', err);
-      setPolicies([]);
-    }
-    // Reset du chat et navigation vers la vue contrats
+    const userPolicies = storageService.getPolicies(loggedInUser.id);
+    setPolicies(userPolicies);
+    if (loggedInUser.profile) setUserProfile(loggedInUser.profile);
     setMessages([]);
     setActiveView('policies');
     setShowAuth(false);
@@ -75,40 +59,34 @@ function App() {
     setShowAuth(false);
   };
 
-  const handleAddPolicy = async (policy: Omit<Policy, 'userId'> & { file?: File | null; fileData?: string | null; fileName?: string | null }) => {
+  const handleAddPolicy = (policy: Omit<Policy, 'userId'>) => {
     if (!user) return;
-    const policyWithUser: any = { ...policy, userId: user.id };
-    try {
-      const created = await storageService.savePolicy(policyWithUser);
-      // Use returned created policy (may include summary, fileData, id)
-      setPolicies(prev => [created, ...prev]);
-    } catch (err) {
-      console.error('Failed to save policy', err);
-    }
+    const policyWithUser: Policy = { ...policy, userId: user.id };
+    storageService.savePolicy(policyWithUser);
+    setPolicies(prev => [policyWithUser, ...prev]);
   };
 
-  const handleUpdatePolicy = async (updatedPolicy: Policy & { file?: File | null; fileData?: string | null; fileName?: string | null }) => {
-    try {
-      const updated = await storageService.updatePolicy(updatedPolicy);
-      setPolicies(prev => prev.map(p => p.id === updated.id ? updated : p));
-      setEditingPolicy(null);
-    } catch (err) {
-      console.error('Failed to update policy', err);
-    }
+  const handleUpdatePolicy = (updatedPolicy: Policy) => {
+    storageService.updatePolicy(updatedPolicy);
+    setPolicies(prev => prev.map(p => p.id === updatedPolicy.id ? updatedPolicy : p));
+    setEditingPolicy(null);
   };
 
   const handleDeletePolicy = (id: string) => {
-    if (confirm("Êtes-vous sûr de vouloir supprimer ce contrat ?")) {
+    if (confirm("Êtes-vous sûr ?")) {
       storageService.deletePolicy(id);
       setPolicies(prev => prev.filter(p => p.id !== id));
       if (editingPolicy?.id === id) setEditingPolicy(null);
     }
   };
 
-  const handleEditPolicy = (policy: Policy) => {
-    setEditingPolicy(policy);
-    setActiveView('policies');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleUpdateProfile = (newProfile: UserProfileData) => {
+    setUserProfile(newProfile);
+    if (user) {
+      const updatedUser = { ...user, profile: newProfile };
+      setUser(updatedUser);
+      authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile } as any);
+    }
   };
 
   const renderContent = () => {
@@ -132,37 +110,23 @@ function App() {
                   {policies.length} contrats
                 </span>
               </div>
-              <PolicyList 
-                policies={policies} 
-                onDelete={handleDeletePolicy} 
-                onEdit={handleEditPolicy}
-              />
+              <PolicyList policies={policies} onDelete={handleDeletePolicy} onEdit={p => { setEditingPolicy(p); setActiveView('policies'); }} />
             </div>
           </div>
         );
       case 'chat':
-        return (
-          <div className="h-[calc(100vh-140px)] md:h-[calc(100vh-120px)]">
-            <ChatInterface 
-              policies={policies} 
-              messages={messages} 
-              setMessages={setMessages} 
-            />
-          </div>
-        );
+        return <div className="h-[calc(100vh-140px)]"><ChatInterface policies={policies} messages={messages} setMessages={setMessages} /></div>;
       case 'analysis':
-        return <AnalysisView policies={policies} />;
+        return <AnalysisView policies={policies} profile={userProfile} onUpdateProfile={handleUpdateProfile} />;
       case 'experts':
         return <ExpertContact policies={policies} />;
       case 'profile':
         return <UserProfile user={user!} onUpdateUser={setUser} />;
-      default:
-        return null;
+      default: return null;
     }
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 font-medium">Initialisation...</div>;
-  
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center">Initialisation...</div>;
   if (!user) {
     if (showAuth) return <AuthScreen onLogin={handleLogin} onBack={() => setShowAuth(false)} />;
     return <LandingPage onStart={() => setShowAuth(true)} />;
@@ -170,39 +134,17 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
-      <Sidebar 
-        activeView={activeView} 
-        setActiveView={setActiveView} 
-        user={user} 
-        onLogout={handleLogout}
-        isCollapsed={isSidebarCollapsed}
-        setIsCollapsed={setIsSidebarCollapsed}
-        isMobileOpen={isMobileMenuOpen}
-        onCloseMobile={() => setIsMobileMenuOpen(false)}
-      />
-
-      {/* Main Content Area */}
+      <Sidebar activeView={activeView} setActiveView={setActiveView} user={user} onLogout={handleLogout} isCollapsed={isSidebarCollapsed} setIsCollapsed={setIsSidebarCollapsed} isMobileOpen={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} />
       <div className={`flex-1 transition-all duration-300 ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
-        {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-slate-200 h-16 px-4 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-2">
-            <div className="bg-primary-600 p-1.5 rounded-lg">
-              <ShieldCheck className="w-5 h-5 text-white" />
-            </div>
+            <div className="bg-primary-600 p-1.5 rounded-lg"><ShieldCheck className="w-5 h-5 text-white" /></div>
             <span className="font-bold text-slate-900">AssurClair</span>
           </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(true)}
-            className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"
-          >
-            <Menu className="w-6 h-6" />
-          </button>
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-slate-600"><Menu className="w-6 h-6" /></button>
         </header>
-
-        <main className="p-4 md:p-8 min-h-[calc(100vh-64px)] lg:min-h-screen">
-          <div className="max-w-6xl mx-auto animate-fadeIn">
-            {renderContent()}
-          </div>
+        <main className="p-4 md:p-8 min-h-screen">
+          <div className="max-w-6xl mx-auto animate-fadeIn">{renderContent()}</div>
         </main>
       </div>
     </div>

@@ -1,290 +1,261 @@
 
-// -----------------------------------------------------------------------------
-// Service client pour fonctionnalités AI
-// - Ce module délègue les appels AI au backend (endpoints `/api/ai`), ce qui
-//   évite d'exposer une clé API dans le navigateur. Les fonctions retournent
-//   des données simples (résumé, recherche, détection de doublons) provenant
-//   du backend.
-// -----------------------------------------------------------------------------
 import { GoogleGenAI, Type, LiveServerMessage, Modality, Blob } from "@google/genai";
-import { Policy, DuplicateFinding, Message, WebSearchResult } from "../types";
-
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
+import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData } from "../types";
 
 const getAiClient = () => {
-  // Dans le navigateur, on utilise l'API backend pour appeler Gemini afin de
-  // ne pas exposer de clé au client. Renvoie `null` car le client natif n'est
-  // pas utilisé côté front.
-  return null;
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.error("API_KEY is missing from environment variables.");
+    throw new Error("Clé API manquante. Veuillez configurer votre clé API.");
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
-/* --- HELPER: Generate System Instruction from Policies --- */
 const generateSystemInstruction = (policies: Policy[]): string => {
   let context = "Tu es AssurClair, un assistant personnel expert en assurances. Ton but est d'aider l'utilisateur à comprendre ses couvertures. ";
-  context += "Voici la liste des contrats de l'utilisateur (analyse-les pour répondre) :\n";
+  context += "Voici la liste des contrats de l'utilisateur :\n";
 
   policies.forEach(p => {
     context += `- Contrat "${p.name}" chez "${p.provider}" (Type: ${p.type}, Formule: ${p.coverageDetail || 'Non spécifiée'}). `;
+    if (p.options?.length) context += `Options souscrites: ${p.options.join(', ')}. `;
     if (p.summary) context += `Résumé garanties: ${p.summary}. `;
-    if (p.sourceUrl) context += `Source web: ${p.sourceUrl}. `;
     context += "\n";
   });
 
   context += "\nConsignes :\n";
-  context += "1. Sois précis et cite le contrat concerné quand tu réponds.\n";
-  context += "2. Si une garantie n'est pas mentionnée, dis que tu ne la trouves pas dans les documents.\n";
+  context += "1. Sois précis et cite le contrat concerné.\n";
+  context += "2. Inclus les assurances de cartes bancaires (Visa Premier, Gold Mastercard) dans tes raisonnements de doublons (voyage, location de voiture).\n";
   context += "3. Sois concis et serviable.\n";
   
   return context;
 };
 
-/**
- * Generates a brief summary of the uploaded insurance policy.
- */
 export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
+  const ai = getAiClient();
   try {
-    const res = await fetch(`${API_BASE}/api/policies/summarize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileBase64, mimeType }) });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.message || 'Summarize failed');
-    return body.summary as string;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: mimeType, data: fileBase64 } },
+          { text: "Analyse ce document d'assurance. Extrais : l'assureur, le type de contrat, la formule et les options éventuelles. Limite à 150 mots." }
+        ]
+      }
+    });
+    return response.text || "Impossible de générer un résumé.";
   } catch (error) {
-    console.error('Error summarizing policy (client->backend):', error);
+    console.error("Error summarizing policy:", error);
     throw error;
   }
 };
 
-/**
- * Searches for the policy conditions online with improved grounding and extraction.
- */
 export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
+  const ai = getAiClient();
+  const prompt = `Trouve les garanties, formules et options complémentaires standard pour l'assurance suivante : 
+  Assureur: ${provider}, Type: ${type}, Produit: ${name}.
+  Donne un court résumé des garanties, liste les noms des formules commerciales (ex: Tiers, Confort) et liste les options couramment proposées (ex: Assistance 0km, Jardin+, Vol hors domicile).`;
+
   try {
-    const res = await fetch(`${API_BASE}/api/policies/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, type, name })
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING },
+            formulas: { type: Type.ARRAY, items: { type: Type.STRING } },
+            options: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["summary", "formulas", "options"]
+        }
+      }
     });
 
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      console.error('Search failed:', errBody);
-      return { summary: 'La recherche a échoué.', sourceUrl: undefined, detectedFormulas: [] };
+    let textResponse = response.text || "";
+    if (textResponse.includes("```json")) textResponse = textResponse.replace(/```json|```/g, "").trim();
+
+    const jsonResponse = JSON.parse(textResponse);
+    let sourceUrl = undefined;
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (chunks) {
+      const webChunk = chunks.find((c: any) => c.web?.uri);
+      if (webChunk) sourceUrl = webChunk.web.uri;
     }
 
-    const body = await res.json().catch(() => ({}));
-    return { summary: body.summary || '', sourceUrl: body.sourceUrl, detectedFormulas: body.formulas || [] } as WebSearchResult;
+    return { 
+      summary: jsonResponse.summary || "Données récupérées via le web.", 
+      sourceUrl, 
+      detectedFormulas: jsonResponse.formulas?.length ? jsonResponse.formulas : ["Standard", "Essentiel", "Premium"],
+      availableOptions: jsonResponse.options || []
+    };
   } catch (error) {
-    console.error('Error searching policy info (client->backend):', error);
-    return { summary: 'Erreur réseau lors de la recherche.', sourceUrl: undefined, detectedFormulas: [] };
+    return { 
+      summary: "Données web indisponibles pour le moment.", 
+      sourceUrl: undefined, 
+      detectedFormulas: ["Standard", "Essentiel", "Premium"],
+      availableOptions: []
+    };
   }
 };
 
-/**
- * Detects duplicates across multiple policies.
- */
-export const detectDuplicates = async (policies: Policy[]): Promise<DuplicateFinding[]> => {
-  if (policies.length < 2) return [];
+export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {
+  const ai = getAiClient();
+  const promptParts: any[] = [
+    {
+      text: `Agis en expert courtier. Analyse ces contrats selon ce profil utilisateur détaillé.
+      
+      PROFIL UTILISATEUR :
+      - Profession: ${profile.profession || 'Non renseigné'} (${profile.workStatus})
+      - Enfants: ${profile.childrenCount || 0}
+      - Maison: ${profile.hasPool ? 'Piscine' : ''}, ${profile.hasGarden ? 'Jardin' : ''}
+      - Santé: ${profile.healthNeeds?.join(', ') || 'Standard'}. Note: ${profile.healthSpecifics || 'RAS'}
+      - Sports à risque: ${profile.riskySports?.join(', ') || 'Aucun'}
+      - Voyages: ${profile.travelFrequency}
+      - Projets de vie: ${profile.lifeProjects || 'Aucun projet spécifié'}
+      
+      MISSIONS :
+      1. DOUBLONS : Ex: Assurance voyage payée alors qu'il a une carte Gold/Premier.
+      2. CARENCES : Ex: Pratique du ski/parapente sans garantie spécifique, ou indépendant sans prévoyance. 
+         Vérifie si les options souscrites (ex: Jardin+) sont pertinentes ou s'il en manque (ex: a un jardin mais pas l'option).
+      3. ÉCONOMIES : Estime les gains si on supprime un doublon ou une option inutile.
+
+      Retourne un tableau JSON d'OptimizationFinding.`
+    }
+  ];
+
+  policies.forEach(p => {
+    promptParts.push({ text: `ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail}. Options: ${p.options?.join(', ') || 'Aucune'}. Résumé: ${p.summary}` });
+  });
+
   try {
-    const res = await fetch(`${API_BASE}/api/policies/detect-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ policies }) });
-    const body = await res.json();
-    if (!res.ok) throw new Error('Detect duplicates failed');
-    return body as DuplicateFinding[];
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: { parts: promptParts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              type: { type: Type.STRING, enum: ["duplicate", "gap", "saving"] },
+              severity: { type: Type.STRING, enum: ["low", "medium", "high"] },
+              involvedPolicies: { type: Type.ARRAY, items: { type: Type.STRING } },
+              estimatedSaving: { type: Type.NUMBER },
+              recommendation: { type: Type.STRING }
+            },
+            required: ["title", "description", "type", "severity", "involvedPolicies", "recommendation"]
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text) as OptimizationFinding[];
   } catch (error) {
-    console.error('Error detectDuplicates (client->backend):', error);
-    throw error;
+    console.error("Error detecting optimizations:", error);
+    return [];
   }
 };
 
-/**
- * Chat with the AI (Text Mode).
- */
-export const sendMessageToAssistant = async (
-  message: string, 
-  policies: Policy[], 
-  history: Message[]
-): Promise<string> => {
+export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
+  const ai = getAiClient();
+  const systemInstruction = generateSystemInstruction(policies);
   try {
-    const res = await fetch(`${API_BASE}/api/ai/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, policies, history }) });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.message || 'Chat failed');
-    return body.reply as string;
+    const finalParts = [
+      ...history.map(h => ({ text: `${h.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${h.text}` })),
+      { text: message }
+    ];
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: { parts: finalParts },
+      config: { systemInstruction, tools: [{ googleSearch: {} }] }
+    });
+    return response.text || "Désolé...";
   } catch (error) {
-    console.error('Error in chat (client->backend):', error);
-    return 'Une erreur technique est survenue.';
+    return "Une erreur technique est survenue.";
   }
 };
 
-
-/* ==========================================
-   LIVE API & AUDIO UTILITIES
-   ========================================== */
-
+/* AUDIO UTILS */
 function createBlob(data: Float32Array): Blob {
   const l = data.length;
   const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    int16[i] = Math.max(-1, Math.min(1, data[i])) * 32768;
-  }
-  
+  for (let i = 0; i < l; i++) int16[i] = Math.max(-1, Math.min(1, data[i])) * 32768;
   let binary = '';
   const bytes = new Uint8Array(int16.buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const base64 = btoa(binary);
-
-  return {
-    data: base64,
-    mimeType: 'audio/pcm;rate=16000',
-  };
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return { data: btoa(binary), mimeType: 'audio/pcm;rate=16000' };
 }
 
 function decode(base64: string) {
   const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
   return bytes;
 }
 
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number = 24000,
-  numChannels: number = 1,
-): Promise<AudioBuffer> {
+async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
+  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
+  const channelData = buffer.getChannelData(0);
+  for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
   return buffer;
 }
 
-export const connectLiveSession = async (
-  policies: Policy[],
-  onInputTranscription: (text: string) => void,
-  onOutputTranscription: (text: string) => void,
-  onTurnComplete: () => void
-) => {
+export const connectLiveSession = async (policies: Policy[], onInput: (t: string) => void, onOutput: (t: string) => void, onComplete: () => void) => {
   const ai = getAiClient();
-  if (!ai) throw new Error('Live audio sessions require direct Gemini client support; configure GEMINI_API_KEY or use server-side live endpoint.');
   const systemInstruction = generateSystemInstruction(policies);
-
-  const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-  const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-  
-  try {
-    await outputAudioContext.resume();
-  } catch (e) {
-    console.warn("Failed to resume audio context", e);
-  }
-
-  const outputNode = outputAudioContext.createGain();
-  outputNode.connect(outputAudioContext.destination);
-
+  const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+  const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  const outputNode = outputCtx.createGain();
+  outputNode.connect(outputCtx.destination);
   let nextStartTime = 0;
   const sources = new Set<AudioBufferSourceNode>();
-  let stream: MediaStream | null = null;
-  let scriptProcessor: ScriptProcessorNode | null = null;
-  let sourceNode: MediaStreamAudioSourceNode | null = null;
-
-  stream = await navigator.mediaDevices.getUserMedia({ 
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
-  
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const sessionPromise = ai.live.connect({
     model: 'gemini-2.5-flash-native-audio-preview-09-2025',
     callbacks: {
       onopen: () => {
-        sourceNode = inputAudioContext.createMediaStreamSource(stream!);
-        scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
-        
-        scriptProcessor.onaudioprocess = (e) => {
-          if (outputAudioContext.currentTime < nextStartTime) {
-             return; 
-          }
-          const inputData = e.inputBuffer.getChannelData(0);
-          const pcmBlob = createBlob(inputData);
-          sessionPromise.then((session) => {
-            session.sendRealtimeInput({ media: pcmBlob });
-          });
+        const source = inputCtx.createMediaStreamSource(stream);
+        const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (e) => {
+          sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }));
         };
-        
-        sourceNode.connect(scriptProcessor);
-        scriptProcessor.connect(inputAudioContext.destination);
+        source.connect(processor);
+        processor.connect(inputCtx.destination);
       },
-      onmessage: async (message: LiveServerMessage) => {
-        if (message.serverContent?.inputTranscription) {
-           onInputTranscription(message.serverContent.inputTranscription.text);
+      onmessage: async (m: LiveServerMessage) => {
+        if (m.serverContent?.inputTranscription) onInput(m.serverContent.inputTranscription.text);
+        if (m.serverContent?.outputTranscription) onOutput(m.serverContent.outputTranscription.text);
+        if (m.serverContent?.turnComplete) onComplete();
+        const b64 = m.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+        if (b64) {
+          nextStartTime = Math.max(nextStartTime, outputCtx.currentTime);
+          const buf = await decodeAudioData(decode(b64), outputCtx);
+          const src = outputCtx.createBufferSource();
+          src.buffer = buf;
+          src.connect(outputNode);
+          src.start(nextStartTime);
+          nextStartTime += buf.duration;
+          sources.add(src);
         }
-        if (message.serverContent?.outputTranscription) {
-           onOutputTranscription(message.serverContent.outputTranscription.text);
-        }
-        if (message.serverContent?.turnComplete) {
-           onTurnComplete();
-        }
-
-        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-        if (base64Audio) {
-          try {
-            nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
-            const audioBuffer = await decodeAudioData(
-              decode(base64Audio),
-              outputAudioContext
-            );
-            
-            const source = outputAudioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(outputNode);
-            source.addEventListener('ended', () => sources.delete(source));
-            source.start(nextStartTime);
-            nextStartTime += audioBuffer.duration;
-            sources.add(source);
-          } catch (err) {
-            console.error("Error decoding audio", err);
-          }
-        }
-
-        if (message.serverContent?.interrupted) {
-          sources.forEach(s => {
-            try { s.stop(); } catch (e) {}
-          });
-          sources.clear();
-          nextStartTime = 0;
-        }
-      },
-      onclose: () => console.log("Live Session Closed"),
-      onerror: (err) => console.error("Live Session Error", err)
+      }
     },
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } }
-      },
-      systemInstruction: systemInstruction,
+    config: { 
+      responseModalities: [Modality.AUDIO], 
+      systemInstruction, 
       inputAudioTranscription: {}, 
-      outputAudioTranscription: {}
+      outputAudioTranscription: {} 
     }
   });
-
   return () => {
-    sessionPromise.then(session => session.close());
-    if (stream) stream.getTracks().forEach(track => track.stop());
-    if (sourceNode) sourceNode.disconnect();
-    if (scriptProcessor) scriptProcessor.disconnect();
-    if (inputAudioContext.state !== 'closed') inputAudioContext.close();
-    if (outputAudioContext.state !== 'closed') outputAudioContext.close();
+    sessionPromise.then(s => s.close());
+    stream.getTracks().forEach(t => t.stop());
+    inputCtx.close();
+    outputCtx.close();
   };
 };

@@ -1,15 +1,7 @@
-// -----------------------------------------------------------------------------
-// Interface de chat / assistant
-// - Permet d'envoyer des messages textuels à l'assistant et de recevoir des
-//   réponses générées côté serveur.
-// - Support expérimental de sessions vocales 'live' : transcription en temps
-//   réel et lecture audio.
-// -----------------------------------------------------------------------------
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
 import { sendMessageToAssistant, connectLiveSession } from '../services/geminiService';
-import { uuid } from '../utils/uuid';
 
 interface Props {
   policies: Policy[];
@@ -55,9 +47,8 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    // On ajoute immédiatement le message utilisateur en UI (optimistic update)
     const userMessage: Message = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       role: 'user',
       text: input.trim(),
       timestamp: Date.now(),
@@ -68,22 +59,19 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     setIsLoading(true);
 
     try {
-      // Appel backend qui s'occupe d'interroger l'AI / pipeline
       const responseText = await sendMessageToAssistant(userMessage.text, policies, messages);
       
       const botMessage: Message = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: 'model',
         text: responseText,
         timestamp: Date.now(),
       };
 
-      // Ajout de la réponse du bot
       setMessages(prev => [...prev, botMessage]);
     } catch (error) {
-      // En cas d'erreur, on informe l'utilisateur via un message du bot
       const errorMessage: Message = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: 'model',
         text: "Désolé, j'ai rencontré une erreur. Veuillez réessayer.",
         timestamp: Date.now(),
@@ -96,7 +84,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
 
   const toggleLiveSession = async () => {
     if (isLive) {
-      // Stop Session: nettoyage des callbacks et état local
+      // Stop Session
       if (cleanupLiveSession.current) cleanupLiveSession.current();
       cleanupLiveSession.current = null;
       setIsLive(false);
@@ -105,7 +93,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
       liveUserTextRef.current = '';
       liveModelTextRef.current = '';
     } else {
-      // Start Session: initialise l'état et démarre la connexion live
+      // Start Session
       setIsLive(true);
       setLiveUserText('');
       setLiveModelText('');
@@ -116,17 +104,15 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         const cleanup = await connectLiveSession(
           policies,
           (inputText) => {
-             // Transcription partielle utilisateur (affichée en temps réel)
              setLiveUserText(prev => prev + inputText);
              liveUserTextRef.current += inputText;
           },
           (outputText) => {
-             // Transcription partielle assistant
              setLiveModelText(prev => prev + outputText);
              liveModelTextRef.current += outputText;
           },
           () => {
-             // Fin d'un tour : on presse les transcriptions dans l'historique
+             // Turn Complete
              const finalUserText = liveUserTextRef.current;
              const finalModelText = liveModelTextRef.current;
 
@@ -136,7 +122,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
                  // Only add if there is actual content
                  if (finalUserText.trim()) {
                    newMessages.push({
-                     id: uuid(),
+                     id: crypto.randomUUID(),
                      role: 'user',
                      text: finalUserText,
                      timestamp: Date.now()
@@ -144,7 +130,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
                  }
                  if (finalModelText.trim()) {
                    newMessages.push({
-                     id: uuid(),
+                     id: crypto.randomUUID(),
                      role: 'model',
                      text: finalModelText,
                      timestamp: Date.now()
