@@ -1,10 +1,4 @@
 
-// -----------------------------------------------------------------------------
-// Contact Experts
-// - Formulaire d'envoi de dossier à un expert humain pour audit.
-// - Composant volontairement simple : ici il simule l'envoi et affiche un
-//   écran de confirmation (utile pour la démo/non-prod).
-// -----------------------------------------------------------------------------
 import React, { useState } from 'react';
 import { Users, Phone, Mail, Clock, ShieldCheck, CheckCircle, ArrowRight, MessageCircle } from 'lucide-react';
 import { Policy } from '../types';

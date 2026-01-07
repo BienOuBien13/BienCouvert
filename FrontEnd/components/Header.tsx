@@ -1,8 +1,3 @@
-// -----------------------------------------------------------------------------
-// Header global de l'application
-// - Affiche le logo, le nom et des actions rapides (profil / déconnexion).
-// - Simple composant présentational utilisé dans la layout principale.
-// -----------------------------------------------------------------------------
 import React from 'react';
 import { ShieldCheck, LogOut, User as UserIcon, Settings } from 'lucide-react';
 import { User } from '../types';

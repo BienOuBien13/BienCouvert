@@ -24,6 +24,13 @@ router.get('/', (req: any, res) => {
 router.post('/', upload.single('file'), async (req: any, res) => {
   try {
     const body = req.body;
+
+    // Validation minimale serveur : on requiert au moins un nom ou un fichier/base64
+    // (le client frontend valide plus strictement selon le mode choisi).
+    if (!body.name && !req.file && !(body.fileData && body.fileName)) {
+      return res.status(400).json({ message: 'Missing required fields (name or file)' });
+    }
+
     // On lit l'état actuel des polices (stockage local JSON)
     const policies = storage.readPolicies();
 
