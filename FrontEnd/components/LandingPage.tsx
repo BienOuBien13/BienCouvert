@@ -49,7 +49,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         <div className="max-w-7xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-sm font-bold mb-8 animate-fadeIn">
             <SparklesIcon className="w-4 h-4" />
-            Propulsé par Gemini 3.0 Pro
+            Propulsé par Gemini 30.0 Pro
           </div>
           <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 max-w-4xl mx-auto leading-[1.1]">
             L'assurance qui s'éclaire enfin par <span className="text-primary-600">l'IA générative</span>.
