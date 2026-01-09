@@ -1,6 +1,8 @@
-import { Policy } from '../types';
+
+import { Policy, CentralCgEntry, PolicyType } from '../types';
 
 const POLICIES_KEY = 'assurclair_policies';
+const CENTRAL_CG_KEY = 'assurclair_central_cg';
 
 export const storageService = {
   getPolicies: (userId: string): Policy[] => {
@@ -39,5 +41,41 @@ export const storageService = {
     const allPolicies: Policy[] = JSON.parse(allPoliciesStr);
     const newPolicies = allPolicies.filter(p => p.id !== policyId);
     localStorage.setItem(POLICIES_KEY, JSON.stringify(newPolicies));
+  },
+
+  // --- Central CG Repository Functions ---
+  
+  getCentralCgRepo: (): CentralCgEntry[] => {
+    const repoStr = localStorage.getItem(CENTRAL_CG_KEY);
+    return repoStr ? JSON.parse(repoStr) : [];
+  },
+
+  saveCgEntry: (entry: Omit<CentralCgEntry, 'id' | 'lastVerified'>): void => {
+    const repo = storageService.getCentralCgRepo();
+    const newEntry: CentralCgEntry = {
+      ...entry,
+      id: crypto.randomUUID(),
+      lastVerified: Date.now()
+    };
+    repo.push(newEntry);
+    localStorage.setItem(CENTRAL_CG_KEY, JSON.stringify(repo));
+  },
+
+  deleteCgEntry: (id: string): void => {
+    const repo = storageService.getCentralCgRepo();
+    const filtered = repo.filter(e => e.id !== id);
+    localStorage.setItem(CENTRAL_CG_KEY, JSON.stringify(filtered));
+  },
+
+  findCgInRepo: (provider: string, name: string, type: PolicyType): CentralCgEntry | null => {
+    const repo = storageService.getCentralCgRepo();
+    const p = provider.toLowerCase().trim();
+    const n = name.toLowerCase().trim();
+    
+    return repo.find(entry => 
+      entry.provider.toLowerCase().includes(p) && 
+      (entry.policyName.toLowerCase().includes(n) || n.includes(entry.policyName.toLowerCase())) &&
+      entry.type === type
+    ) || null;
   }
 };

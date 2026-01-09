@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
@@ -196,7 +197,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm ${
                 msg.role === 'user'
                   ? 'bg-primary-600 text-white rounded-br-none'
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'
@@ -210,7 +211,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         {/* Live Transcription Bubbles (Temporary) */}
         {(liveUserText || (isLive && !liveModelText)) && (
            <div className="flex justify-end">
-             <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm bg-primary-600/80 text-white rounded-br-none animate-pulse">
+             <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm bg-primary-600/80 text-white rounded-br-none animate-pulse">
                 {liveUserText || "..."}
              </div>
            </div>
@@ -218,7 +219,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         
         {liveModelText && (
            <div className="flex justify-start">
-             <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200">
+             <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200">
                 {liveModelText}
              </div>
            </div>

@@ -1,5 +1,5 @@
 
-import { User } from '../types';
+import { User, UserProfileData } from '../types';
 
 const USERS_KEY = 'assurclair_users';
 const SESSION_KEY = 'assurclair_session';
@@ -14,7 +14,13 @@ export const authService = {
     const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
     if (!user) throw new Error("Email ou mot de passe incorrect.");
-    const sessionUser: User = { id: user.id, email: user.email, name: user.name };
+    
+    const sessionUser: User = { 
+      id: user.id, 
+      email: user.email, 
+      name: user.name,
+      profile: user.profile 
+    };
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
     return sessionUser;
   },
@@ -25,7 +31,6 @@ export const authService = {
     if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
       throw new Error("Cet email est déjà utilisé.");
     }
-    // Dériver le nom de l'email (ex: jean.dupont@mail.com -> Jean Dupont)
     const displayName = email.split('@')[0]
       .split('.')
       .map(part => part.charAt(0).toUpperCase() + part.slice(1))
@@ -48,20 +53,29 @@ export const authService = {
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
   },
 
-  updateUser: (userId: string, data: { name: string; email: string; password?: string }): User => {
+  updateUser: (userId: string, data: { name: string; email: string; password?: string, profile?: UserProfileData }): User => {
     const usersStr = localStorage.getItem(USERS_KEY);
     const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
     const userIndex = users.findIndex(u => u.id === userId);
     if (userIndex === -1) throw new Error("Utilisateur non trouvé.");
+    
     const updatedUser: StoredUser = {
       ...users[userIndex],
       name: data.name,
       email: data.email,
-      password: data.password ? data.password : users[userIndex].password
+      password: data.password ? data.password : users[userIndex].password,
+      profile: data.profile || users[userIndex].profile
     };
+    
     users[userIndex] = updatedUser;
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    const sessionUser: User = { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name };
+    
+    const sessionUser: User = { 
+      id: updatedUser.id, 
+      email: updatedUser.email, 
+      name: updatedUser.name,
+      profile: updatedUser.profile
+    };
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
     return sessionUser;
   },

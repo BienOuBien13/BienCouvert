@@ -1,59 +1,26 @@
 
+// @google/genai SDK is used for all GenAI interactions.
 import { GoogleGenAI, Type, LiveServerMessage, Modality, Blob } from "@google/genai";
-import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData } from "../types";
+import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData, PolicyType, CentralCgEntry } from "../types";
 
 const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.error("API_KEY is missing from environment variables.");
-    throw new Error("Clé API manquante. Veuillez configurer votre clé API.");
-  }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
-const generateSystemInstruction = (policies: Policy[]): string => {
-  let context = "Tu es AssurClair, un assistant personnel expert en assurances. Ton but est d'aider l'utilisateur à comprendre ses couvertures. ";
-  context += "Voici la liste des contrats de l'utilisateur :\n";
+export interface SmartExtractionResult {
+  policies: Array<Partial<Policy & { 
+    isComplete: boolean; 
+    suggestedFormulas?: string[]; 
+    suggestedOptions?: string[];
+    summary?: string;
+  }>>;
+  clarificationQuestions: string | null;
+}
 
-  policies.forEach(p => {
-    context += `- Contrat "${p.name}" chez "${p.provider}" (Type: ${p.type}, Formule: ${p.coverageDetail || 'Non spécifiée'}). `;
-    if (p.options?.length) context += `Options souscrites: ${p.options.join(', ')}. `;
-    if (p.summary) context += `Résumé garanties: ${p.summary}. `;
-    context += "\n";
-  });
-
-  context += "\nConsignes :\n";
-  context += "1. Sois précis et cite le contrat concerné.\n";
-  context += "2. Inclus les assurances de cartes bancaires (Visa Premier, Gold Mastercard) dans tes raisonnements de doublons (voyage, location de voiture).\n";
-  context += "3. Sois concis et serviable.\n";
-  
-  return context;
-};
-
-export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
+export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<Partial<CentralCgEntry>> => {
   const ai = getAiClient();
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: mimeType, data: fileBase64 } },
-          { text: "Analyse ce document d'assurance. Extrais : l'assureur, le type de contrat, la formule et les options éventuelles. Limite à 150 mots." }
-        ]
-      }
-    });
-    return response.text || "Impossible de générer un résumé.";
-  } catch (error) {
-    console.error("Error summarizing policy:", error);
-    throw error;
-  }
-};
-
-export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
-  const ai = getAiClient();
-  const prompt = `Trouve les garanties, formules et options complémentaires standard pour l'assurance suivante : 
-  Assureur: ${provider}, Type: ${type}, Produit: ${name}.
-  Donne un court résumé des garanties, liste les noms des formules commerciales (ex: Tiers, Confort) et liste les options couramment proposées (ex: Assistance 0km, Jardin+, Vol hors domicile).`;
+  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} via l'URL : ${pdfUrl}.
+  Extrais : 1. Les formules commerciales. 2. Les options complémentaires. 3. Un résumé sémantique.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -65,75 +32,119 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            summary: { type: Type.STRING },
-            formulas: { type: Type.ARRAY, items: { type: Type.STRING } },
-            options: { type: Type.ARRAY, items: { type: Type.STRING } }
+            indexedFormulas: { type: Type.ARRAY, items: { type: Type.STRING } },
+            indexedOptions: { type: Type.ARRAY, items: { type: Type.STRING } },
+            semanticSummary: { type: Type.STRING }
           },
-          required: ["summary", "formulas", "options"]
+          required: ["indexedFormulas", "indexedOptions", "semanticSummary"]
         }
       }
     });
-
-    let textResponse = response.text || "";
-    if (textResponse.includes("```json")) textResponse = textResponse.replace(/```json|```/g, "").trim();
-
-    const jsonResponse = JSON.parse(textResponse);
-    let sourceUrl = undefined;
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (chunks) {
-      const webChunk = chunks.find((c: any) => c.web?.uri);
-      if (webChunk) sourceUrl = webChunk.web.uri;
-    }
-
-    return { 
-      summary: jsonResponse.summary || "Données récupérées via le web.", 
-      sourceUrl, 
-      detectedFormulas: jsonResponse.formulas?.length ? jsonResponse.formulas : ["Standard", "Essentiel", "Premium"],
-      availableOptions: jsonResponse.options || []
-    };
-  } catch (error) {
-    return { 
-      summary: "Données web indisponibles pour le moment.", 
-      sourceUrl: undefined, 
-      detectedFormulas: ["Standard", "Essentiel", "Premium"],
-      availableOptions: []
-    };
+    return JSON.parse(response.text || '{}');
+  } catch (e) {
+    return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Erreur" };
   }
 };
 
-export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {
+export const parsePoliciesFromText = async (text: string): Promise<SmartExtractionResult> => {
   const ai = getAiClient();
-  const promptParts: any[] = [
-    {
-      text: `Agis en expert courtier. Analyse ces contrats selon ce profil utilisateur détaillé.
-      
-      PROFIL UTILISATEUR :
-      - Profession: ${profile.profession || 'Non renseigné'} (${profile.workStatus})
-      - Enfants: ${profile.childrenCount || 0}
-      - Maison: ${profile.hasPool ? 'Piscine' : ''}, ${profile.hasGarden ? 'Jardin' : ''}
-      - Santé: ${profile.healthNeeds?.join(', ') || 'Standard'}. Note: ${profile.healthSpecifics || 'RAS'}
-      - Sports à risque: ${profile.riskySports?.join(', ') || 'Aucun'}
-      - Voyages: ${profile.travelFrequency}
-      - Projets de vie: ${profile.lifeProjects || 'Aucun projet spécifié'}
-      
-      MISSIONS :
-      1. DOUBLONS : Ex: Assurance voyage payée alors qu'il a une carte Gold/Premier.
-      2. CARENCES : Ex: Pratique du ski/parapente sans garantie spécifique, ou indépendant sans prévoyance. 
-         Vérifie si les options souscrites (ex: Jardin+) sont pertinentes ou s'il en manque (ex: a un jardin mais pas l'option).
-      3. ÉCONOMIES : Estime les gains si on supprime un doublon ou une option inutile.
-
-      Retourne un tableau JSON d'OptimizationFinding.`
-    }
-  ];
-
-  policies.forEach(p => {
-    promptParts.push({ text: `ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail}. Options: ${p.options?.join(', ') || 'Aucune'}. Résumé: ${p.summary}` });
-  });
+  const prompt = `Extrais les contrats d'assurance du texte suivant : "${text}".
+  
+  CONSIGNES :
+  1. NORMALISATION : Corrige impérativement les noms d'assureurs (ex: MAIFFE -> MAIF, AXAXA -> AXA, ALLIANCE -> Allianz, MACIFF -> MACIF).
+  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: { parts: promptParts },
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            policies: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: "Nom commercial du contrat" },
+                  provider: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
+                  type: { type: Type.STRING, enum: Object.values(PolicyType) },
+                  coverageDetail: { type: Type.STRING, description: "Formule détectée" },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Options spécifiques citées" }
+                },
+                required: ["name", "provider", "type"]
+              }
+            }
+          },
+          required: ["policies"]
+        }
+      }
+    });
+    return JSON.parse(response.text || '{"policies": []}');
+  } catch (error) {
+    return { policies: [], clarificationQuestions: null };
+  }
+};
+
+export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
+  const ai = getAiClient();
+  const prompt = `Recherche les Conditions Générales officielles (PDF) pour l'assurance ${type} "${name}" chez l'assureur ${provider}. 
+  Identifie précisément les noms des formules (ex: Tiers, Tous Risques, Initiale, Confort, Intégrale) et les options (ex: Assistance 0km, Prêt de véhicule).`;
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING },
+            sourceUrl: { type: Type.STRING },
+            detectedFormulas: { type: Type.ARRAY, items: { type: Type.STRING } },
+            availableOptions: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["summary", "sourceUrl", "detectedFormulas", "availableOptions"]
+        }
+      },
+    });
+    return JSON.parse(response.text || '{}');
+  } catch (e) {
+    return { summary: "Analyse web indisponible.", detectedFormulas: [], sourceUrl: "", availableOptions: [] };
+  }
+};
+
+export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
+  const ai = getAiClient();
+  let context = "Tu es AssurClair. Contrats actuels :\n";
+  policies.forEach(p => context += `- ${p.type} ${p.name} chez ${p.provider}\n`);
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [...history.map(m => ({ parts: [{ text: m.text }], role: m.role })), { parts: [{ text: message }], role: 'user' }],
+    config: { systemInstruction: context, tools: [{ googleSearch: {} }] }
+  });
+  return response.text || "Désolé.";
+};
+
+export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {
+  const ai = getAiClient();
+  const prompt = `Analyse les contrats suivants en fonction du profil utilisateur détaillé :
+  CONTRATS : ${JSON.stringify(policies)}
+  PROFIL : ${JSON.stringify(profile)}
+
+  RÈGLES D'ANALYSE :
+  1. ADÉQUATION PROFIL : Vérifie si les garanties (Santé, Habitation) correspondent aux âges et aux spécificités du foyer (ex: besoin dentaire/optique pour les enfants, RC piscine).
+  2. DOUBLONS : Détecte si deux contrats couvrent le même risque (ex: Protection Juridique dans Auto ET Habitation).
+  3. MANQUES : Identifie des risques non couverts (ex: maison sans assurance habitation, animal de compagnie sans mutuelle, absence de GAV).
+  4. LOCALISATION : Utilise le code postal pour évaluer si le contrat habitation semble cohérent avec les risques de la zone (si mentionné).`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -146,7 +157,6 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
               type: { type: Type.STRING, enum: ["duplicate", "gap", "saving"] },
               severity: { type: Type.STRING, enum: ["low", "medium", "high"] },
               involvedPolicies: { type: Type.ARRAY, items: { type: Type.STRING } },
-              estimatedSaving: { type: Type.NUMBER },
               recommendation: { type: Type.STRING }
             },
             required: ["title", "description", "type", "severity", "involvedPolicies", "recommendation"]
@@ -154,108 +164,243 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
         }
       }
     });
-    return JSON.parse(response.text) as OptimizationFinding[];
-  } catch (error) {
-    console.error("Error detecting optimizations:", error);
-    return [];
-  }
+    return JSON.parse(response.text || "[]");
+  } catch (error) { return []; }
 };
 
-export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
+export const generateShareableReport = async (policies: Policy[], findings: OptimizationFinding[]): Promise<string> => {
   const ai = getAiClient();
-  const systemInstruction = generateSystemInstruction(policies);
+  const prompt = `Génère un court texte de partage résumant mon bilan AssurClair. Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.`;
   try {
-    const finalParts = [
-      ...history.map(h => ({ text: `${h.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${h.text}` })),
-      { text: message }
-    ];
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: { parts: finalParts },
-      config: { systemInstruction, tools: [{ googleSearch: {} }] }
+      contents: { parts: [{ text: prompt }] },
     });
-    return response.text || "Désolé...";
+    return response.text?.trim() || "J'ai fait mon bilan AssurClair !";
   } catch (error) {
-    return "Une erreur technique est survenue.";
+    return "J'ai fait mon bilan AssurClair !";
   }
 };
 
-/* AUDIO UTILS */
-function createBlob(data: Float32Array): Blob {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) int16[i] = Math.max(-1, Math.min(1, data[i])) * 32768;
-  let binary = '';
-  const bytes = new Uint8Array(int16.buffer);
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return { data: btoa(binary), mimeType: 'audio/pcm;rate=16000' };
-}
-
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-  return bytes;
-}
-
-async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
-  return buffer;
-}
-
-export const connectLiveSession = async (policies: Policy[], onInput: (t: string) => void, onOutput: (t: string) => void, onComplete: () => void) => {
+export const connectIntakeSession = async (
+  onInput: (t: string) => void,
+  onOutput: (t: string) => void,
+  onComplete: () => void,
+  existingPolicyTypes: PolicyType[]
+) => {
   const ai = getAiClient();
-  const systemInstruction = generateSystemInstruction(policies);
-  const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-  const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-  const outputNode = outputCtx.createGain();
-  outputNode.connect(outputCtx.destination);
+  const allRecommended = ["Automobile", "Habitation", "Santé/Mutuelle", "Protection Juridique", "Prévoyance/Décès"];
+  const missing = allRecommended.filter(type => !existingPolicyTypes.includes(type as PolicyType));
+  
+  const systemInstruction = `Tu es l'agent d'admission d'AssurClair. Ton rôle est d'être PRÉCIS.
+  
+  RÈGLES D'INTERACTION :
+  1. Si l'utilisateur mentionne un contrat SANS l'assureur : Demande impérativement "Chez quel assureur ?"
+  2. Si l'assureur est connu mais la FORMULE est absente (ex: Tiers, Tous Risques, Initiale) : Demande "Quelle est votre formule ou niveau de garantie ?"
+  3. Si l'utilisateur mentionne des options, valide-les.
+  4. NORMALISATION : Corrige vocalement les noms (ex: "D'accord pour la MAIF" si l'utilisateur dit MAIFFE).
+  5. Suggère les types manquants : ${missing.join(', ')}.
+  6. Réponse courte (max 10 mots).`;
+  
   let nextStartTime = 0;
+  const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+  const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  
+  // Volume boost
+  const outputNode = outputAudioContext.createGain();
+  outputNode.gain.value = 1.3; // 30% boost
+  outputNode.connect(outputAudioContext.destination);
+  
   const sources = new Set<AudioBufferSourceNode>();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  
   const sessionPromise = ai.live.connect({
-    model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+    model: 'gemini-2.5-flash-native-audio-preview-12-2025',
     callbacks: {
       onopen: () => {
-        const source = inputCtx.createMediaStreamSource(stream);
-        const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = (e) => {
-          sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }));
+        // Ensure audio contexts are resumed
+        inputAudioContext.resume();
+        outputAudioContext.resume();
+
+        const source = inputAudioContext.createMediaStreamSource(stream);
+        const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmBlob = createBlob(inputData);
+          sessionPromise.then(s => {
+            try {
+              s.sendRealtimeInput({ media: pcmBlob });
+            } catch (err) {
+              console.error("Failed to send audio input", err);
+            }
+          });
         };
-        source.connect(processor);
-        processor.connect(inputCtx.destination);
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(inputAudioContext.destination);
       },
-      onmessage: async (m: LiveServerMessage) => {
-        if (m.serverContent?.inputTranscription) onInput(m.serverContent.inputTranscription.text);
-        if (m.serverContent?.outputTranscription) onOutput(m.serverContent.outputTranscription.text);
-        if (m.serverContent?.turnComplete) onComplete();
-        const b64 = m.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-        if (b64) {
-          nextStartTime = Math.max(nextStartTime, outputCtx.currentTime);
-          const buf = await decodeAudioData(decode(b64), outputCtx);
-          const src = outputCtx.createBufferSource();
-          src.buffer = buf;
-          src.connect(outputNode);
-          src.start(nextStartTime);
-          nextStartTime += buf.duration;
-          sources.add(src);
+      onmessage: async (message: LiveServerMessage) => {
+        if (message.serverContent?.outputTranscription) onOutput(message.serverContent.outputTranscription.text);
+        else if (message.serverContent?.inputTranscription) onInput(message.serverContent.inputTranscription.text);
+        if (message.serverContent?.turnComplete) onComplete();
+        
+        const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+        if (base64Audio) {
+          nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
+          try {
+            const audioBuffer = await decodeAudioData(decode(base64Audio), outputAudioContext, 24000, 1);
+            const source = outputAudioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(outputNode);
+            source.onended = () => sources.delete(source);
+            source.start(nextStartTime);
+            nextStartTime += audioBuffer.duration;
+            sources.add(source);
+          } catch (err) {
+            console.error("Audio decoding error", err);
+          }
         }
-      }
+        if (message.serverContent?.interrupted) {
+          for (const source of sources.values()) {
+            try { source.stop(); } catch(e) {}
+          }
+          sources.clear();
+          nextStartTime = 0;
+        }
+      },
+      onerror: (e) => console.error("Live session error:", e),
+      onclose: () => console.log("Live session closed"),
     },
     config: { 
       responseModalities: [Modality.AUDIO], 
-      systemInstruction, 
+      outputAudioTranscription: {}, 
       inputAudioTranscription: {}, 
-      outputAudioTranscription: {} 
-    }
+      systemInstruction: systemInstruction,
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
+    },
   });
-  return () => {
-    sessionPromise.then(s => s.close());
+  
+  function createBlob(data: Float32Array): Blob {
+    const int16 = new Int16Array(data.length);
+    for (let i = 0; i < data.length; i++) int16[i] = data[i] * 32768;
+    return { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+  }
+  
+  return async () => {
+    try {
+      (await sessionPromise).close();
+    } catch(e) {}
     stream.getTracks().forEach(t => t.stop());
-    inputCtx.close();
-    outputCtx.close();
+    inputAudioContext.close();
+    outputAudioContext.close();
   };
 };
+
+export const connectLiveSession = async (
+  policies: Policy[],
+  onInput: (t: string) => void,
+  onOutput: (t: string) => void,
+  onComplete: () => void
+) => {
+  const ai = getAiClient();
+  let context = "Tu es AssurClair. Contrats actuels :\n";
+  policies.forEach(p => context += `- [${p.type}] ${p.name} chez ${p.provider}.\n`);
+  
+  let nextStartTime = 0;
+  const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+  const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  
+  const outputNode = outputAudioContext.createGain();
+  outputNode.gain.value = 1.3; // Boost
+  outputNode.connect(outputAudioContext.destination);
+  
+  const sources = new Set<AudioBufferSourceNode>();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  
+  const sessionPromise = ai.live.connect({
+    model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+    callbacks: {
+      onopen: () => {
+        inputAudioContext.resume();
+        outputAudioContext.resume();
+        const source = inputAudioContext.createMediaStreamSource(stream);
+        const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmBlob = createBlob(inputData);
+          sessionPromise.then(s => {
+            try { s.sendRealtimeInput({ media: pcmBlob }); } catch(e) {}
+          });
+        };
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(inputAudioContext.destination);
+      },
+      onmessage: async (message: LiveServerMessage) => {
+        if (message.serverContent?.outputTranscription) onOutput(message.serverContent.outputTranscription.text);
+        else if (message.serverContent?.inputTranscription) onInput(message.serverContent.inputTranscription.text);
+        if (message.serverContent?.turnComplete) onComplete();
+        const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+        if (base64Audio) {
+          nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
+          try {
+            const audioBuffer = await decodeAudioData(decode(base64Audio), outputAudioContext, 24000, 1);
+            const source = outputAudioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(outputNode);
+            source.onended = () => sources.delete(source);
+            source.start(nextStartTime);
+            nextStartTime += audioBuffer.duration;
+            sources.add(source);
+          } catch(e) {}
+        }
+        if (message.serverContent?.interrupted) {
+          for (const source of sources.values()) { try { source.stop(); } catch(e) {} }
+          sources.clear();
+          nextStartTime = 0;
+        }
+      },
+      onerror: (e) => console.error(e),
+    },
+    config: { 
+      responseModalities: [Modality.AUDIO], 
+      outputAudioTranscription: {}, 
+      inputAudioTranscription: {}, 
+      systemInstruction: context,
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } }
+    },
+  });
+  
+  function createBlob(data: Float32Array): Blob {
+    const int16 = new Int16Array(data.length);
+    for (let i = 0; i < data.length; i++) int16[i] = data[i] * 32768;
+    return { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+  }
+  
+  return async () => {
+    try { (await sessionPromise).close(); } catch(e) {}
+    stream.getTracks().forEach(t => t.stop());
+    inputAudioContext.close();
+    outputAudioContext.close();
+  };
+};
+
+function decode(b64: string) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function encode(bytes: Uint8Array) {
+  let bin = '';
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+  }
+  return buffer;
+}

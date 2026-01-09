@@ -1,0 +1,249 @@
+
+import React, { useState, useEffect } from 'react';
+import { 
+  Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
+  ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
+  Cpu, Sparkles, Wand2, Loader2, ListChecks
+} from 'lucide-react';
+import { CentralCgEntry, PolicyType } from '../types';
+import { storageService } from '../services/storageService';
+import { indexCgDocument } from '../services/geminiService';
+
+export const AdminView: React.FC = () => {
+  const [repo, setRepo] = useState<CentralCgEntry[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [isIndexing, setIsIndexing] = useState(false);
+  
+  const [newEntry, setNewEntry] = useState({
+    provider: '',
+    policyName: '',
+    type: PolicyType.AUTO,
+    pdfUrl: ''
+  });
+
+  const [indexingResult, setIndexingResult] = useState<{
+    indexedFormulas: string[];
+    indexedOptions: string[];
+    semanticSummary: string;
+  } | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    setRepo(storageService.getCentralCgRepo());
+  }, []);
+
+  const handleStartIndexing = async () => {
+    if (!newEntry.provider || !newEntry.pdfUrl) return;
+    setIsIndexing(true);
+    try {
+      const result = await indexCgDocument(newEntry.provider, newEntry.type, newEntry.pdfUrl);
+      setIndexingResult(result as any);
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de l'indexation sémantique.");
+    } finally {
+      setIsIndexing(false);
+    }
+  };
+
+  const handleFinalAdd = () => {
+    if (!indexingResult) return;
+    storageService.saveCgEntry({
+      ...newEntry,
+      indexedFormulas: indexingResult.indexedFormulas,
+      indexedOptions: indexingResult.indexedOptions,
+      semanticSummary: indexingResult.semanticSummary
+    });
+    setRepo(storageService.getCentralCgRepo());
+    setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
+    setIndexingResult(null);
+    setShowAddForm(false);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("Supprimer ce document de la base centrale ?")) {
+      storageService.deleteCgEntry(id);
+      setRepo(storageService.getCentralCgRepo());
+    }
+  };
+
+  const filteredRepo = repo.filter(e => 
+    e.provider.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    e.policyName.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-8 animate-fadeIn pb-20">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter flex items-center gap-3">
+            <Database className="w-8 h-8 text-primary-600" />
+            Gestionnaire de Connaissances
+          </h2>
+          <p className="text-slate-500 font-medium mt-1">Base vectorisée pour l'IA d'AssurClair</p>
+        </div>
+        
+        <button 
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-900/10 transition-all"
+        >
+          {showAddForm ? 'Annuler' : <><Plus className="w-4 h-4" /> Indexer un nouveau document</>}
+        </button>
+      </div>
+
+      {showAddForm && (
+        <div className="bg-white p-8 rounded-[2.5rem] border-2 border-primary-100 shadow-2xl animate-scaleIn space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assureur</label>
+              <input 
+                type="text" required placeholder="AXA, Maif..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.provider} onChange={e => setNewEntry({...newEntry, provider: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nom Contrat</label>
+              <input 
+                type="text" required placeholder="Auto Zen..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.policyName} onChange={e => setNewEntry({...newEntry, policyName: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type</label>
+              <select 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
+                value={newEntry.type} onChange={e => setNewEntry({...newEntry, type: e.target.value as PolicyType})}
+              >
+                {Object.values(PolicyType).map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">URL du PDF Officiel</label>
+              <input 
+                type="url" required placeholder="https://..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.pdfUrl} onChange={e => setNewEntry({...newEntry, pdfUrl: e.target.value})}
+              />
+            </div>
+          </div>
+
+          {!indexingResult ? (
+            <button 
+              onClick={handleStartIndexing}
+              disabled={isIndexing || !newEntry.pdfUrl}
+              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {isIndexing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
+              {isIndexing ? 'Vectorisation en cours...' : 'Lancer l\'indexation sémantique'}
+            </button>
+          ) : (
+            <div className="bg-slate-50 p-8 rounded-[2rem] border border-slate-200 space-y-6 animate-fadeIn">
+              <div className="flex items-center gap-2 text-emerald-600">
+                <CheckCircle className="w-6 h-6" />
+                <h4 className="font-black uppercase text-xs tracking-widest">Analyse IA terminée</h4>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase text-slate-400">Formules Indexées :</p>
+                  <div className="flex flex-wrap gap-2">
+                    {indexingResult.indexedFormulas.map(f => (
+                      <span key={f} className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold">{f}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase text-slate-400">Options Indexées :</p>
+                  <div className="flex flex-wrap gap-2">
+                    {indexingResult.indexedOptions.map(o => (
+                      <span key={o} className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold">{o}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                 <p className="text-[10px] font-black uppercase text-slate-400">Résumé Sémantique :</p>
+                 <p className="text-xs text-slate-600 font-medium leading-relaxed bg-white p-4 rounded-2xl border border-slate-100">{indexingResult.semanticSummary}</p>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => setIndexingResult(null)} className="flex-1 py-4 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-widest">Recommencer</button>
+                <button onClick={handleFinalAdd} className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">Valider et stocker en base</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
+          <div className="relative flex-grow max-w-md">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Rechercher dans la base vectorisée..." 
+              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            {filteredRepo.length} Contrat(s) certifié(s)
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100">
+                <th className="px-8 py-4">Assureur</th>
+                <th className="px-8 py-4">Nom</th>
+                <th className="px-8 py-4">Type</th>
+                <th className="px-8 py-4">Intelligence</th>
+                <th className="px-8 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredRepo.map((entry) => (
+                <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-8 py-5">
+                    <span className="font-black text-slate-900">{entry.provider}</span>
+                  </td>
+                  <td className="px-8 py-5">
+                    <span className="font-bold text-slate-600">{entry.policyName}</span>
+                  </td>
+                  <td className="px-8 py-5">
+                    <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase">
+                      {entry.type}
+                    </span>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-3">
+                       <div className="flex -space-x-1">
+                          <div className={`w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-black ${entry.indexedFormulas?.length ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>F</div>
+                          <div className={`w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-black ${entry.indexedOptions?.length ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>O</div>
+                       </div>
+                       <span className="text-[9px] font-bold text-slate-400 uppercase">{entry.indexedFormulas?.length + entry.indexedOptions?.length} points indexés</span>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5 text-right">
+                    <button 
+                      onClick={() => handleDelete(entry.id)}
+                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};

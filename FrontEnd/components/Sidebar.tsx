@@ -10,7 +10,9 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { AppView, User } from '../types';
 
@@ -40,6 +42,7 @@ export const Sidebar: React.FC<Props> = ({
     { id: 'chat' as AppView, label: 'Assistant IA', icon: MessageSquare },
     { id: 'analysis' as AppView, label: 'Optimisation', icon: Zap },
     { id: 'experts' as AppView, label: 'Experts Humains', icon: Users },
+    { id: 'admin' as AppView, label: 'Administration', icon: Database },
   ];
 
   const sidebarClasses = `
@@ -47,8 +50,6 @@ export const Sidebar: React.FC<Props> = ({
     ${isMobileOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'}
     ${isCollapsed ? 'lg:w-20' : 'lg:w-64'}
   `;
-
-  // NavItem logic is now inlined in the map below to fix the type error with 'key' prop
 
   return (
     <>
@@ -61,11 +62,11 @@ export const Sidebar: React.FC<Props> = ({
 
       <aside className={sidebarClasses}>
         <div className="p-6 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="bg-primary-600 p-2 rounded-lg flex-shrink-0">
+          <div className="flex items-center gap-3 overflow-hidden" onClick={() => setActiveView('policies')}>
+            <div className="bg-primary-600 p-2 rounded-lg flex-shrink-0 cursor-pointer">
               <ShieldCheck className="w-6 h-6 text-white" />
             </div>
-            <span className={`text-xl font-bold text-white whitespace-nowrap transition-opacity ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
+            <span className={`text-xl font-bold text-white whitespace-nowrap transition-opacity cursor-pointer ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
               AssurClair
             </span>
           </div>
@@ -83,7 +84,6 @@ export const Sidebar: React.FC<Props> = ({
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-hide">
-          {/* Inlined NavItem logic here to fix the TypeScript error on 'key' prop */}
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;

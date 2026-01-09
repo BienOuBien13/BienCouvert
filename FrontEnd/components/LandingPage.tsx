@@ -47,14 +47,9 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
 
       <section className="pt-40 pb-24 px-6">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-gradient-to-r from-primary-50 to-white/60 border border-primary-100 text-sm font-bold mb-8 animate-fadeIn">
-            <SparklesIcon className="w-4 h-4 text-primary-600" />
-            <span className="text-slate-600">Propulsé par</span>
-            <span className="ml-2 inline-flex items-center gap-2 px-3 py-1 bg-white border border-primary-100 rounded-full shadow-sm">
-              <span className="font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-emerald-500">Gemini</span>
-              <span className="text-xs text-slate-400">30.0</span>
-              <span className="ml-2 text-xs text-white bg-primary-600 px-2 py-0.5 rounded-full">Pro</span>
-            </span>
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-sm font-bold mb-8 animate-fadeIn">
+            <SparklesIcon className="w-4 h-4" />
+            Propulsé par Gemini 3.0 Pro
           </div>
           <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 max-w-4xl mx-auto leading-[1.1]">
             L'assurance qui s'éclaire enfin par <span className="text-primary-600">l'IA générative</span>.
