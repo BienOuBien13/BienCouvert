@@ -1,11 +1,25 @@
+// =============================================================================
+// SERVICE D'AUTHENTIFICATION
+// Gère l'authentification des utilisateurs en utilisant le localStorage.
+// Fournit les fonctions pour l'inscription, la connexion, la réinitialisation
+// de mot de passe, et la gestion du profil utilisateur.
+// 
+// IMPORTANT : Cette implémentation utilise localStorage et est adaptée pour
+// une démonstration. En production, utiliser un backend sécurisé avec JWT/OAuth.
+// =============================================================================
 
 import { User, UserProfileData } from '../types';
 
-const USERS_KEY = 'assurclair_users';
-const SESSION_KEY = 'assurclair_session';
+// Clés localStorage pour la persistance des données
+const USERS_KEY = 'assurclair_users';      // Liste de tous les utilisateurs inscrits
+const SESSION_KEY = 'assurclair_session';  // Session de l'utilisateur connecté
 
+/**
+ * Interface étendue de User incluant le mot de passe pour le stockage local.
+ * Le mot de passe n'est jamais exposé aux composants, seulement stocké en localStorage.
+ */
 interface StoredUser extends User {
-  password: string;
+  password: string;  // Mot de passe en clair (⚠️ à hasher en production)
 }
 
 export const authService = {

@@ -1,10 +1,30 @@
+// =============================================================================
+// SERVICE DE STOCKAGE LOCAL
+// Gère la persistance des polices d'assurance et du référentiel central des CG
+// en utilisant localStorage. Fournit une interface simple pour les opérations
+// CRUD (Create, Read, Update, Delete).
+// 
+// IMPORTANT : Utilise localStorage pour la démo. En production, remplacer par
+// des appels API vers le backend.
+// =============================================================================
 
 import { Policy, CentralCgEntry, PolicyType } from '../types';
 
-const POLICIES_KEY = 'assurclair_policies';
-const CENTRAL_CG_KEY = 'assurclair_central_cg';
+// Clés localStorage pour la persistance
+const POLICIES_KEY = 'assurclair_policies';          // Polices des utilisateurs
+const CENTRAL_CG_KEY = 'assurclair_central_cg';      // Référentiel central des CG
 
+/**
+ * Service de stockage exposant toutes les opérations sur les polices et le référentiel CG.
+ */
 export const storageService = {
+  /**
+   * Récupère toutes les polices d'un utilisateur.
+   * Filtre les polices par userId dans le tableau global.
+   * 
+   * @param userId - Identifiant de l'utilisateur
+   * @returns Tableau des polices appartenant à cet utilisateur
+   */
   getPolicies: (userId: string): Policy[] => {
     const allPoliciesStr = localStorage.getItem(POLICIES_KEY);
     if (!allPoliciesStr) return [];

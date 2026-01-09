@@ -1,3 +1,9 @@
+// =============================================================================
+// APPLICATION PRINCIPALE - AssurClair
+// Composant racine qui gère l'état global de l'application et la navigation.
+// Ce fichier orchestre l'authentification, la gestion des polices, le chat IA,
+// et toutes les vues principales de l'application.
+// =============================================================================
 
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
@@ -17,15 +23,17 @@ import { storageService } from './services/storageService';
 import { Menu, ShieldCheck } from 'lucide-react';
 
 function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [activeView, setActiveView] = useState<AppView>('policies');
-  const [isLoading, setIsLoading] = useState(true);
-  const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
-  const [showAuth, setShowAuth] = useState(false);
-  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  // --- États principaux de l'application ---
+  const [user, setUser] = useState<User | null>(null);                    // Utilisateur connecté (null si non authentifié)
+  const [policies, setPolicies] = useState<Policy[]>([]);                 // Liste des polices d'assurance de l'utilisateur
+  const [messages, setMessages] = useState<Message[]>([]);                // Historique du chat avec l'IA
+  const [activeView, setActiveView] = useState<AppView>('policies');     // Vue active (policies, chat, analysis, etc.)
+  const [isLoading, setIsLoading] = useState(true);                      // Indicateur de chargement initial
+  const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null); // Police en cours d'édition
+  const [showAuth, setShowAuth] = useState(false);                       // Affichage du formulaire d'authentification
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);       // Affichage de la modale de réinitialisation
   
+  // Profil utilisateur avec valeurs par défaut
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     childrenCount: 0,
     healthNeeds: [],
@@ -34,25 +42,37 @@ function App() {
     hasGarden: false
   });
 
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // États de l'interface utilisateur
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);   // Sidebar réduite/dépliée
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);       // Menu mobile ouvert/fermé
 
+  // --- Effet de montage : restauration de la session utilisateur ---
+  // Vérifie au chargement si un utilisateur est déjà connecté (session en localStorage)
   useEffect(() => {
     const currentUser = authService.getCurrentUser();
     if (currentUser) handleLogin(currentUser);
     setIsLoading(false);
   }, []);
 
+  /**
+   * Gestionnaire de connexion utilisateur.
+   * Initialise l'état de l'application avec les données de l'utilisateur connecté.
+   * @param loggedInUser - Utilisateur authentifié
+   */
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
     const userPolicies = storageService.getPolicies(loggedInUser.id);
     setPolicies(userPolicies);
     if (loggedInUser.profile) setUserProfile(loggedInUser.profile);
-    setMessages([]);
-    setActiveView('policies');
-    setShowAuth(false);
+    setMessages([]);                    // Réinitialise l'historique du chat
+    setActiveView('policies');          // Retour à la vue principale
+    setShowAuth(false);                 // Ferme l'écran d'authentification
   };
 
+  /**
+   * Gestionnaire de déconnexion utilisateur.
+   * Réinitialise complètement l'état de l'application.
+   */
   const handleLogout = () => {
     authService.logout();
     setUser(null);
@@ -61,9 +81,17 @@ function App() {
     setShowAuth(false);
   };
 
+  /**
+   * Réinitialisation complète des données utilisateur.
+   * Supprime toutes les polices et réinitialise le profil.
+   * Action irréversible confirmée par une modale.
+   */
   const handleClearAllData = () => {
     if (user) {
+      // Suppression de toutes les polices de l'utilisateur
       policies.forEach(p => storageService.deletePolicy(p.id));
+      
+      // Réinitialisation du profil utilisateur
       const resetProfile = { childrenCount: 0 };
       authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
       setUserProfile(resetProfile);
@@ -75,11 +103,15 @@ function App() {
     alert("Données réinitialisées avec succès.");
   };
 
+  /**
+   * Ajout d'une nouvelle police d'assurance.
+   * @param policy - Objet police sans userId (ajouté automatiquement)
+   */
   const handleAddPolicy = (policy: Omit<Policy, 'userId'>) => {
     if (!user) return;
     const policyWithUser: Policy = { ...policy, userId: user.id };
     storageService.savePolicy(policyWithUser);
-    setPolicies(prev => [policyWithUser, ...prev]);
+    setPolicies(prev => [policyWithUser, ...prev]);  // Ajout en début de liste
   };
 
   const handleUpdatePolicy = (updatedPolicy: Policy) => {
