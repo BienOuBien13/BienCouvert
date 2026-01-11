@@ -1,43 +1,123 @@
-import { Policy } from '../types';
+// =============================================================================
+// SERVICE DE STOCKAGE (MODE BACKEND)
+// Utilise des appels API vers le backend Express au lieu de localStorage.
+// Gère les polices d'assurance via l'API REST sur VITE_API_URL.
+// =============================================================================
 
-const POLICIES_KEY = 'assurclair_policies';
+import { Policy, CentralCgEntry, PolicyType } from '../types';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const TOKEN_KEY = 'assurclair_token';
+
+/**
+ * Effectue une requête authentifiée vers le backend
+ */
+const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...options.headers,
+  };
+
+  const response = await fetch(`${API_URL}/api${endpoint}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Network error' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
 
 export const storageService = {
-  getPolicies: (userId: string): Policy[] => {
-    const allPoliciesStr = localStorage.getItem(POLICIES_KEY);
-    if (!allPoliciesStr) return [];
-    
-    const allPolicies: Policy[] = JSON.parse(allPoliciesStr);
-    return allPolicies.filter(p => p.userId === userId);
+  /**
+   * Récupère toutes les polices d'un utilisateur
+   */
+  getPolicies: async (userId: string): Promise<Policy[]> => {
+    return apiFetch(`/policies?userId=${userId}`, { method: 'GET' });
   },
 
-  savePolicy: (policy: Policy): void => {
-    const allPoliciesStr = localStorage.getItem(POLICIES_KEY);
-    const allPolicies: Policy[] = allPoliciesStr ? JSON.parse(allPoliciesStr) : [];
-    
-    allPolicies.unshift(policy);
-    localStorage.setItem(POLICIES_KEY, JSON.stringify(allPolicies));
+  /**
+   * Sauvegarde une nouvelle police
+   */
+  savePolicy: async (policy: Policy): Promise<void> => {
+    await apiFetch('/policies', {
+      method: 'POST',
+      body: JSON.stringify(policy),
+    });
   },
 
-  updatePolicy: (updatedPolicy: Policy): void => {
-    const allPoliciesStr = localStorage.getItem(POLICIES_KEY);
-    if (!allPoliciesStr) return;
-
-    const allPolicies: Policy[] = JSON.parse(allPoliciesStr);
-    const index = allPolicies.findIndex(p => p.id === updatedPolicy.id);
-    
-    if (index !== -1) {
-      allPolicies[index] = updatedPolicy;
-      localStorage.setItem(POLICIES_KEY, JSON.stringify(allPolicies));
-    }
+  /**
+   * Met à jour une police existante
+   */
+  updatePolicy: async (updatedPolicy: Policy): Promise<void> => {
+    await apiFetch(`/policies/${updatedPolicy.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updatedPolicy),
+    });
   },
 
-  deletePolicy: (policyId: string): void => {
-    const allPoliciesStr = localStorage.getItem(POLICIES_KEY);
-    if (!allPoliciesStr) return;
+  /**
+   * Supprime une police
+   */
+  deletePolicy: async (policyId: string): Promise<void> => {
+    await apiFetch(`/policies/${policyId}`, {
+      method: 'DELETE',
+    });
+  },
 
-    const allPolicies: Policy[] = JSON.parse(allPoliciesStr);
-    const newPolicies = allPolicies.filter(p => p.id !== policyId);
-    localStorage.setItem(POLICIES_KEY, JSON.stringify(newPolicies));
-  }
+  // --- Central CG Repository Functions ---
+
+  /**
+   * Récupère le référentiel central des CG
+   */
+  getCentralCgRepo: async (): Promise<CentralCgEntry[]> => {
+    return apiFetch('/policies/central-cg', { method: 'GET' });
+  },
+
+  /**
+   * Sauvegarde une entrée CG dans le référentiel
+   */
+  saveCgEntry: async (entry: Omit<CentralCgEntry, 'id' | 'lastVerified'>): Promise<void> => {
+    await apiFetch('/policies/central-cg', {
+      method: 'POST',
+      body: JSON.stringify(entry),
+    });
+  },
+
+  /**
+   * Supprime une entrée CG du référentiel
+   */
+  deleteCgEntry: async (id: string): Promise<void> => {
+    await apiFetch(`/policies/central-cg/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  /**
+   * Recherche une CG dans le référentiel
+   */
+  findCgInRepo: async (
+    provider: string,
+    name: string,
+    type: PolicyType
+  ): Promise<CentralCgEntry | null> => {
+    const repo = await storageService.getCentralCgRepo();
+    const p = provider.toLowerCase().trim();
+    const n = name.toLowerCase().trim();
+
+    return (
+      repo.find(
+        (entry) =>
+          entry.provider.toLowerCase().includes(p) &&
+          (entry.policyName.toLowerCase().includes(n) ||
+            n.includes(entry.policyName.toLowerCase())) &&
+          entry.type === type
+      ) || null
+    );
+  },
 };

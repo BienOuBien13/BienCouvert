@@ -11,37 +11,66 @@ export enum PolicyType {
   OTHER = 'Autre'
 }
 
-export type AppView = 'policies' | 'chat' | 'analysis' | 'experts' | 'profile';
+export type AppView = 'policies' | 'chat' | 'analysis' | 'experts' | 'profile' | 'admin';
 
 export interface User {
   id: string;
   email: string;
   name: string;
   profile?: UserProfileData;
+  isAdmin?: boolean;
+}
+
+export interface CentralCgEntry {
+  id: string;
+  provider: string;
+  policyName: string;
+  type: PolicyType;
+  pdfUrl: string;
+  lastVerified: number;
+  indexedFormulas: string[];
+  indexedOptions: string[];
+  semanticSummary: string;
 }
 
 export interface UserProfileData {
-  // Logement & Famille
+  // Foyer
+  adultsCount?: number;
+  childrenCount?: number;
+  householdMembersAges?: number[];
+  hasPets?: boolean;
+  petDetails?: string;
+  
+  // Habitat
+  postalCode?: string;
+  housingStatus?: 'owner' | 'tenant' | 'landlord';
+  housingType?: 'apartment' | 'house';
+  residenceType?: 'principal' | 'secondary';
+  housingSurface?: number;
+  constructionYear?: number;
   hasPool?: boolean;
   hasGarden?: boolean;
-  childrenCount?: number;
   
-  // Travail & Statut
-  profession?: string;
+  // Patrimoine & Finances
+  reconstructionValue?: number;
+  highTechValue?: number;
+  jewelryValue?: number;
+  vehiclesCount?: number;
+  monthlyIncome?: number;
+  
+  // Travail & Loisirs
   workStatus?: 'salarié' | 'indépendant' | 'fonctionnaire' | 'sans-emploi' | 'retraité';
-  isTeleworking?: boolean;
-
-  // Santé & Risques
+  profession?: string;
+  teleworkDays?: number;
+  riskySports?: string[];
+  
+  // Santé
   healthNeeds?: string[];
-  healthSpecifics?: string; // Champ libre antécédents/risques
+  healthSpecifics?: string;
   
-  // Loisirs & Lifestyle
-  expensiveEquipment?: string[];
-  riskySports?: string[]; // Parapente, plongée, ski, etc.
-  travelFrequency?: 'rare' | 'occasionnel' | 'fréquent';
-  
-  // Projets & Expression libre
-  lifeProjects?: string; // Champ libre : "Je vais acheter une maison", "Je pars au Japon"
+  // Historique
+  claimsLast5Years?: number;
+  riskTolerance?: number;
 }
 
 export interface Policy {
@@ -50,14 +79,16 @@ export interface Policy {
   name: string;
   provider: string;
   type: PolicyType;
-  coverageDetail?: string; // Formula name
-  options?: string[]; // Specific add-ons like "Jardin+", "Vol 24h/24"
+  coverageDetail?: string;
+  options?: string[];
   fileData: string | null;
   fileName: string | null;
   sourceUrl?: string;
   mimeType: string;
   summary?: string;
   addedAt: number;
+  annualPremium?: number;
+  isInternalSource?: boolean;
 }
 
 export interface WebSearchResult {
@@ -83,12 +114,9 @@ export interface OptimizationFinding {
   involvedPolicies: string[];
   estimatedSaving?: number;
   recommendation: string;
-}
-
-export interface ExpertRequest {
-  id: string;
-  policyIds: string[];
-  message: string;
-  status: 'pending' | 'contacted';
-  createdAt: number;
+  comparisonDetails?: {
+    policyA: string;
+    policyB: string;
+    overlap: string;
+  };
 }

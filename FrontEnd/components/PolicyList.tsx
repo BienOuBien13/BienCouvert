@@ -1,32 +1,26 @@
 
 import React, { useState } from 'react';
 import { 
-  FileText, Trash2, Pencil, Globe, ExternalLink, 
-  ChevronDown, ChevronUp, Car, Home, Heart, Scale, 
-  Briefcase, Shield, AlertCircle, CreditCard, Banknote, Smartphone, Tag
+  Trash2, Pencil, Shield, ChevronDown, Car, Home, Heart, Scale, 
+  Briefcase, CreditCard, Banknote, Smartphone, Share2, 
+  ChevronRight, Filter, SortAsc, SortDesc, Calendar, Euro, Building2, Info, CheckCircle, Zap, ExternalLink, Globe, Search, Loader2, AlertCircle, FileWarning, Link2, X, Check, FileText, Download
 } from 'lucide-react';
-import { Policy, PolicyType } from '../types';
+import { Policy, PolicyType, User } from '../types';
+import { searchPolicyInfo } from '../services/geminiService';
+import { generatePortfolioPDF } from '../services/pdfService';
 
 interface Props {
   policies: Policy[];
   onDelete: (id: string) => void;
   onEdit: (policy: Policy) => void;
+  onUpdatePolicy?: (policy: Policy) => void;
+  user: User;
 }
 
-export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit }) => {
+export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpdatePolicy, user }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  if (policies.length === 0) {
-    return (
-      <div className="text-center py-12 bg-white rounded-3xl border-2 border-slate-100 border-dashed">
-        <Shield className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-        <h3 className="text-lg font-bold text-slate-900">Aucun contrat</h3>
-        <p className="text-slate-500 max-w-sm mx-auto mt-1 text-sm">Ajoutez vos contrats auto, habitation ou cartes bancaires pour commencer.</p>
-      </div>
-    );
-  }
-
-  const toggleExpand = (id: string) => setExpandedId(expandedId === id ? null : id);
+  const [isSearchingLink, setIsSearchingLink] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const getPolicyStyle = (type: PolicyType) => {
     switch (type) {
@@ -42,65 +36,151 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit }) => {
     }
   };
 
+  const handleRepairLink = async (policy: Policy) => {
+    setIsSearchingLink(policy.id);
+    try {
+      const result = await searchPolicyInfo(policy.provider, policy.type, policy.name);
+      if (result.sourceUrl && onUpdatePolicy) {
+        onUpdatePolicy({ ...policy, sourceUrl: result.sourceUrl, summary: result.summary });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSearchingLink(null);
+    }
+  };
+
+  const handleExportPortfolio = async () => {
+    if (policies.length === 0 || isExporting) return;
+    setIsExporting(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      generatePortfolioPDF(user, policies);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4">
-      {policies.map((policy) => {
-        const isExpanded = expandedId === policy.id;
-        const style = getPolicyStyle(policy.type);
-        const Icon = style.icon;
+    <div className="space-y-6 pb-12">
+      <div className="px-4 flex items-center justify-between">
+         <h3 className="font-black text-slate-900 uppercase tracking-tighter">Mon Portefeuille ({policies.length})</h3>
+         
+         {policies.length > 0 && (
+           <button 
+             onClick={handleExportPortfolio}
+             disabled={isExporting}
+             className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 rounded-2xl text-[10px] font-black text-slate-700 uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+           >
+             {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-primary-600" /> : <Download className="w-4 h-4 text-primary-600" />}
+             {isExporting ? 'Génération...' : 'Exporter PDF'}
+           </button>
+         )}
+      </div>
 
-        return (
-          <div key={policy.id} className={`bg-white rounded-2xl border transition-all ${isExpanded ? 'border-primary-400 shadow-lg' : 'border-slate-200 hover:border-primary-200'}`}>
-            <div onClick={() => toggleExpand(policy.id)} className="p-4 flex items-center gap-4 cursor-pointer">
-              <div className={`p-3 rounded-xl ${style.bg} ${style.color}`}><Icon className="w-5 h-5" /></div>
-              <div className="flex-grow min-w-0">
-                <h3 className="font-bold text-slate-900 truncate">{policy.name}</h3>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-slate-500 truncate">{policy.provider}</p>
-                  {policy.options && policy.options.length > 0 && (
-                    <span className="flex items-center gap-1 text-[10px] text-primary-600 font-bold bg-primary-50 px-1.5 py-0.5 rounded">
-                      <Tag className="w-2.5 h-2.5" /> {policy.options.length}
-                    </span>
-                  )}
+      <div className="space-y-4">
+        {policies.map((policy) => {
+          const isExpanded = expandedId === policy.id;
+          const style = getPolicyStyle(policy.type);
+          const Icon = style.icon;
+
+          return (
+            <div key={policy.id} className={`bg-white rounded-[2.5rem] border transition-all duration-300 ${isExpanded ? 'border-primary-400 shadow-2xl ring-4 ring-primary-50' : 'border-slate-100 hover:border-slate-300'}`}>
+              
+              <div onClick={() => setExpandedId(isExpanded ? null : policy.id)} className="p-6 flex items-center gap-6 cursor-pointer group">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${isExpanded ? 'bg-primary-600 text-white' : style.bg + ' ' + style.color}`}>
+                  <Icon className="w-7 h-7" />
                 </div>
+                <div className="flex-grow min-w-0">
+                  <h4 className="font-black text-slate-900 truncate">{policy.name}</h4>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{policy.provider}</p>
+                    {policy.coverageDetail && (
+                      <span className="text-[8px] font-black text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full uppercase">
+                        {policy.coverageDetail}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {policy.sourceUrl && <div className="hidden sm:block"><CheckCircle className="w-5 h-5 text-emerald-500" /></div>}
+                <ChevronDown className={`w-5 h-5 text-slate-300 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
               </div>
-              <div className="flex items-center gap-2">
-                 <span className={`hidden sm:inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${style.bg} ${style.color} border-current opacity-70`}>{policy.type}</span>
-                 {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-              </div>
-            </div>
 
-            {isExpanded && (
-              <div className="px-4 pb-5 animate-fadeIn">
-                <div className="pt-4 border-t border-slate-100 space-y-4">
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <div className="flex-grow space-y-3">
-                      <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 leading-relaxed border border-slate-100 italic">
-                        {policy.summary || "Analyse IA non disponible."}
-                      </div>
-                      
-                      {policy.options && policy.options.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
+              {isExpanded && (
+                <div className="px-8 pb-8 animate-fadeIn">
+                  <div className="pt-6 border-t border-slate-100 space-y-6">
+                    <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <Globe className="w-3 h-3" /> Document de référence
+                      </label>
+
+                      {policy.sourceUrl ? (
+                        <div className="space-y-3">
+                          <a 
+                            href={policy.sourceUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-5 h-5" />
+                              <span className="text-xs font-black uppercase tracking-widest">Conditions Générales (.PDF)</span>
+                            </div>
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => handleRepairLink(policy)}
+                          disabled={isSearchingLink === policy.id}
+                          className="w-full p-6 bg-white border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs font-bold hover:border-primary-400 hover:text-primary-600 transition-all flex flex-col items-center gap-2"
+                        >
+                          {isSearchingLink === policy.id ? <Loader2 className="w-6 h-6 animate-spin" /> : <Search className="w-6 h-6" />}
+                          Rechercher les conditions chez {policy.provider}
+                        </button>
+                      )}
+                    </div>
+
+                    {policy.options && policy.options.length > 0 && (
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Garanties optionnelles</label>
+                         <div className="flex flex-wrap gap-2">
                            {policy.options.map(opt => (
-                             <span key={opt} className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-slate-600 uppercase tracking-tight">
+                             <span key={opt} className="px-3 py-1 bg-white text-slate-600 text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-200">
                                {opt}
                              </span>
                            ))}
-                        </div>
-                      )}
+                         </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Info className="w-3 h-3 text-primary-500" /> Note de synthèse IA</label>
+                       <div className="bg-white p-6 rounded-3xl border border-slate-100 text-sm text-slate-700 leading-relaxed shadow-sm">
+                          {policy.summary || (isSearchingLink === policy.id ? "Analyse en cours..." : "Pas de résumé disponible pour ce contrat.")}
+                       </div>
                     </div>
-                    
-                    <div className="sm:w-40 flex flex-col gap-2">
-                      <button onClick={() => onEdit(policy)} className="w-full flex items-center justify-center gap-2 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50">Modifier</button>
-                      <button onClick={() => onDelete(policy.id)} className="w-full flex items-center justify-center gap-2 py-2 bg-white border border-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-50">Supprimer</button>
+
+                    <div className="flex gap-2 pt-4">
+                       <button onClick={() => onEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>
+                       <button onClick={() => onDelete(policy.id)} className="flex-1 py-4 bg-white border border-red-100 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all">Supprimer</button>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          );
+        })}
+
+        {policies.length === 0 && (
+          <div className="py-20 text-center space-y-4 opacity-40">
+             <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
+                <Shield className="w-10 h-10 text-slate-300" />
+             </div>
+             <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Votre portefeuille est vide</p>
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 };

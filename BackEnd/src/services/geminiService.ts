@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { WebSearchResult, DuplicateFinding, Policy, Message } from '../types';
+import { WebSearchResult, DuplicateFinding, Policy, Message, SmartExtractionResult, PolicyType } from '../types';
 
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
@@ -60,7 +60,7 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   try {
     // On envoie d'abord le fichier (inlineData) puis l'instruction de résumé.
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest',
       contents: {
         parts: [
           {
@@ -98,7 +98,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest',
       contents: { parts: [{ text: prompt }] },
       config: {
         tools: [{ googleSearch: {} }],
@@ -144,7 +144,7 @@ export const detectDuplicates = async (policies: Policy[]): Promise<DuplicateFin
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest',
       contents: { parts },
       config: {
         responseMimeType: 'application/json'
@@ -170,7 +170,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     ];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest',
       contents: { parts: finalParts },
       config: {
         systemInstruction,
@@ -182,5 +182,55 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
   } catch (err) {
     console.error('gemini chat error', err);
     return 'Une erreur technique est survenue.';
+  }
+};
+
+/**
+ * Extrait les contrats d'assurance à partir d'un texte libre.
+ * Normalise les noms d'assureurs et identifie les types, formules et options.
+ */
+export const parsePoliciesFromText = async (text: string): Promise<SmartExtractionResult> => {
+  const ai = getAiClient();
+  if (!ai) return { policies: [], clarificationQuestions: null };
+
+  const prompt = `Extrais les contrats d'assurance du texte suivant : "${text}".
+  
+  CONSIGNES :
+  1. NORMALISATION : Corrige impérativement les noms d'assureurs (ex: MAIFFE -> MAIF, AXAXA -> AXA, ALLIANCE -> Allianz, MACIFF -> MACIF).
+  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.`;
+
+  try {
+    const Type = ai.types || {};
+    const response = await ai.models.generateContent({
+      model: 'gemini-1.5-flash-latest',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            policies: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: "Nom commercial du contrat" },
+                  provider: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
+                  type: { type: Type.STRING, enum: Object.values(PolicyType) },
+                  coverageDetail: { type: Type.STRING, description: "Formule détectée" },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Options spécifiques citées" }
+                },
+                required: ["name", "provider", "type"]
+              }
+            }
+          },
+          required: ["policies"]
+        }
+      }
+    });
+    return JSON.parse(response.text || '{"policies": []}');
+  } catch (error) {
+    console.error('parsePoliciesFromText error', error);
+    return { policies: [], clarificationQuestions: null };
   }
 };
