@@ -6,5 +6,13 @@
     "password": "$2a$10$7twLLhBruwLtU21rUt0HveVX5oayD3uLOQNELyOpQIbqiAQO46sQ.",
     "profile": {},
     "isAdmin": false
+  },
+  {
+    "id": "753f0fcb-c72c-48cd-844b-eeabb9724273",
+    "email": "test@example.com",
+    "name": "Test",
+    "password": "$2a$10$P6FFJrgsEZil2IKvfdmeke46hrlqr96ikNztqmNNUU6V6S3urXMOy",
+    "profile": {},
+    "isAdmin": false
   }
 ]
