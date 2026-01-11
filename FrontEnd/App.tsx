@@ -49,9 +49,12 @@ function App() {
   // --- Effet de montage : restauration de la session utilisateur ---
   // Vérifie au chargement si un utilisateur est déjà connecté (session en localStorage)
   useEffect(() => {
-    const currentUser = authService.getCurrentUser();
-    if (currentUser) handleLogin(currentUser);
-    setIsLoading(false);
+    const initUser = async () => {
+      const currentUser = await authService.getCurrentUser();
+      if (currentUser) await handleLogin(currentUser);
+      setIsLoading(false);
+    };
+    initUser();
   }, []);
 
   /**
@@ -59,9 +62,9 @@ function App() {
    * Initialise l'état de l'application avec les données de l'utilisateur connecté.
    * @param loggedInUser - Utilisateur authentifié
    */
-  const handleLogin = (loggedInUser: User) => {
+  const handleLogin = async (loggedInUser: User) => {
     setUser(loggedInUser);
-    const userPolicies = storageService.getPolicies(loggedInUser.id);
+    const userPolicies = await storageService.getPolicies(loggedInUser.id);
     setPolicies(userPolicies);
     if (loggedInUser.profile) setUserProfile(loggedInUser.profile);
     setMessages([]);                    // Réinitialise l'historique du chat
@@ -86,14 +89,14 @@ function App() {
    * Supprime toutes les polices et réinitialise le profil.
    * Action irréversible confirmée par une modale.
    */
-  const handleClearAllData = () => {
+  const handleClearAllData = async () => {
     if (user) {
       // Suppression de toutes les polices de l'utilisateur
-      policies.forEach(p => storageService.deletePolicy(p.id));
+      await Promise.all(policies.map(p => storageService.deletePolicy(p.id)));
       
       // Réinitialisation du profil utilisateur
       const resetProfile = { childrenCount: 0 };
-      authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
+      await authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
       setUserProfile(resetProfile);
       setPolicies([]);
       setMessages([]);
@@ -107,22 +110,22 @@ function App() {
    * Ajout d'une nouvelle police d'assurance.
    * @param policy - Objet police sans userId (ajouté automatiquement)
    */
-  const handleAddPolicy = (policy: Omit<Policy, 'userId'>) => {
+  const handleAddPolicy = async (policy: Omit<Policy, 'userId'>) => {
     if (!user) return;
     const policyWithUser: Policy = { ...policy, userId: user.id };
-    storageService.savePolicy(policyWithUser);
+    await storageService.savePolicy(policyWithUser);
     setPolicies(prev => [policyWithUser, ...prev]);  // Ajout en début de liste
   };
 
-  const handleUpdatePolicy = (updatedPolicy: Policy) => {
-    storageService.updatePolicy(updatedPolicy);
+  const handleUpdatePolicy = async (updatedPolicy: Policy) => {
+    await storageService.updatePolicy(updatedPolicy);
     setPolicies(prev => prev.map(p => p.id === updatedPolicy.id ? updatedPolicy : p));
     setEditingPolicy(null);
   };
 
-  const handleDeletePolicy = (id: string) => {
+  const handleDeletePolicy = async (id: string) => {
     if (window.confirm("Supprimer ce contrat ?")) {
-      storageService.deletePolicy(id);
+      await storageService.deletePolicy(id);
       setPolicies(prev => prev.filter(p => p.id !== id));
       if (editingPolicy?.id === id) setEditingPolicy(null);
     }
@@ -134,12 +137,12 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleUpdateProfile = (newProfile: UserProfileData) => {
+  const handleUpdateProfile = async (newProfile: UserProfileData) => {
     setUserProfile(newProfile);
     if (user) {
       const updatedUser = { ...user, profile: newProfile };
       setUser(updatedUser);
-      authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile });
+      await authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile });
     }
   };
 

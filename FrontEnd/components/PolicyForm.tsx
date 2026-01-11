@@ -155,7 +155,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       // Lancement automatique de l'analyse profonde pour chaque nouveau contrat
       for (const p of policies) {
         try {
-          const internal = storageService.findCgInRepo(p.provider!, p.name!, p.type as PolicyType);
+          const internal = await storageService.findCgInRepo(p.provider!, p.name!, p.type as PolicyType);
           let updates;
           if (internal) {
             updates = {
@@ -269,7 +269,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     const timer = setTimeout(async () => {
       if (provider.trim().length >= 2 && name.trim().length >= 2 && mode === 'web' && !initialData) {
         setIsSearchingManualPDF(true);
-        const internal = storageService.findCgInRepo(provider, name, type);
+        const internal = await storageService.findCgInRepo(provider, name, type);
         if (internal) {
           setSourceUrl(internal.pdfUrl);
           setIsInternalManual(true);

@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const geminiService_1 = require("../services/geminiService");
 const router = (0, express_1.Router)();
-// Endpoint chat utilisé par le frontend : envoie un message, le contexte des
-// polices et l'historique. Réponse : `{ reply: string }`.
+// Endpoint chat utilisÃ© par le frontend : envoie un message, le contexte des
+// polices et l'historique. RÃ©ponse : `{ reply: string }`.
 router.post('/chat', async (req, res) => {
     const { message, policies, history } = req.body;
     if (!message)
@@ -16,6 +16,48 @@ router.post('/chat', async (req, res) => {
     catch (e) {
         console.error(e);
         res.status(500).json({ message: 'Chat error' });
+    }
+});
+// Endpoint recherche d'infos sur une police via Gemini + Google Search
+router.post('/search-policy', async (req, res) => {
+    const { provider, type, name } = req.body;
+    if (!provider || !type || !name)
+        return res.status(400).json({ message: 'Missing parameters' });
+    try {
+        const result = await (0, geminiService_1.searchPolicyInfo)(provider, type, name);
+        res.json(result);
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Search error' });
+    }
+});
+// Endpoint dÃ©tection de doublons entre polices
+router.post('/detect-duplicates', async (req, res) => {
+    const { policies } = req.body;
+    if (!policies || !Array.isArray(policies))
+        return res.status(400).json({ message: 'Invalid policies' });
+    try {
+        const duplicates = await (0, geminiService_1.detectDuplicates)(policies);
+        res.json({ duplicates });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Duplicate detection error' });
+    }
+});
+// Endpoint extraction de contrats depuis texte libre
+router.post('/parse-text', async (req, res) => {
+    const { text } = req.body;
+    if (!text)
+        return res.status(400).json({ message: 'Missing text' });
+    try {
+        const result = await (0, geminiService_1.parsePoliciesFromText)(text);
+        res.json(result);
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Parse error' });
     }
 });
 exports.default = router;

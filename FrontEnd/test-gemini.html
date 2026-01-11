@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Gemini Chat</title>
+</head>
+<body>
+    <h1>Test Gemini API</h1>
+    <div id="result"></div>
+    <button onclick="testChat()">Tester le chat</button>
+    
+    <script type="module">
+        import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.22.0';
+        
+        window.testChat = async function() {
+            const apiKey = 'AIzaSyCPV3dky8oIny2ZYClo6lOi4V-BIlYvaqY';
+            const resultDiv = document.getElementById('result');
+            
+            try {
+                resultDiv.innerHTML = 'Test en cours...';
+                const ai = new GoogleGenAI({ apiKey });
+                
+                const response = await ai.models.generateContent({
+                    model: 'gemini-1.5-pro',
+                    contents: [{ parts: [{ text: 'Bonjour, réponds simplement "OK" si tu fonctionnes.' }], role: 'user' }],
+                });
+                
+                resultDiv.innerHTML = '<pre>' + JSON.stringify(response, null, 2) + '</pre>';
+                console.log('Response:', response);
+            } catch (error) {
+                resultDiv.innerHTML = '<pre style="color: red;">' + error.message + '\n' + error.stack + '</pre>';
+                console.error('Error:', error);
+            }
+        };
+    </script>
+</body>
+</html>

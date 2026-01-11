@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendMessageToAssistant = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
+exports.parsePoliciesFromText = exports.sendMessageToAssistant = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
+const types_1 = require("../types");
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
 // Ce service encapsule l'accès à l'API Gemini (librairie `@google/genai`). Si la
@@ -63,7 +64,7 @@ const summarizePolicy = async (fileBase64, mimeType) => {
     try {
         // On envoie d'abord le fichier (inlineData) puis l'instruction de résumé.
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-1.5-flash-latest',
             contents: {
                 parts: [
                     {
@@ -99,7 +100,7 @@ const searchPolicyInfo = async (provider, type, name) => {
     const prompt = `Recherche les conditions générales et les garanties types pour ce produit d'assurance :\n  Assureur: ${provider}\n  Catégorie: ${type}\n  Nom commercial approximatif: ${name}\n\n  Instructions :\n  1. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur.\n  2. Liste les noms exacts des formules commerciales (ex: \"Essentiel\", \"Confort\", \"Sérénité\", \"Tiers Plus\", \"Tous Risques\").\n  3. Fournis un résumé structuré des plafonds et franchises types si disponibles.\n\n  Réponds EXCLUSIVEMENT sous forme d'un objet JSON.\n  {\n    "summary": "Texte détaillé des garanties en français",\n    "formulas": ["Nom Formule A", "Nom Formule B"]\n  }`;
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-1.5-flash-latest',
             contents: { parts: [{ text: prompt }] },
             config: {
                 tools: [{ googleSearch: {} }],
@@ -144,7 +145,7 @@ const detectDuplicates = async (policies) => {
     });
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-1.5-flash-latest',
             contents: { parts },
             config: {
                 responseMimeType: 'application/json'
@@ -169,7 +170,7 @@ const sendMessageToAssistant = async (message, policies, history) => {
             { text: message }
         ];
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-1.5-flash-latest',
             contents: { parts: finalParts },
             config: {
                 systemInstruction,
@@ -184,3 +185,53 @@ const sendMessageToAssistant = async (message, policies, history) => {
     }
 };
 exports.sendMessageToAssistant = sendMessageToAssistant;
+/**
+ * Extrait les contrats d'assurance à partir d'un texte libre.
+ * Normalise les noms d'assureurs et identifie les types, formules et options.
+ */
+const parsePoliciesFromText = async (text) => {
+    const ai = getAiClient();
+    if (!ai)
+        return { policies: [], clarificationQuestions: null };
+    const prompt = `Extrais les contrats d'assurance du texte suivant : "${text}".
+  
+  CONSIGNES :
+  1. NORMALISATION : Corrige impérativement les noms d'assureurs (ex: MAIFFE -> MAIF, AXAXA -> AXA, ALLIANCE -> Allianz, MACIFF -> MACIF).
+  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.`;
+    try {
+        const Type = ai.types || {};
+        const response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash-latest',
+            contents: { parts: [{ text: prompt }] },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        policies: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING, description: "Nom commercial du contrat" },
+                                    provider: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
+                                    type: { type: Type.STRING, enum: Object.values(types_1.PolicyType) },
+                                    coverageDetail: { type: Type.STRING, description: "Formule détectée" },
+                                    options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Options spécifiques citées" }
+                                },
+                                required: ["name", "provider", "type"]
+                            }
+                        }
+                    },
+                    required: ["policies"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{"policies": []}');
+    }
+    catch (error) {
+        console.error('parsePoliciesFromText error', error);
+        return { policies: [], clarificationQuestions: null };
+    }
+};
+exports.parsePoliciesFromText = parsePoliciesFromText;
