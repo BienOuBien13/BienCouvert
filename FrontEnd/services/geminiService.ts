@@ -18,7 +18,7 @@ export interface SmartExtractionResult {
     suggestedOptions?: string[];
     summary?: string;
   }>>;
-  clarificationQuestions: string | null;
+  clarificationQuestions: string[] | null;
 }
 
 // Fonction stub - à implémenter via backend si nécessaire

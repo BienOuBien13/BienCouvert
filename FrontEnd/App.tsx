@@ -37,7 +37,6 @@ function App() {
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     childrenCount: 0,
     healthNeeds: [],
-    expensiveEquipment: [],
     hasPool: false,
     hasGarden: false
   });

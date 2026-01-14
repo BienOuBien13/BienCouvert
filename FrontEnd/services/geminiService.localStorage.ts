@@ -18,7 +18,7 @@ export interface SmartExtractionResult {
     suggestedOptions?: string[];
     summary?: string;
   }>>;
-  clarificationQuestions: string | null;
+  clarificationQuestions: string[] | null;
 }
 
 export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<Partial<CentralCgEntry>> => {

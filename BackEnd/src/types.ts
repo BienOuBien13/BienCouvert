@@ -141,8 +141,7 @@ export interface Policy {
 export interface WebSearchResult {
   summary: string;
   sourceUrl?: string;
-  detectedFormulas: string[];
-}
+  detectedFormulas: string[];  availableOptions?: string[];}
 
 /** Message Ã©changÃ© avec l'assistant (chat). */
 export interface Message {
@@ -160,7 +159,21 @@ export interface DuplicateFinding {
   severity: 'low' | 'medium' | 'high';
   involvedPolicies: string[];
 }
-
+/** Structure étendue pour les analyses d'optimisation (inclut doublons, gaps, économies) */
+export interface OptimizationFinding {
+  title: string;
+  description: string;
+  type: 'duplicate' | 'gap' | 'saving';
+  severity: 'low' | 'medium' | 'high';
+  involvedPolicies: string[];
+  estimatedSaving?: number;
+  recommendation: string;
+  comparisonDetails?: {
+    policyA: string;
+    policyB: string;
+    overlap: string;
+  };
+}
 /** RequÃªte envoyÃ©e Ã  un expert humain depuis l'application. */
 export interface ExpertRequest {
   id: string;
