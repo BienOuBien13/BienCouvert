@@ -95,7 +95,7 @@ exports.summarizePolicy = summarizePolicy;
 const searchPolicyInfo = async (provider, type, name) => {
     const ai = getAiClient();
     if (!ai) {
-        return { summary: `Recherche simulée pour ${provider} - ${type} - ${name}`, sourceUrl: undefined, detectedFormulas: [] };
+        return { summary: `Recherche simulée pour ${provider} - ${type} - ${name}`, sourceUrl: undefined, detectedFormulas: [], availableOptions: [] };
     }
     const prompt = `Recherche les conditions générales et les garanties types pour ce produit d'assurance :\n  Assureur: ${provider}\n  Catégorie: ${type}\n  Nom commercial approximatif: ${name}\n\n  Instructions :\n  1. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur.\n  2. Liste les noms exacts des formules commerciales (ex: \"Essentiel\", \"Confort\", \"Sérénité\", \"Tiers Plus\", \"Tous Risques\").\n  3. Fournis un résumé structuré des plafonds et franchises types si disponibles.\n\n  Réponds EXCLUSIVEMENT sous forme d'un objet JSON.\n  {\n    "summary": "Texte détaillé des garanties en français",\n    "formulas": ["Nom Formule A", "Nom Formule B"]\n  }`;
     try {
@@ -116,6 +116,7 @@ const searchPolicyInfo = async (provider, type, name) => {
         }
         const summary = jsonResponse.summary || 'Aucun résumé structuré disponible.';
         const detectedFormulas = Array.isArray(jsonResponse.formulas) ? jsonResponse.formulas : [];
+        const availableOptions = Array.isArray(jsonResponse.options) ? jsonResponse.options : [];
         let sourceUrl = undefined;
         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (chunks && chunks.length > 0) {
@@ -123,11 +124,11 @@ const searchPolicyInfo = async (provider, type, name) => {
             if (webChunk)
                 sourceUrl = webChunk.web.uri;
         }
-        return { summary, sourceUrl, detectedFormulas };
+        return { summary, sourceUrl, detectedFormulas, availableOptions };
     }
     catch (err) {
         console.error('gemini search error', err);
-        return { summary: 'La recherche automatique n\'a pas pu aboutir.', sourceUrl: undefined, detectedFormulas: [] };
+        return { summary: 'La recherche automatique n\'a pas pu aboutir.', sourceUrl: undefined, detectedFormulas: [], availableOptions: [] };
     }
 };
 exports.searchPolicyInfo = searchPolicyInfo;
@@ -137,9 +138,17 @@ const detectDuplicates = async (policies) => {
     const ai = getAiClient();
     if (!ai)
         return [];
-    const parts = [
-        { text: `Analyse ces contrats d'assurance et identifie les doublons (chevauchements de garanties). Exemple : "Protection Juridique" présente dans deux contrats différents. Retourne un tableau JSON.` }
-    ];
+    const prompt = `Analyse ces contrats d'assurance et identifie les optimisations possibles (doublons, gaps de couverture, économies potentielles).
+
+Retourne un tableau JSON d'optimisations avec les champs:
+- title: titre court
+- description: explication détaillée
+- type: 'duplicate' | 'gap' | 'saving'
+- severity: 'low' | 'medium' | 'high'
+- involvedPolicies: tableau d'IDs de polices concernées
+- estimatedSaving: montant économisé estimé (optionnel)
+- recommendation: recommandation d'action`;
+    const parts = [{ text: prompt }];
     policies.forEach(p => {
         parts.push({ text: `Contrat ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail || 'Non spécifiée'}. Résumé : ${p.summary || ''}` });
     });

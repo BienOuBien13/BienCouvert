@@ -14,5 +14,13 @@
     "password": "$2a$10$P6FFJrgsEZil2IKvfdmeke46hrlqr96ikNztqmNNUU6V6S3urXMOy",
     "profile": {},
     "isAdmin": false
+  },
+  {
+    "id": "fb2cc15b-3142-4d76-af4f-74db59e9559a",
+    "email": "aa@gmail.com",
+    "name": "Aa",
+    "password": "$2a$10$rb6tIP/fNJjUkn4qYS/ilugSBJU4cvPhULlVXjUKZ7ce8KgTrlIQi",
+    "profile": {},
+    "isAdmin": false
   }
 ]
