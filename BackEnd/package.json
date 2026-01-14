@@ -12,11 +12,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-<<<<<<< HEAD
-    "@google/genai": "^1.30.0",
-=======
     "@google/genai": "^1.35.0",
->>>>>>> be22e58 (ok)
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
