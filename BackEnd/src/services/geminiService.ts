@@ -49,16 +49,12 @@ const generateSystemInstruction = (policies: Policy[] = []) => {
 };
 
 export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
-  // Tente d'obtenir un résumé via Gemini. Si le client AI n'est pas dispo
-  // (clé manquante ou lib non installée), on retourne un message simulé
-  // pour que l'UX reste cohérente en environnement de développement.
   const ai = getAiClient();
   if (!ai) {
     return `Résumé simulé (${mimeType}) : impossible d'accéder à Gemini, configurez GEMINI_API_KEY.`;
   }
 
   try {
-    // On envoie d'abord le fichier (inlineData) puis l'instruction de résumé.
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash-latest',
       contents: {
@@ -79,10 +75,8 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
       }
     });
 
-    // response.text contient le texte renvoyé par Gemini (ou undefined)
     return response.text || 'Impossible de générer un résumé.';
   } catch (err) {
-    // Log détaillé pour faciliter le débogage en dev
     console.error('gemini summarize error', err);
     throw err;
   }
@@ -200,39 +194,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
  * Normalise les noms d'assureurs et identifie les types, formules et options.
  */
 export const parsePoliciesFromText = async (text: string): Promise<SmartExtractionResult> => {
-  const ai = getAiClient();
-  if (!ai) return { policies: [], clarificationQuestions: null };
-
-  const prompt = `Extrais les contrats d'assurance du texte suivant : "${text}".
-  
-  CONSIGNES :
-  1. NORMALISATION : Corrige impérativement les noms d'assureurs (ex: MAIFFE -> MAIF, AXAXA -> AXA, ALLIANCE -> Allianz, MACIFF -> MACIF).
-  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.
-  
-  Réponds au format JSON suivant :
-  {
-    "policies": [
-      {
-        "name": "nom du contrat",
-        "provider": "nom de l'assureur",
-        "type": "Automobile|Habitation|Santé/Mutuelle|Protection Juridique|Prévoyance/Décès|Carte Bancaire|Emprunteur/Crédit|Appareils Mobiles|Autre",
-        "coverageDetail": "formule (optionnel)",
-        "options": ["option1", "option2"]
-      }
-    ]
-  }`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        responseMimeType: "application/json"
-      }
-    });
-    return JSON.parse(response.text || '{"policies": []}');
-  } catch (error) {
-    console.error('parsePoliciesFromText error', error);
-    return { policies: [], clarificationQuestions: null };
-  }
+  // Temporarily disabled due to API compatibility issues
+  console.warn('parsePoliciesFromText: Feature temporarily disabled');
+  return { policies: [], clarificationQuestions: null };
 };
