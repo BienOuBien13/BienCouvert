@@ -22,14 +22,14 @@
 export function uuid(): string {
   try {
     // Méthode 1 : Utilisation de l'API native crypto.randomUUID (la plus simple)
-    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
-      return (crypto as any).randomUUID();
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
     }
 
     // Méthode 2 : Génération manuelle avec crypto.getRandomValues (conforme RFC4122)
-    const getRandomValues = typeof crypto !== 'undefined' && (crypto as any).getRandomValues
-      ? (arr: Uint8Array) => (crypto as any).getRandomValues(arr)  // Crypto API disponible
-      : (arr: Uint8Array) => {                                     // Fallback Math.random
+    const getRandomValues = typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
+      ? (arr: Uint8Array) => crypto.getRandomValues(arr)  // Crypto API disponible
+      : (arr: Uint8Array) => {                             // Fallback Math.random
         for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
         return arr;
       };
