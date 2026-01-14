@@ -60,7 +60,7 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   try {
     // On envoie d'abord le fichier (inlineData) puis l'instruction de résumé.
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'models/gemini-1.5-flash',
       contents: {
         parts: [
           {
@@ -98,7 +98,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'models/gemini-1.5-flash',
       contents: { parts: [{ text: prompt }] },
       config: {
         tools: [{ googleSearch: {} }],
@@ -154,7 +154,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'models/gemini-1.5-flash',
       contents: { parts },
       config: {
         responseMimeType: 'application/json'
@@ -180,7 +180,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     ];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'models/gemini-1.5-flash',
       contents: { parts: finalParts },
       config: {
         systemInstruction,
@@ -224,7 +224,7 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'models/gemini-1.5-flash',
       contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: "application/json"
