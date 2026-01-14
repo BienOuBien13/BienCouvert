@@ -207,35 +207,27 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
   
   CONSIGNES :
   1. NORMALISATION : Corrige impérativement les noms d'assureurs (ex: MAIFFE -> MAIF, AXAXA -> AXA, ALLIANCE -> Allianz, MACIFF -> MACIF).
-  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.`;
+  2. DÉTECTION : Identifie le type, le nom du contrat, l'assureur, la formule (Tiers, Tous Risques, etc.) et les options citées.
+  
+  Réponds au format JSON suivant :
+  {
+    "policies": [
+      {
+        "name": "nom du contrat",
+        "provider": "nom de l'assureur",
+        "type": "Automobile|Habitation|Santé/Mutuelle|Protection Juridique|Prévoyance/Décès|Carte Bancaire|Emprunteur/Crédit|Appareils Mobiles|Autre",
+        "coverageDetail": "formule (optionnel)",
+        "options": ["option1", "option2"]
+      }
+    ]
+  }`;
 
   try {
-    const Type = ai.types || {};
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash-latest',
       contents: { parts: [{ text: prompt }] },
       config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            policies: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING, description: "Nom commercial du contrat" },
-                  provider: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
-                  type: { type: Type.STRING, enum: Object.values(PolicyType) },
-                  coverageDetail: { type: Type.STRING, description: "Formule détectée" },
-                  options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Options spécifiques citées" }
-                },
-                required: ["name", "provider", "type"]
-              }
-            }
-          },
-          required: ["policies"]
-        }
+        responseMimeType: "application/json"
       }
     });
     return JSON.parse(response.text || '{"policies": []}');
