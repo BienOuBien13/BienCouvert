@@ -21,15 +21,10 @@ function getAiClient() {
   if (!GEMINI_KEY) return null;
   if (!client) {
     try {
-      const mod = require('@google/genai');
-      const GoogleGenAI = mod?.GoogleGenAI || mod?.default?.GoogleGenAI || mod?.default;
-      if (!GoogleGenAI) {
-        console.error('Loaded @google/genai but could not find GoogleGenAI export.');
-        return null;
-      }
-      client = new GoogleGenAI({ apiKey: GEMINI_KEY });
+      const { GoogleGenerativeAI } = require('@google/generative-ai');
+      client = new GoogleGenerativeAI(GEMINI_KEY);
     } catch (e) {
-      console.error('Failed to require @google/genai - AI features will be disabled. Install @google/genai to enable them.', e);
+      console.error('Failed to require @google/generative-ai - AI features will be disabled.', e);
       return null;
     }
   }
@@ -55,27 +50,19 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: fileBase64
-            }
-          },
-          {
-            text: "Analyse ce document d'assurance. Extrais en français : le nom de l'assureur, le type de contrat, et une liste à puces très concise des garanties majeures. Limite la réponse à 150 mots."
-          }
-        ]
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: fileBase64
+        }
       },
-      config: {
-        thinkingConfig: { thinkingBudget: 0 }
-      }
-    });
-
-    return response.text || 'Impossible de générer un résumé.';
+      "Analyse ce document d'assurance. Extrais en français : le nom de l'assureur, le type de contrat, et une liste à puces très concise des garanties majeures. Limite la réponse à 150 mots."
+    ]);
+    
+    const response = await result.response;
+    return response.text() || 'Impossible de générer un résumé.';
   } catch (err) {
     console.error('gemini summarize error', err);
     throw err;
@@ -91,34 +78,29 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
   const prompt = `Recherche les conditions générales et les garanties types pour ce produit d'assurance :\n  Assureur: ${provider}\n  Catégorie: ${type}\n  Nom commercial approximatif: ${name}\n\n  Instructions :\n  1. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur.\n  2. Liste les noms exacts des formules commerciales (ex: \"Essentiel\", \"Confort\", \"Sérénité\", \"Tiers Plus\", \"Tous Risques\").\n  3. Fournis un résumé structuré des plafonds et franchises types si disponibles.\n\n  Réponds EXCLUSIVEMENT sous forme d'un objet JSON.\n  {\n    "summary": "Texte détaillé des garanties en français",\n    "formulas": ["Nom Formule A", "Nom Formule B"]\n  }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        tools: [{ googleSearch: {} }],
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: {
         responseMimeType: 'application/json'
       }
     });
+    
+    const result = await model.generateContent([prompt]);
+    const response = await result.response;
+    const text = response.text();
 
     let jsonResponse: any = {};
     try {
-      jsonResponse = JSON.parse(response.text);
+      jsonResponse = JSON.parse(text);
     } catch (e) {
-      jsonResponse = { summary: response.text, formulas: [] };
+      jsonResponse = { summary: text, formulas: [] };
     }
 
     const summary = jsonResponse.summary || 'Aucun résumé structuré disponible.';
     const detectedFormulas = Array.isArray(jsonResponse.formulas) ? jsonResponse.formulas : [];
     const availableOptions = Array.isArray(jsonResponse.options) ? jsonResponse.options : [];
 
-    let sourceUrl: string | undefined = undefined;
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (chunks && chunks.length > 0) {
-      const webChunk = chunks.find((c: any) => c.web?.uri);
-      if (webChunk) sourceUrl = webChunk.web.uri;
-    }
-
-    return { summary, sourceUrl, detectedFormulas, availableOptions } as WebSearchResult;
+    return { summary, sourceUrl: undefined, detectedFormulas, availableOptions } as WebSearchResult;
   } catch (err) {
     console.error('gemini search error', err);
     return { summary: 'La recherche automatique n\'a pas pu aboutir.', sourceUrl: undefined, detectedFormulas: [], availableOptions: [] };
@@ -147,15 +129,18 @@ Retourne un tableau JSON d'optimisations avec les champs:
   });
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: { parts },
-      config: {
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: {
         responseMimeType: 'application/json'
       }
     });
+    
+    const result = await model.generateContent(parts);
+    const response = await result.response;
+    const text = response.text();
 
-    return JSON.parse(response.text) as OptimizationFinding[];
+    return JSON.parse(text) as OptimizationFinding[];
   } catch (err) {
     console.error('gemini detectDuplicates error', err);
     return [];
@@ -164,28 +149,37 @@ Retourne un tableau JSON d'optimisations avec les champs:
 
 export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
   const ai = getAiClient();
-  if (!ai) return 'Assistant non disponible (GEMINI_API_KEY manquante).';
-  const systemInstruction = generateSystemInstruction(policies || []);
+  if (!ai) {
+    return "Le service d'assistant est temporairement indisponible. Veuillez configurer GEMINI_API_KEY.";
+  }
 
   try {
-    const finalParts = [
-      ...((history || []).map(h => ({ text: `${h.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${h.text}` }))),
-      { text: message }
-    ];
+    const policyContext = policies.map(p => 
+      `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`
+    ).join('\n');
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: { parts: finalParts },
-      config: {
-        systemInstruction,
-        tools: [{ googleSearch: {} }]
-      }
+    const systemInstruction = `Tu es un assistant expert en assurance. Voici les polices de l'utilisateur :\n${policyContext}\n\nRéponds en français de manière claire et concise.`;
+
+    const chatHistory = history.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }]
+    }));
+
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      systemInstruction: systemInstruction
+    });
+    
+    const chat = model.startChat({
+      history: chatHistory
     });
 
-    return response.text || 'Désolé, je n\'ai pas pu analyser cette demande.';
+    const result = await chat.sendMessage(message);
+    const response = await result.response;
+    return response.text() || "Désolé, je n'ai pas pu générer de réponse.";
   } catch (err) {
-    console.error('gemini chat error', err);
-    return 'Une erreur technique est survenue.';
+    console.error('gemini sendMessageToAssistant error', err);
+    return "Une erreur s'est produite lors de la communication avec l'assistant.";
   }
 };
 
@@ -194,7 +188,52 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
  * Normalise les noms d'assureurs et identifie les types, formules et options.
  */
 export const parsePoliciesFromText = async (text: string): Promise<SmartExtractionResult> => {
-  // Temporarily disabled due to API compatibility issues
-  console.warn('parsePoliciesFromText: Feature temporarily disabled');
-  return { policies: [], clarificationQuestions: null };
+  const ai = getAiClient();
+  if (!ai) {
+    return { policies: [], clarificationQuestions: null };
+  }
+
+  const prompt = `Tu es un expert en analyse de documents d'assurance. Extrais les polices d'assurance du texte suivant et retourne un JSON.
+
+Format attendu :
+{
+  "policies": [
+    {
+      "type": "Auto" | "Habitation" | "Santé" | "Vie" | "Autre",
+      "provider": "Nom de l'assureur",
+      "name": "Nom du contrat",
+      "coverageDetail": "Formule (Essentiel/Confort/Premium/etc.)",
+      "premium": nombre ou null,
+      "startDate": "YYYY-MM-DD" ou null
+    }
+  ],
+  "clarificationQuestions": ["Question 1", "Question 2"] ou null
+}
+
+Si des informations sont manquantes ou ambiguës, génère des questions de clarification.
+
+Texte à analyser :
+${text}`;
+
+  try {
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json'
+      }
+    });
+    
+    const result = await model.generateContent([prompt]);
+    const response = await result.response;
+    const jsonText = response.text();
+
+    const parsed = JSON.parse(jsonText);
+    return {
+      policies: Array.isArray(parsed.policies) ? parsed.policies : [],
+      clarificationQuestions: Array.isArray(parsed.clarificationQuestions) ? parsed.clarificationQuestions : null
+    };
+  } catch (err) {
+    console.error('gemini parsePoliciesFromText error', err);
+    return { policies: [], clarificationQuestions: null };
+  }
 };
