@@ -50,7 +50,7 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   }
 
   try {
-    const model = ai.getGenerativeModel({ model: 'gemini-pro' });
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent([
       {
         inlineData: {
@@ -79,7 +79,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.0-pro',
       generationConfig: {
         responseMimeType: 'application/json'
       }
@@ -130,7 +130,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-pro',
+      model: 'gemini-1.5-flash',
       generationConfig: {
         responseMimeType: 'application/json'
       }
@@ -166,12 +166,15 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     }));
 
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-pro',
-      systemInstruction: systemInstruction
+      model: 'gemini-1.5-flash'
     });
     
+    // Ajouter le contexte système au premier message si l'historique est vide
     const chat = model.startChat({
-      history: chatHistory
+      history: chatHistory.length === 0 ? [
+        { role: 'user', parts: [{ text: systemInstruction }] },
+        { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance.' }] }
+      ] : chatHistory
     });
 
     const result = await chat.sendMessage(message);
