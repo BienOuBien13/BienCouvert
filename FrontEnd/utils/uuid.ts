@@ -27,27 +27,23 @@ export function uuid(): string {
     }
 
     // Méthode 2 : Génération manuelle avec crypto.getRandomValues (conforme RFC4122)
-    const getRandomValues = typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
-      ? (arr: Uint8Array) => crypto.getRandomValues(arr)  // Crypto API disponible
-      : (arr: Uint8Array) => {                             // Fallback Math.random
-        for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
-        return arr;
-      };
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      
+      // Application du format UUID v4 selon RFC4122
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;  // Version 4
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;  // Variant
+      
+      // Conversion en chaîne hexadécimale avec formatage UUID
+      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      return `${hex.substr(0,8)}-${hex.substr(8,4)}-${hex.substr(12,4)}-${hex.substr(16,4)}-${hex.substr(20,12)}`;
+    }
     
-    // Génération de 16 octets aléatoires
-    const bytes = new Uint8Array(16);
-    getRandomValues(bytes);
-    
-    // Application du format UUID v4 selon RFC4122
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;  // Version 4 (bits 4-7 du 7ème octet = 0100)
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;  // Variant (bits 6-7 du 9ème octet = 10)
-    
-    // Conversion en chaîne hexadécimale avec formatage UUID
-    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.substr(0,8)}-${hex.substr(8,4)}-${hex.substr(12,4)}-${hex.substr(16,4)}-${hex.substr(20,12)}`;
+    // Méthode 3 : Fallback Math.random
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   } catch (e) {
-    // Méthode 3 : Fallback ultime si toutes les méthodes crypto échouent
-    // Génère un ID basé sur timestamp + aléatoire (moins sécurisé)
+    // Fallback d'urgence
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 }
