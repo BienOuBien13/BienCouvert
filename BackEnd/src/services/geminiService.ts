@@ -50,7 +50,7 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   }
 
   try {
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const result = await model.generateContent([
       {
         inlineData: {
@@ -166,7 +166,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     }));
 
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.5-flash'
+      model: 'gemini-2.5-flash'
     });
     
     // Ajouter le contexte système au premier message si l'historique est vide
