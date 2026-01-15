@@ -50,7 +50,7 @@ export const summarizePolicy = async (fileBase64: string, mimeType: string): Pro
   }
 
   try {
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = ai.getGenerativeModel({ model: 'gemini-pro' });
     const result = await model.generateContent([
       {
         inlineData: {
@@ -130,7 +130,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-pro',
       generationConfig: {
         responseMimeType: 'application/json'
       }
@@ -166,7 +166,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     }));
 
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-pro',
       systemInstruction: systemInstruction
     });
     
@@ -217,7 +217,7 @@ ${text}`;
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-pro',
       generationConfig: {
         responseMimeType: 'application/json'
       }
