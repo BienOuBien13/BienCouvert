@@ -79,7 +79,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-1.0-pro',
+      model: 'gemini-1.5-flash',
       generationConfig: {
         responseMimeType: 'application/json'
       }
@@ -220,7 +220,7 @@ ${text}`;
 
   try {
     const model = ai.getGenerativeModel({ 
-      model: 'gemini-pro',
+      model: 'gemini-1.5-flash',
       generationConfig: {
         responseMimeType: 'application/json'
       }
