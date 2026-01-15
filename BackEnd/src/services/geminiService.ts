@@ -162,7 +162,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 
     const chatHistory = history.map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
+      parts: [{ text: msg.text }]
     }));
 
     const model = ai.getGenerativeModel({ 
