@@ -6,7 +6,8 @@ import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData,
 const getAiClient = () => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('VITE_GEMINI_API_KEY non configurée. Ajoutez-la dans le fichier .env');
+    console.warn('VITE_GEMINI_API_KEY non configurée. Les fonctions audio/live ne seront pas disponibles.');
+    return null;
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -204,6 +205,9 @@ export const connectIntakeSession = async (
   existingPolicyTypes: PolicyType[]
 ) => {
   const ai = getAiClient();
+  if (!ai) {
+    throw new Error('Fonction audio non disponible: VITE_GEMINI_API_KEY manquante');
+  }
   const allRecommended = ["Automobile", "Habitation", "Santé/Mutuelle", "Protection Juridique", "Prévoyance/Décès"];
   const missing = allRecommended.filter(type => !existingPolicyTypes.includes(type as PolicyType));
   
@@ -317,6 +321,9 @@ export const connectLiveSession = async (
   onComplete: () => void
 ) => {
   const ai = getAiClient();
+  if (!ai) {
+    throw new Error('Fonction audio non disponible: VITE_GEMINI_API_KEY manquante');
+  }
   let context = "Tu es AssurClair. Contrats actuels :\n";
   policies.forEach(p => context += `- [${p.type}] ${p.name} chez ${p.provider}.\n`);
   
