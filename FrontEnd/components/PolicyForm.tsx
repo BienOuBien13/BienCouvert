@@ -9,6 +9,7 @@ import {
 import { Policy, PolicyType, CentralCgEntry } from '../types';
 import { searchPolicyInfo, parsePoliciesFromText, connectIntakeSession } from '../services/geminiService';
 import { storageService } from '../services/storageService';
+import { uuid } from '../utils/uuid';
 
 interface Props {
   onAddPolicy: (policy: Omit<Policy, 'userId'>) => void;
@@ -218,7 +219,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
   const handleSavePolicy = async (p: Partial<Policy>) => {
     const policyData: Omit<Policy, 'userId'> = {
-      id: initialData?.id || crypto.randomUUID(),
+      id: initialData?.id || uuid(),
       name: p.name || name,
       provider: p.provider || provider,
       type: (p.type as PolicyType) || type,
