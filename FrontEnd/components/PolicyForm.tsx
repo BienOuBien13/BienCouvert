@@ -337,7 +337,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-black text-slate-900 flex items-center gap-2 tracking-tighter">
             {initialData ? <Edit3 className="w-4 h-4 text-primary-600" /> : <Sparkles className="w-4 h-4 text-primary-600" />}
-            {initialData ? 'Modification' : 'Admission intelligente'}
+            {initialData ? 'Modification' : 'Ajout intelligent'}
           </h2>
           {!initialData && (
             <div className="flex bg-slate-100 p-1 rounded-xl">

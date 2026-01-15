@@ -75,7 +75,24 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
     return { summary: `Recherche simulée pour ${provider} - ${type} - ${name}`, sourceUrl: undefined, detectedFormulas: [], availableOptions: [] };
   }
 
-  const prompt = `Recherche les conditions générales et les garanties types pour ce produit d'assurance :\n  Assureur: ${provider}\n  Catégorie: ${type}\n  Nom commercial approximatif: ${name}\n\n  Instructions :\n  1. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur.\n  2. Liste les noms exacts des formules commerciales (ex: \"Essentiel\", \"Confort\", \"Sérénité\", \"Tiers Plus\", \"Tous Risques\").\n  3. Fournis un résumé structuré des plafonds et franchises types si disponibles.\n\n  Réponds EXCLUSIVEMENT sous forme d'un objet JSON.\n  {\n    "summary": "Texte détaillé des garanties en français",\n    "formulas": ["Nom Formule A", "Nom Formule B"]\n  }`;
+  const prompt = `Tu es un expert en assurances. Recherche sur Internet les conditions générales actuelles pour ce produit d'assurance :
+  
+  Assureur: ${provider}
+  Catégorie: ${type}
+  Nom commercial: ${name}
+  
+  Instructions :
+  1. RECHERCHE WEB: Trouve les informations officielles les plus récentes sur ce contrat
+  2. Identifie les garanties incluses par défaut pour ce type de contrat chez cet assureur
+  3. Liste les noms EXACTS des formules commerciales disponibles (ex: "Essentiel", "Confort", "Sérénité", "Tiers", "Tiers Plus", "Tous Risques")
+  4. Fournis un résumé structuré des plafonds et franchises types si disponibles
+  
+  Réponds EXCLUSIVEMENT sous forme d'un objet JSON :
+  {
+    "summary": "Texte détaillé des garanties en français avec sources",
+    "formulas": ["Nom Exact Formule A", "Nom Exact Formule B", "Nom Exact Formule C"],
+    "options": ["Option 1", "Option 2"]
+  }`;
 
   try {
     const model = ai.getGenerativeModel({ 
