@@ -4,7 +4,6 @@ import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLe
 import { authService } from '../services/authService';
 import { User } from '../types';
 
-
 interface Props {
   onLogin: (user: User) => void;
   onBack: () => void;
@@ -31,21 +30,21 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       await new Promise(resolve => setTimeout(resolve, 800));
 
       if (mode === 'login') {
-        const user = await authService.login(email, password);
+        const user = authService.login(email, password);
         onLogin(user);
       } else if (mode === 'register') {
-        const user = await authService.register(email, password);
+        const user = authService.register(email, password);
         onLogin(user);
       } else if (mode === 'forgot') {
         try {
-          await authService.resetPassword(email, "temp_check"); 
+          authService.resetPassword(email, "temp_check"); 
           setMode('email-sent');
         } catch (e) {
           throw new Error("Aucun compte trouvé avec cet email.");
         }
       } else if (mode === 'reset') {
         if (password !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas.");
-        await authService.resetPassword(email, password);
+        authService.resetPassword(email, password);
         setSuccess("Mot de passe réinitialisé ! Connectez-vous avec votre nouveau mot de passe.");
         setMode('login');
         setPassword('');

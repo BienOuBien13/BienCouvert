@@ -11,7 +11,7 @@ export enum PolicyType {
   OTHER = 'Autre'
 }
 
-export type AppView = 'policies' | 'chat' | 'analysis' | 'experts' | 'profile' | 'admin';
+export type AppView = 'home' | 'policies' | 'chat' | 'analysis' | 'experts' | 'profile' | 'admin';
 
 export interface User {
   id: string;
@@ -37,7 +37,7 @@ export interface UserProfileData {
   // Foyer
   adultsCount?: number;
   childrenCount?: number;
-  householdMembersAges?: number[];
+  householdMembersAges?: number[]; // Âges individuels
   hasPets?: boolean;
   petDetails?: string;
   

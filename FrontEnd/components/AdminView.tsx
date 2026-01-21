@@ -30,10 +30,7 @@ export const AdminView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    const loadRepo = async () => {
-      setRepo(await storageService.getCentralCgRepo());
-    };
-    loadRepo();
+    setRepo(storageService.getCentralCgRepo());
   }, []);
 
   const handleStartIndexing = async () => {
@@ -50,24 +47,24 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  const handleFinalAdd = async () => {
+  const handleFinalAdd = () => {
     if (!indexingResult) return;
-    await storageService.saveCgEntry({
+    storageService.saveCgEntry({
       ...newEntry,
       indexedFormulas: indexingResult.indexedFormulas,
       indexedOptions: indexingResult.indexedOptions,
       semanticSummary: indexingResult.semanticSummary
     });
-    setRepo(await storageService.getCentralCgRepo());
+    setRepo(storageService.getCentralCgRepo());
     setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
     setIndexingResult(null);
     setShowAddForm(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Supprimer ce document de la base centrale ?")) {
-      await storageService.deleteCgEntry(id);
-      setRepo(await storageService.getCentralCgRepo());
+      storageService.deleteCgEntry(id);
+      setRepo(storageService.getCentralCgRepo());
     }
   };
 

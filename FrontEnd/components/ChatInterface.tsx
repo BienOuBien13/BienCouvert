@@ -3,7 +3,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
 import { sendMessageToAssistant, connectLiveSession } from '../services/geminiService';
-import { uuid } from '../utils/uuid';
 
 interface Props {
   policies: Policy[];
@@ -50,7 +49,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       role: 'user',
       text: input.trim(),
       timestamp: Date.now(),
@@ -64,7 +63,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
       const responseText = await sendMessageToAssistant(userMessage.text, policies, messages);
       
       const botMessage: Message = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: 'model',
         text: responseText,
         timestamp: Date.now(),
@@ -73,7 +72,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
       setMessages(prev => [...prev, botMessage]);
     } catch (error) {
       const errorMessage: Message = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: 'model',
         text: "Désolé, j'ai rencontré une erreur. Veuillez réessayer.",
         timestamp: Date.now(),
@@ -124,7 +123,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
                  // Only add if there is actual content
                  if (finalUserText.trim()) {
                    newMessages.push({
-                     id: uuid(),
+                     id: crypto.randomUUID(),
                      role: 'user',
                      text: finalUserText,
                      timestamp: Date.now()
@@ -132,7 +131,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
                  }
                  if (finalModelText.trim()) {
                    newMessages.push({
-                     id: uuid(),
+                     id: crypto.randomUUID(),
                      role: 'model',
                      text: finalModelText,
                      timestamp: Date.now()
