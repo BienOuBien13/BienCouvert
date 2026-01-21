@@ -1,0 +1,6 @@
+nohup: ignoring input
+
+> assurclair-backend@0.1.0 start
+> node dist/index.js
+
+AssurClair backend listening on port 4000
