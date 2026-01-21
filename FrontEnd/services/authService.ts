@@ -1,102 +1,120 @@
+// =============================================================================
+// SERVICE D'AUTHENTIFICATION (MODE BACKEND)
+// Utilise des appels API vers le backend Express au lieu de localStorage.
+// Gère l'authentification via JWT et bcrypt côté serveur.
+// =============================================================================
 
 import { User, UserProfileData } from '../types';
 
-const USERS_KEY = 'assurclair_users';
-const SESSION_KEY = 'assurclair_session';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const TOKEN_KEY = 'assurclair_token';
+const USER_KEY = 'assurclair_current_user';
 
-interface StoredUser extends User {
-  password: string;
-}
+/**
+ * Effectue une requête authentifiée vers le backend
+ */
+const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...options.headers,
+  };
+
+  const response = await fetch(`${API_URL}/api${endpoint}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Network error' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
 
 export const authService = {
-  login: (email: string, password: string): User => {
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
-    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (!user) throw new Error("Email ou mot de passe incorrect.");
+  /**
+   * Connexion utilisateur
+   */
+  login: async (email: string, password: string): Promise<User> => {
+    const response = await apiFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
     
-    const sessionUser: User = { 
-      id: user.id, 
-      email: user.email, 
-      name: user.name,
-      profile: user.profile,
-      isAdmin: user.isAdmin
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    return sessionUser;
+    localStorage.setItem(TOKEN_KEY, response.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+    
+    return response.user;
   },
 
-  register: (email: string, password: string): User => {
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
-    if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
-      throw new Error("Cet email est déjà utilisé.");
-    }
-    const displayName = email.split('@')[0]
-      .split('.')
-      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-
-    // For demonstration purposes, all users are admins
-    const newUser: StoredUser = { 
-      id: crypto.randomUUID(), 
-      name: displayName, 
-      email, 
-      password, 
-      isAdmin: true 
-    };
-    users.push(newUser);
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    const sessionUser: User = { 
-      id: newUser.id, 
-      email: newUser.email, 
-      name: newUser.name, 
-      isAdmin: true 
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    return sessionUser;
+  /**
+   * Inscription utilisateur
+   */
+  register: async (email: string, password: string): Promise<User> => {
+    const response = await apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    
+    localStorage.setItem(TOKEN_KEY, response.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+    
+    return response.user;
   },
 
-  resetPassword: (email: string, newPassword: string): void => {
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
-    const index = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-    if (index === -1) throw new Error("Aucun compte associé à cet email.");
-    users[index].password = newPassword;
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  /**
+   * Réinitialisation de mot de passe
+   */
+  resetPassword: async (email: string, newPassword: string): Promise<void> => {
+    await apiFetch('/auth/reset', {
+      method: 'POST',
+      body: JSON.stringify({ email, newPassword }),
+    });
   },
 
-  updateUser: (userId: string, data: { name: string; email: string; password?: string, profile?: UserProfileData }): User => {
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: StoredUser[] = usersStr ? JSON.parse(usersStr) : [];
-    const userIndex = users.findIndex(u => u.id === userId);
-    if (userIndex === -1) throw new Error("Utilisateur non trouvé.");
+  /**
+   * Mise à jour du profil utilisateur
+   */
+  updateUser: async (userId: string, data: { name: string; email: string; password?: string; profile?: UserProfileData }): Promise<User> => {
+    const response = await apiFetch('/auth/me', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
     
-    const updatedUser: StoredUser = {
-      ...users[userIndex],
-      name: data.name,
-      email: data.email,
-      password: data.password ? data.password : users[userIndex].password,
-      profile: data.profile || users[userIndex].profile
-    };
+    localStorage.setItem(USER_KEY, JSON.stringify(response.user));
     
-    users[userIndex] = updatedUser;
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    
-    const sessionUser: User = { 
-      id: updatedUser.id, 
-      email: updatedUser.email, 
-      name: updatedUser.name,
-      profile: updatedUser.profile,
-      isAdmin: updatedUser.isAdmin
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    return sessionUser;
+    return response.user;
   },
 
-  logout: () => localStorage.removeItem(SESSION_KEY),
+  /**
+   * Déconnexion
+   */
+  logout: (): void => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  },
+
+  /**
+   * Récupère l'utilisateur actuellement connecté
+   */
   getCurrentUser: (): User | null => {
-    const sessionStr = localStorage.getItem(SESSION_KEY);
-    return sessionStr ? JSON.parse(sessionStr) : null;
-  }
+    const userStr = localStorage.getItem(USER_KEY);
+    if (!userStr) return null;
+    
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Récupère le token JWT
+   */
+  getToken: (): string | null => {
+    return localStorage.getItem(TOKEN_KEY);
+  },
 };

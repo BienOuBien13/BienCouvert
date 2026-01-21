@@ -12,7 +12,9 @@
         import { GoogleGenAI } from 'https://esm.sh/@google/genai@0.22.0';
         
         window.testChat = async function() {
-            const apiKey = 'AIzaSyCPV3dky8oIny2ZYClo6lOi4V-BIlYvaqY';
+            // ⚠️ IMPORTANT: Ne jamais committer de clé API en dur
+            // En production, utiliser des variables d'environnement
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY || 'YOUR_API_KEY_HERE';
             const resultDiv = document.getElementById('result');
             
             try {

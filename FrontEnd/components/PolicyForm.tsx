@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { uuid } from '../utils/uuid';
 import { 
   FileText, Loader2, ArrowRight, 
   Car, Home, Heart, Scale, Shield, CreditCard, Smartphone, Banknote, 
@@ -146,7 +147,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   const finalizeSave = () => {
     if (!refiningPolicy) return;
     const finalPolicy: Omit<Policy, 'userId'> = {
-      id: initialData?.id || crypto.randomUUID(),
+      id: initialData?.id || uuid(),
       name: refiningPolicy.name || name || 'Sans nom',
       provider: refiningPolicy.provider || provider,
       type: refiningPolicy.type || type,

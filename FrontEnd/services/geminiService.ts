@@ -4,7 +4,12 @@ import { GoogleGenAI, Type, LiveServerMessage, Modality, Blob } from "@google/ge
 import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData, PolicyType, CentralCgEntry } from "../types";
 
 const getAiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('VITE_GEMINI_API_KEY non configurée. Les fonctions IA seront limitées.');
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
 export interface SmartExtractionResult {
@@ -19,6 +24,9 @@ export interface SmartExtractionResult {
 
 export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<Partial<CentralCgEntry>> => {
   const ai = getAiClient();
+  if (!ai) {
+    return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Fonction IA non disponible" };
+  }
   const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} via l'URL : ${pdfUrl}.
   Extrais : 1. Les formules commerciales. 2. Les options complémentaires. 3. Un résumé sémantique.`;
 
@@ -48,6 +56,9 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
 
 export const parsePoliciesFromText = async (text: string): Promise<SmartExtractionResult> => {
   const ai = getAiClient();
+  if (!ai) {
+    return { policies: [], clarificationQuestions: null };
+  }
   const prompt = `Extrais les contrats d'assurance du texte suivant : "${text}".
   
   CONSIGNES :
@@ -90,6 +101,9 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
 
 export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
   const ai = getAiClient();
+  if (!ai) {
+    return { formulas: [], options: [], summary: "Fonction IA non disponible", sourceUrl: null };
+  }
   const prompt = `Recherche les Conditions Générales officielles (PDF) pour l'assurance ${type} "${name}" chez l'assureur ${provider}. 
   Identifie précisément les noms des formules (ex: Tiers, Tous Risques, Initiale, Confort, Intégrale) et les options (ex: Assistance 0km, Prêt de véhicule).`;
   try {
@@ -119,6 +133,9 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
 export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
   const ai = getAiClient();
+  if (!ai) {
+    return "Désolé, le service IA n'est pas disponible. Veuillez configurer VITE_GEMINI_API_KEY.";
+  }
   let context = "Tu es AssurClair. Contrats actuels :\n";
   policies.forEach(p => context += `- ${p.type} ${p.name} chez ${p.provider}\n`);
   const response = await ai.models.generateContent({
@@ -131,6 +148,9 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 
 export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {
   const ai = getAiClient();
+  if (!ai) {
+    return [{ title: "Service IA non disponible", severity: "medium", description: "Veuillez configurer VITE_GEMINI_API_KEY pour accéder aux optimisations.", savingsPotential: 0 }];
+  }
   const prompt = `Analyse les contrats suivants en fonction du profil utilisateur détaillé :
   CONTRATS : ${JSON.stringify(policies)}
   PROFIL : ${JSON.stringify(profile)}
@@ -171,6 +191,9 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
 
 export const generateShareableReport = async (policies: Policy[], findings: OptimizationFinding[]): Promise<string> => {
   const ai = getAiClient();
+  if (!ai) {
+    return "J'ai fait mon bilan AssurClair !";
+  }
   const prompt = `Génère un court texte de partage résumant mon bilan AssurClair. Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.`;
   try {
     const response = await ai.models.generateContent({
@@ -190,6 +213,9 @@ export const connectIntakeSession = async (
   existingPolicyTypes: PolicyType[]
 ) => {
   const ai = getAiClient();
+  if (!ai) {
+    throw new Error('Fonction audio non disponible: VITE_GEMINI_API_KEY manquante');
+  }
   const allRecommended = ["Automobile", "Habitation", "Santé/Mutuelle", "Protection Juridique", "Prévoyance/Décès"];
   const missing = allRecommended.filter(type => !existingPolicyTypes.includes(type as PolicyType));
   
@@ -303,6 +329,9 @@ export const connectLiveSession = async (
   onComplete: () => void
 ) => {
   const ai = getAiClient();
+  if (!ai) {
+    throw new Error('Fonction audio non disponible: VITE_GEMINI_API_KEY manquante');
+  }
   let context = "Tu es AssurClair. Contrats actuels :\n";
   policies.forEach(p => context += `- [${p.type}] ${p.name} chez ${p.provider}.\n`);
   

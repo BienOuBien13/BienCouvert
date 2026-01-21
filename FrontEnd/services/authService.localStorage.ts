@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { User, UserProfileData } from '../types';
+import { uuid } from '../utils/uuid';
 
 // Clés localStorage pour la persistance des données
 const USERS_KEY = 'assurclair_users';      // Liste de tous les utilisateurs inscrits
@@ -50,7 +51,7 @@ export const authService = {
       .map(part => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
 
-    const newUser: StoredUser = { id: crypto.randomUUID(), name: displayName, email, password };
+    const newUser: StoredUser = { id: uuid(), name: displayName, email, password };
     users.push(newUser);
     localStorage.setItem(USERS_KEY, JSON.stringify(users));
     const sessionUser: User = { id: newUser.id, email: newUser.email, name: newUser.name };

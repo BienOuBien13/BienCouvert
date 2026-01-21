@@ -45,10 +45,15 @@ function App() {
     setIsLoading(false);
   }, []);
 
-  const handleLogin = (loggedInUser: User) => {
+  const handleLogin = async (loggedInUser: User) => {
     setUser(loggedInUser);
-    const userPolicies = storageService.getPolicies(loggedInUser.id);
-    setPolicies(userPolicies);
+    try {
+      const userPolicies = await storageService.getPolicies(loggedInUser.id);
+      setPolicies(userPolicies);
+    } catch (error) {
+      console.error('Failed to load policies:', error);
+      setPolicies([]);
+    }
     if (loggedInUser.profile) setUserProfile(loggedInUser.profile);
     setMessages([]);
     setActiveView('home');
@@ -63,38 +68,57 @@ function App() {
     setShowAuth(false);
   };
 
-  const handleClearAllData = () => {
+  const handleClearAllData = async () => {
     if (user) {
-      policies.forEach(p => storageService.deletePolicy(p.id));
-      const resetProfile = { adultsCount: 1, childrenCount: 0 };
-      authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
-      setUserProfile(resetProfile);
-      setPolicies([]);
-      setMessages([]);
+      try {
+        await Promise.all(policies.map(p => storageService.deletePolicy(p.id)));
+        const resetProfile = { adultsCount: 1, childrenCount: 0 };
+        await authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
+        setUserProfile(resetProfile);
+        setPolicies([]);
+        setMessages([]);
+      } catch (error) {
+        console.error('Failed to clear data:', error);
+      }
     }
     setIsClearModalOpen(false);
     setActiveView('home');
   };
 
-  const handleAddPolicy = (policy: Omit<Policy, 'userId'>) => {
+  const handleAddPolicy = async (policy: Omit<Policy, 'userId'>) => {
     if (!user) return;
     const policyWithUser: Policy = { ...policy, userId: user.id };
-    storageService.savePolicy(policyWithUser);
-    setPolicies(prev => [policyWithUser, ...prev]);
-    setActiveView('policies');
+    try {
+      await storageService.savePolicy(policyWithUser);
+      setPolicies(prev => [policyWithUser, ...prev]);
+      setActiveView('policies');
+    } catch (error) {
+      console.error('Failed to save policy:', error);
+      alert('Erreur lors de la sauvegarde du contrat');
+    }
   };
 
-  const handleUpdatePolicy = (updatedPolicy: Policy) => {
-    storageService.updatePolicy(updatedPolicy);
-    setPolicies(prev => prev.map(p => p.id === updatedPolicy.id ? updatedPolicy : p));
-    setEditingPolicy(null);
+  const handleUpdatePolicy = async (updatedPolicy: Policy) => {
+    try {
+      await storageService.updatePolicy(updatedPolicy);
+      setPolicies(prev => prev.map(p => p.id === updatedPolicy.id ? updatedPolicy : p));
+      setEditingPolicy(null);
+    } catch (error) {
+      console.error('Failed to update policy:', error);
+      alert('Erreur lors de la mise à jour du contrat');
+    }
   };
 
-  const handleDeletePolicy = (id: string) => {
+  const handleDeletePolicy = async (id: string) => {
     if (window.confirm("Supprimer ce contrat ?")) {
-      storageService.deletePolicy(id);
-      setPolicies(prev => prev.filter(p => p.id !== id));
-      if (editingPolicy?.id === id) setEditingPolicy(null);
+      try {
+        await storageService.deletePolicy(id);
+        setPolicies(prev => prev.filter(p => p.id !== id));
+        if (editingPolicy?.id === id) setEditingPolicy(null);
+      } catch (error) {
+        console.error('Failed to delete policy:', error);
+        alert('Erreur lors de la suppression du contrat');
+      }
     }
   };
 
@@ -104,12 +128,17 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleUpdateProfile = (newProfile: UserProfileData) => {
+  const handleUpdateProfile = async (newProfile: UserProfileData) => {
     setUserProfile(newProfile);
     if (user) {
-      const updatedUser = { ...user, profile: newProfile };
-      setUser(updatedUser);
-      authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile });
+      try {
+        const updatedUser = { ...user, profile: newProfile };
+        setUser(updatedUser);
+        await authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile });
+      } catch (error) {
+        console.error('Failed to update profile:', error);
+        alert('Erreur lors de la mise à jour du profil');
+      }
     }
   };
 

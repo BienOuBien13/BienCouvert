@@ -30,7 +30,15 @@ export const AdminView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    setRepo(storageService.getCentralCgRepo());
+    const loadRepo = async () => {
+      try {
+        const data = await storageService.getCentralCgRepo();
+        setRepo(data);
+      } catch (error) {
+        console.error('Failed to load CG repo:', error);
+      }
+    };
+    loadRepo();
   }, []);
 
   const handleStartIndexing = async () => {
@@ -47,24 +55,36 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  const handleFinalAdd = () => {
+  const handleFinalAdd = async () => {
     if (!indexingResult) return;
-    storageService.saveCgEntry({
-      ...newEntry,
-      indexedFormulas: indexingResult.indexedFormulas,
-      indexedOptions: indexingResult.indexedOptions,
-      semanticSummary: indexingResult.semanticSummary
-    });
-    setRepo(storageService.getCentralCgRepo());
-    setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
-    setIndexingResult(null);
-    setShowAddForm(false);
+    try {
+      await storageService.saveCgEntry({
+        ...newEntry,
+        indexedFormulas: indexingResult.indexedFormulas,
+        indexedOptions: indexingResult.indexedOptions,
+        semanticSummary: indexingResult.semanticSummary
+      });
+      const data = await storageService.getCentralCgRepo();
+      setRepo(data);
+      setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
+      setIndexingResult(null);
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Failed to save CG entry:', error);
+      alert('Erreur lors de la sauvegarde');
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Supprimer ce document de la base centrale ?")) {
-      storageService.deleteCgEntry(id);
-      setRepo(storageService.getCentralCgRepo());
+      try {
+        await storageService.deleteCgEntry(id);
+        const data = await storageService.getCentralCgRepo();
+        setRepo(data);
+      } catch (error) {
+        console.error('Failed to delete CG entry:', error);
+        alert('Erreur lors de la suppression');
+      }
     }
   };
 
