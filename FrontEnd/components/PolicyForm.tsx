@@ -100,7 +100,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
     try {
       // Priorité 1 : Recherche dans la base vérifiée (Admin Base)
-      const internal = storageService.findCgInRepo(extracted.provider!, extracted.name || 'Contrat', extracted.type as PolicyType);
+      const internal = await storageService.findCgInRepo(extracted.provider!, extracted.name || 'Contrat', extracted.type as PolicyType);
       let data;
       if (internal) {
         data = { 
