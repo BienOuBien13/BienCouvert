@@ -124,12 +124,21 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
   }
 };
 
-export const detectDuplicates = async (policies: Policy[]): Promise<OptimizationFinding[]> => {
+export const detectDuplicates = async (policies: Policy[], profile: any = {}): Promise<OptimizationFinding[]> => {
   if (!policies || policies.length < 2) return [];
   const ai = getAiClient();
   if (!ai) return [];
 
-  const prompt = `Analyse ces contrats d'assurance et identifie les optimisations possibles (doublons, gaps de couverture, économies potentielles).
+  const prompt = `Analyse ces contrats d'assurance en fonction du profil utilisateur et identifie les optimisations possibles (doublons, gaps de couverture, économies potentielles).
+
+PROFIL UTILISATEUR : ${JSON.stringify(profile)}
+
+CRITÈRES D'ANALYSE PRIORITAIRES :
+1. ADÉQUATION FAMILLE : Vérifie si les âges des membres justifient des garanties santé spécifiques.
+2. HABITAT & RISQUES : Analyse la présence de piscine, jardin ou l'année de construction.
+3. LOCALISATION : Utilise le code postal pour évaluer les risques géographiques.
+4. ANIMAUX : Vérifie si une mutuelle santé animale ou RC adaptée existe.
+5. DOUBLONS & MANQUES : Détecte les chevauchements et manques critiques.
 
 Retourne un tableau JSON d'optimisations avec les champs:
 - title: titre court
@@ -137,7 +146,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 - type: 'duplicate' | 'gap' | 'saving'
 - severity: 'low' | 'medium' | 'high'
 - involvedPolicies: tableau d'IDs de polices concernées
-- estimatedSaving: montant économisé estimé (optionnel)
+- savingsPotential: montant économisé estimé (nombre)
 - recommendation: recommandation d'action`;
 
   const parts: any[] = [{ text: prompt }];
@@ -255,5 +264,71 @@ ${text}`;
   } catch (err) {
     console.error('gemini parsePoliciesFromText error', err);
     return { policies: [], clarificationQuestions: null };
+  }
+};
+
+/**
+ * Indexe un document de Conditions Générales via l'URL d'un PDF
+ * Retourne les formules, options et un résumé sémantique
+ */
+export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<any> => {
+  const ai = getAiClient();
+  if (!ai) {
+    return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Service IA non disponible" };
+  }
+
+  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} via l'URL : ${pdfUrl}.
+  Extrais : 
+  1. Les formules commerciales (ex: Tiers, Tous Risques, Initiale, Confort).
+  2. Les options complémentaires (ex: Assistance 0km, Protection du conducteur).
+  3. Un résumé sémantique des garanties principales.
+  
+  Réponds au format JSON suivant :
+  {
+    "indexedFormulas": ["Formule 1", "Formule 2"],
+    "indexedOptions": ["Option 1", "Option 2"],
+    "semanticSummary": "Résumé des garanties"
+  }`;
+
+  try {
+    const model = ai.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json'
+      }
+    });
+    
+    const result = await model.generateContent([prompt]);
+    const response = await result.response;
+    const jsonText = response.text();
+    return JSON.parse(jsonText);
+  } catch (err) {
+    console.error('gemini indexCgDocument error', err);
+    return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Erreur d'indexation" };
+  }
+};
+
+/**
+ * Génère un texte de partage court résumant le bilan AssurClair de l'utilisateur
+ */
+export const generateShareableReport = async (policies: Policy[], findings: any[]): Promise<string> => {
+  const ai = getAiClient();
+  if (!ai) {
+    return "J'ai fait mon bilan AssurClair !";
+  }
+
+  const prompt = `Génère un court texte de partage (max 2 phrases) résumant mon bilan AssurClair.
+  Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.
+  ${findings.length > 0 ? `J'ai ${findings.length} optimisation(s) possibles.` : ''}
+  Ton texte doit être engageant et positif.`;
+
+  try {
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent([prompt]);
+    const response = await result.response;
+    return response.text().trim() || "J'ai fait mon bilan AssurClair !";
+  } catch (error) {
+    console.error('gemini generateShareableReport error', error);
+    return "J'ai fait mon bilan AssurClair !";
   }
 };
