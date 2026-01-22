@@ -4,7 +4,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-# Si tu utilises VITE_API_BASE, docker-compose fournit l'env au build
+# Copie le fichier .env.production comme .env pour le build
+COPY .env.production .env
+# Build avec les variables d'environnement de production
 RUN npm run build
 
 # --- Nginx pour servir le static
