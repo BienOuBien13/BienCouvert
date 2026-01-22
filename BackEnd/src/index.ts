@@ -79,7 +79,7 @@ app.use('/api/ai', aiRoutes);            // Routes d'interaction avec l'IA (chat
 // Démarrage du serveur
 // -----------------------------------------------------------------------------
 
-const PORT = process.env.PORT || 4000;  // Port configurable via variable d'environnement
+const PORT = parseInt(process.env.PORT || '4000', 10);  // Port configurable via variable d'environnement
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
 });
