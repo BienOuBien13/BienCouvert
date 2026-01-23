@@ -49,6 +49,11 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   const [smartText, setSmartText] = useState('');
   const [isAnalyzingText, setIsAnalyzingText] = useState(false);
   
+  // États pour le chatbot conversationnel
+  const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'assistant', text: string}>>([]);
+  const [isWaitingResponse, setIsWaitingResponse] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
   // Raffinement State
   const [refiningPolicy, setRefiningPolicy] = useState<Partial<Policy> & { 
     isSearchingPDF: boolean;
@@ -79,15 +84,38 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     }
   }, [initialData]);
 
+  // Auto-scroll pour le chatbot
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Initialiser le chatbot quand on passe en mode smart
+  useEffect(() => {
+    if (mode === 'smart' && formView === 'input' && chatMessages.length === 0) {
+      initializeChatbot(type);
+    }
+  }, [mode, formView]);
+
   const selectCategory = (catType: PolicyType) => {
     setType(catType);
     setFormView('input');
+    // Initialiser la conversation avec une question de l'IA
+    if (mode === 'smart' && chatMessages.length === 0) {
+      initializeChatbot(catType);
+    }
+  };
+
+  const initializeChatbot = (catType: PolicyType) => {
+    const categoryName = GUIDE_CATEGORIES.find(c => c.type === catType)?.label || 'assurance';
+    const initialMessage = `Bonjour ! 👋 Je vais vous aider à enregistrer votre ${categoryName.toLowerCase()}. Pour commencer, chez quel assureur êtes-vous ?`;
+    setChatMessages([{ role: 'assistant', text: initialMessage }]);
   };
 
   const resetForm = () => {
     setName(''); setProvider(''); setType(PolicyType.AUTO); 
     setCoverageDetail(''); setSelectedOptions([]); setSummary('');
     setSourceUrl(''); setSmartText(''); setRefiningPolicy(null);
+    setChatMessages([]); setIsWaitingResponse(false);
     setMode('smart');
     setFormView('selector');
     if (onCancelEdit) onCancelEdit();
@@ -127,16 +155,51 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     }
   };
 
-  const handleSmartExtraction = async (text: string) => {
-    if (!text.trim() || isAnalyzingText) return;
-    setIsAnalyzingText(true);
+  const handleChatMessage = async (userMessage: string) => {
+    if (!userMessage.trim() || isWaitingResponse) return;
+    
+    // Ajouter le message utilisateur
+    const newMessages = [...chatMessages, { role: 'user' as const, text: userMessage }];
+    setChatMessages(newMessages);
+    setSmartText('');
+    setIsWaitingResponse(true);
+    
     try {
-      const result = await parsePoliciesFromText(text);
-      if (result.policies.length > 0) {
+      // Construire le contexte pour l'IA
+      const conversationContext = newMessages.map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.text}`).join('\n');
+      const fullContext = `Tu es un assistant qui aide à enregistrer des contrats d'assurance. Pose des questions courtes et précises pour obtenir : 1) l'assureur, 2) le nom/numéro du contrat, 3) la formule si applicable. Quand tu as assez d'infos, dis "[COMPLET]" suivi des informations extraites au format JSON.\n\nConversation:\n${conversationContext}\nAssistant:`;
+      
+      const result = await parsePoliciesFromText(fullContext);
+      
+      // Vérifier si on a assez d'informations
+      if (result.policies.length > 0 && result.policies[0].provider && result.policies[0].name) {
         startRefining(result.policies[0]);
+      } else if (result.clarificationQuestions) {
+        // Poser une question de clarification
+        setChatMessages([...newMessages, { role: 'assistant', text: result.clarificationQuestions }]);
+      } else {
+        // Question par défaut basée sur ce qui manque
+        let nextQuestion = "Pouvez-vous me donner plus de détails sur votre contrat ?";
+        const lastMsg = conversationContext.toLowerCase();
+        
+        if (!lastMsg.includes('axa') && !lastMsg.includes('maif') && !lastMsg.includes('macif') && !lastMsg.includes('allianz')) {
+          nextQuestion = "Chez quel assureur avez-vous souscrit ce contrat ?";
+        } else if (!result.policies[0]?.name) {
+          nextQuestion = "Parfait ! Connaissez-vous le nom ou le numéro de votre contrat ? Sinon, quelle est votre formule (Tiers, Tous Risques, etc.) ?";
+        }
+        
+        setChatMessages([...newMessages, { role: 'assistant', text: nextQuestion }]);
       }
-      setSmartText("");
-    } catch (err) { console.error(err); } finally { setIsAnalyzingText(false); }
+    } catch (err) {
+      console.error(err);
+      setChatMessages([...newMessages, { role: 'assistant', text: "Désolé, j'ai rencontré une erreur. Pouvez-vous reformuler ?" }]);
+    } finally {
+      setIsWaitingResponse(false);
+    }
+  };
+
+  const handleSmartExtraction = async (text: string) => {
+    handleChatMessage(text);
   };
 
   const handleManualNext = () => {
@@ -306,7 +369,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                 {refiningPolicy?.summary && (
                   <div className="p-5 bg-primary-50 rounded-[2rem] border border-primary-100 flex gap-4">
                      <Info className="w-5 h-5 text-primary-600 flex-shrink-0" />
-                     <p className="text-[10px] text-primary-800 font-medium leading-relaxed italic">
+                     <p className="text-[10px] text-primary-800 font-medium leading-relaxed italic line-clamp-5">
                        "{refiningPolicy.summary}"
                      </p>
                   </div>
@@ -347,28 +410,59 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
         {mode === 'smart' ? (
           <div className="space-y-4">
-             <div className="relative">
-                <div className={`w-full bg-slate-50 border rounded-3xl transition-all relative overflow-hidden border-slate-200 focus-within:border-primary-400 min-h-[180px] flex flex-col items-center justify-center p-8 text-center`}>
-                  <Bot className="w-12 h-12 text-primary-200 mb-4" />
-                  <textarea 
-                    className="w-full bg-transparent border-none outline-none text-sm font-bold text-center placeholder:text-slate-300 resize-none h-16 leading-tight"
-                    placeholder="Tapez : 'J'ai une assurance auto chez AXA'..."
-                    value={smartText}
-                    onChange={e => setSmartText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSmartExtraction(smartText))}
-                  />
-                  <div className="text-[9px] font-black uppercase text-slate-400 mt-2 opacity-50 tracking-tighter">L'IA s'occupe de chercher les garanties pour vous.</div>
-                </div>
-                
-                <div className="absolute bottom-4 right-4">
-                   <button 
-                    onClick={() => handleSmartExtraction(smartText)}
-                    disabled={!smartText.trim() || isAnalyzingText}
-                    className="p-5 bg-slate-900 text-white rounded-2xl hover:bg-primary-600 disabled:opacity-50 transition-all shadow-xl active:scale-95"
-                  >
-                    {isAnalyzingText ? <Loader2 className="w-6 h-6 animate-spin" /> : <ArrowRight className="w-6 h-6" />}
-                  </button>
-                </div>
+             {/* Zone de conversation */}
+             <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 min-h-[300px] max-h-[400px] overflow-y-auto space-y-3">
+               {chatMessages.length === 0 && (
+                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                   <Sparkles className="w-10 h-10 text-primary-300 mb-3" />
+                   <p className="text-xs text-slate-400 font-medium max-w-xs">
+                     L'assistant IA va vous poser quelques questions pour identifier votre contrat rapidement.
+                   </p>
+                 </div>
+               )}
+               
+               {chatMessages.map((msg, idx) => (
+                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                   <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs ${msg.role === 'user' ? 'bg-primary-600 text-white rounded-br-none' : 'bg-white text-slate-800 rounded-bl-none border border-slate-200'}`}>
+                     {msg.text}
+                   </div>
+                 </div>
+               ))}
+               
+               {isWaitingResponse && (
+                 <div className="flex justify-start">
+                   <div className="bg-white rounded-2xl rounded-bl-none px-4 py-3 flex items-center gap-2 border border-slate-200">
+                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
+                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                   </div>
+                 </div>
+               )}
+               <div ref={messagesEndRef} />
+             </div>
+             
+             {/* Zone de saisie */}
+             <div className="relative flex gap-2">
+                <input 
+                  type="text"
+                  className="flex-1 px-4 py-4 bg-white border-2 border-slate-200 rounded-2xl outline-none text-sm font-medium placeholder:text-slate-300 focus:border-primary-400 transition-colors"
+                  placeholder="Répondez à l'assistant..."
+                  value={smartText}
+                  onChange={e => setSmartText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSmartExtraction(smartText))}
+                  disabled={isWaitingResponse}
+                />
+                <button 
+                  onClick={() => handleSmartExtraction(smartText)}
+                  disabled={!smartText.trim() || isWaitingResponse}
+                  className="px-6 py-4 bg-primary-600 text-white rounded-2xl hover:bg-primary-700 disabled:opacity-50 transition-all shadow-sm active:scale-95 flex items-center gap-2"
+                >
+                  {isWaitingResponse ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
+                </button>
+             </div>
+             
+             <div className="text-[10px] text-center text-slate-400 font-medium">
+               💡 Répondez naturellement aux questions de l'assistant
              </div>
           </div>
         ) : (

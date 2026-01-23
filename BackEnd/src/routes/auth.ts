@@ -172,13 +172,15 @@ router.get('/me', authMiddleware, (req: any, res) => {
   const u = users.find((x: any) => x.id === req.user.id);
   if (!u) return res.status(404).json({ message: 'User not found' });
   
-  // Retourne les données utilisateur (sans le mot de passe)
+  // Retourne les données utilisateur (sans le mot de passe) avec structure cohérente
   res.json({ 
-    id: u.id, 
-    email: u.email, 
-    name: u.name,
-    profile: u.profile || {},
-    isAdmin: u.isAdmin || false
+    user: {
+      id: u.id, 
+      email: u.email, 
+      name: u.name,
+      profile: u.profile || {},
+      isAdmin: u.isAdmin || false
+    }
   });
 });
 
