@@ -228,16 +228,21 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     // Si un nouveau mot de passe est fourni, le hache avant de le stocker
     if (password) user.password = await bcrypt.hash(password, 10);
     
+    // Sauvegarder dans la base de données
     await storage.writeUser(user);
+    
+    // Relire les données depuis la base pour être sûr d'avoir les valeurs à jour
+    const updatedUsers = await storage.readUsers();
+    const updatedUser = updatedUsers.find((x: any) => x.id === req.user.id);
     
     // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
     res.json({ 
       user: {
-        id: user.id, 
-        email: user.email, 
-        name: user.name,
-        profile: user.profile,
-        isAdmin: user.isAdmin || false
+        id: updatedUser.id, 
+        email: updatedUser.email, 
+        name: updatedUser.name,
+        profile: updatedUser.profile,
+        isAdmin: updatedUser.isAdmin || false
       }
     });
   } catch (err) {

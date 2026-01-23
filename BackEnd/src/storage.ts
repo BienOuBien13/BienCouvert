@@ -105,6 +105,9 @@ export const storage = {
       startDate, endDate, status, documentUrl, documentData, metadata
     } = data;
     
+    // Sérialiser metadata en JSON si c'est un objet
+    const metadataJson = metadata ? JSON.stringify(metadata) : null;
+    
     if (id) {
       // Mise à jour
       await query(
@@ -115,7 +118,7 @@ export const storage = {
              metadata = $12, updated_at = CURRENT_TIMESTAMP
          WHERE id = $13`,
         [userId, policyNumber, insurer, type, premium, coverage, startDate, 
-         endDate, status, documentUrl, documentData, metadata, id]
+         endDate, status, documentUrl, documentData, metadataJson, id]
       );
     } else {
       // Insertion
@@ -126,7 +129,7 @@ export const storage = {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
         [userId, policyNumber, insurer, type, premium, coverage, startDate, 
-         endDate, status || 'active', documentUrl, documentData, metadata]
+         endDate, status || 'active', documentUrl, documentData, metadataJson]
       );
       return result.rows[0].id;
     }

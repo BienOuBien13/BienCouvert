@@ -46,26 +46,32 @@ router.post('/', upload.single('file'), async (req: any, res) => {
       return res.status(400).json({ message: 'Missing required fields (name or file)' });
     }
 
+    // Validation du userId : doit être un entier valide
+    const userId = body.userId ? parseInt(body.userId) : null;
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({ message: 'Valid userId is required' });
+    }
+
     // Construction de l'objet police avec toutes les propriétés nécessaires
     const newPolicy: any = {
-      userId: body.userId || 'anonymous',               // ID de l'utilisateur propriétaire
-      policyNumber: body.policyNumber || null,
-      insurer: body.provider || body.insurer,           // Assureur
-      type: body.type,                                  // Type d'assurance
-      premium: body.annualPremium || null,              // Prime annuelle en €
-      coverage: body.coverage || null,
-      startDate: body.startDate || null,
-      endDate: body.endDate || null,
-      status: 'active',
+      userId: userId,                                   // ID de l'utilisateur propriétaire (INTEGER requis)
+      policyNumber: body.policyNumber || `POL-${Date.now()}`,  // Génère un numéro si absent
+      insurer: body.provider || body.insurer || 'Non spécifié',  // Assureur (requis)
+      type: body.type || 'Autre',                       // Type d'assurance (requis)
+      premium: body.annualPremium ? parseFloat(body.annualPremium) : null,  // Prime annuelle en €
+      coverage: body.coverage ? parseFloat(body.coverage) : null,  // Montant couverture
+      startDate: body.startDate || new Date().toISOString().split('T')[0],  // Date de début
+      endDate: body.endDate || null,                    // Date de fin
+      status: body.status || 'active',                  // Statut (active par défaut)
       documentUrl: body.sourceUrl || null,              // URL source si provient du web
       documentData: null,                               // Document en base64 (rempli plus bas)
       metadata: {
-        name: body.name,
+        name: body.name || 'Contrat sans nom',
         fileName: null,
         mimeType: body.mimeType || 'text/html',
-        coverageDetail: body.coverageDetail,
+        coverageDetail: body.coverageDetail || null,
         options: body.options || [],
-        summary: body.summary,
+        summary: body.summary || null,
         isInternalSource: body.isInternalSource || false
       }
     };
