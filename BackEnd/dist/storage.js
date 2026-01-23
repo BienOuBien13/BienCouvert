@@ -32,9 +32,14 @@ exports.storage = {
         const profileStr = profile ? JSON.stringify(profile) : null;
         if (id) {
             // Mise à jour
-            await (0, db_1.query)(`UPDATE users 
+            const result = await (0, db_1.query)(`UPDATE users 
          SET email = $1, name = $2, password = $3, profile = $4, is_admin = $5, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6`, [email, name, password, profileStr, isAdmin || false, id]);
+         WHERE id = $6
+         RETURNING id`, [email, name, password, profileStr, isAdmin || false, id]);
+            if (result.rows.length === 0) {
+                throw new Error(`User with id ${id} not found for update`);
+            }
+            return result.rows[0].id;
         }
         else {
             // Insertion
@@ -80,7 +85,8 @@ exports.storage = {
             status: row.status,
             documentUrl: row.document_url,
             documentData: row.document_data,
-            metadata: row.metadata
+            metadata: row.metadata,
+            centralCgId: row.central_cg_id // Lien vers le référentiel central
         }));
     },
     /**
@@ -88,25 +94,27 @@ exports.storage = {
      * @param data - Objet police à sauvegarder
      */
     writePolicy: async (data) => {
-        const { id, userId, policyNumber, insurer, type, premium, coverage, startDate, endDate, status, documentUrl, documentData, metadata } = data;
+        const { id, userId, policyNumber, insurer, type, premium, coverage, startDate, endDate, status, documentUrl, documentData, metadata, centralCgId } = data;
+        // Sérialiser metadata en JSON si c'est un objet
+        const metadataJson = metadata ? JSON.stringify(metadata) : null;
         if (id) {
             // Mise à jour
             await (0, db_1.query)(`UPDATE policies 
          SET user_id = $1, policy_number = $2, insurer = $3, type = $4, 
              premium = $5, coverage = $6, start_date = $7, end_date = $8,
              status = $9, document_url = $10, document_data = $11, 
-             metadata = $12, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $13`, [userId, policyNumber, insurer, type, premium, coverage, startDate,
-                endDate, status, documentUrl, documentData, metadata, id]);
+             metadata = $12, central_cg_id = $13, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $14`, [userId, policyNumber, insurer, type, premium, coverage, startDate,
+                endDate, status, documentUrl, documentData, metadataJson, centralCgId || null, id]);
         }
         else {
             // Insertion
             const result = await (0, db_1.query)(`INSERT INTO policies 
          (user_id, policy_number, insurer, type, premium, coverage, 
-          start_date, end_date, status, document_url, document_data, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          start_date, end_date, status, document_url, document_data, metadata, central_cg_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING id`, [userId, policyNumber, insurer, type, premium, coverage, startDate,
-                endDate, status || 'active', documentUrl, documentData, metadata]);
+                endDate, status || 'active', documentUrl, documentData, metadataJson, centralCgId || null]);
             return result.rows[0].id;
         }
     },

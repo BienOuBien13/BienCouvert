@@ -241,11 +241,24 @@ router.post('/detect-duplicates', async (req, res) => {
  * Route GET /api/policies/central-cg
  * Liste toutes les entrées du référentiel central des CG.
  * Utilisé par la vue d'administration pour gérer le référentiel.
+ * Supporte les query params : ?type=habitation, ?insurer=AXA
  */
 router.get('/central-cg', async (req, res) => {
   try {
     const entries = await storage.readCentralCg();
-    res.json(entries);
+    
+    // Filtrage optionnel par type et/ou assureur
+    let filtered = entries;
+    if (req.query.type) {
+      filtered = filtered.filter((e: any) => e.metadata?.type === req.query.type);
+    }
+    if (req.query.insurer) {
+      filtered = filtered.filter((e: any) => 
+        e.insurer.toLowerCase().includes((req.query.insurer as string).toLowerCase())
+      );
+    }
+    
+    res.json(filtered);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

@@ -47,26 +47,31 @@ router.post('/', upload.single('file'), async (req, res) => {
         if (!body.name && !req.file && !(body.fileData && body.fileName)) {
             return res.status(400).json({ message: 'Missing required fields (name or file)' });
         }
+        // Validation du userId : doit être un entier valide
+        const userId = body.userId ? parseInt(body.userId) : null;
+        if (!userId || isNaN(userId)) {
+            return res.status(400).json({ message: 'Valid userId is required' });
+        }
         // Construction de l'objet police avec toutes les propriétés nécessaires
         const newPolicy = {
-            userId: body.userId || 'anonymous', // ID de l'utilisateur propriétaire
-            policyNumber: body.policyNumber || null,
-            insurer: body.provider || body.insurer, // Assureur
-            type: body.type, // Type d'assurance
-            premium: body.annualPremium || null, // Prime annuelle en €
-            coverage: body.coverage || null,
-            startDate: body.startDate || null,
-            endDate: body.endDate || null,
-            status: 'active',
+            userId: userId, // ID de l'utilisateur propriétaire (INTEGER requis)
+            policyNumber: body.policyNumber || `POL-${Date.now()}`, // Génère un numéro si absent
+            insurer: body.provider || body.insurer || 'Non spécifié', // Assureur (requis)
+            type: body.type || 'Autre', // Type d'assurance (requis)
+            premium: body.annualPremium ? parseFloat(body.annualPremium) : null, // Prime annuelle en €
+            coverage: body.coverage ? parseFloat(body.coverage) : null, // Montant couverture
+            startDate: body.startDate || new Date().toISOString().split('T')[0], // Date de début
+            endDate: body.endDate || null, // Date de fin
+            status: body.status || 'active', // Statut (active par défaut)
             documentUrl: body.sourceUrl || null, // URL source si provient du web
             documentData: null, // Document en base64 (rempli plus bas)
             metadata: {
-                name: body.name,
+                name: body.name || 'Contrat sans nom',
                 fileName: null,
                 mimeType: body.mimeType || 'text/html',
-                coverageDetail: body.coverageDetail,
+                coverageDetail: body.coverageDetail || null,
                 options: body.options || [],
-                summary: body.summary,
+                summary: body.summary || null,
                 isInternalSource: body.isInternalSource || false
             }
         };
@@ -245,11 +250,20 @@ router.post('/detect-duplicates', async (req, res) => {
  * Route GET /api/policies/central-cg
  * Liste toutes les entrées du référentiel central des CG.
  * Utilisé par la vue d'administration pour gérer le référentiel.
+ * Supporte les query params : ?type=habitation, ?insurer=AXA
  */
 router.get('/central-cg', async (req, res) => {
     try {
         const entries = await storage_1.storage.readCentralCg();
-        res.json(entries);
+        // Filtrage optionnel par type et/ou assureur
+        let filtered = entries;
+        if (req.query.type) {
+            filtered = filtered.filter((e) => e.metadata?.type === req.query.type);
+        }
+        if (req.query.insurer) {
+            filtered = filtered.filter((e) => e.insurer.toLowerCase().includes(req.query.insurer.toLowerCase()));
+        }
+        res.json(filtered);
     }
     catch (err) {
         console.error(err);

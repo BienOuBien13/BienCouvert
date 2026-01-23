@@ -213,27 +213,49 @@ router.get('/me', authMiddleware, async (req: any, res) => {
  */
 router.put('/me', authMiddleware, async (req: any, res) => {
   try {
+    console.log('📝 PUT /me - User ID:', req.user.id);
+    console.log('📝 Request body:', JSON.stringify(req.body, null, 2));
+    
     const users = await storage.readUsers();
     // Recherche de l'utilisateur par ID extrait du token JWT
     const user = users.find((x: any) => x.id === req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) {
+      console.error('❌ User not found:', req.user.id);
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    console.log('👤 Current user:', { id: user.id, name: user.name, email: user.email });
     
     const { name, email, password, profile } = req.body;
     
     // Mise à jour des champs fournis (ne modifie que les champs présents dans la requête)
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.profile = profile !== undefined ? profile : (user.profile || {});
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (profile !== undefined) user.profile = profile;
+    
+    console.log('📝 Updated user data:', { id: user.id, name: user.name, email: user.email, profile: user.profile });
     
     // Si un nouveau mot de passe est fourni, le hache avant de le stocker
-    if (password) user.password = await bcrypt.hash(password, 10);
+    if (password) {
+      console.log('🔒 Hashing new password...');
+      user.password = await bcrypt.hash(password, 10);
+    }
     
     // Sauvegarder dans la base de données
+    console.log('💾 Saving to database...');
     await storage.writeUser(user);
+    console.log('✅ User saved successfully');
     
     // Relire les données depuis la base pour être sûr d'avoir les valeurs à jour
     const updatedUsers = await storage.readUsers();
     const updatedUser = updatedUsers.find((x: any) => x.id === req.user.id);
+    
+    if (!updatedUser) {
+      console.error('❌ Updated user not found after save!');
+      return res.status(500).json({ message: 'Failed to retrieve updated user' });
+    }
+    
+    console.log('✅ Updated user retrieved:', { id: updatedUser.id, name: updatedUser.name, email: updatedUser.email });
     
     // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
     res.json({ 
@@ -246,8 +268,8 @@ router.put('/me', authMiddleware, async (req: any, res) => {
       }
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    console.error('❌ Error in PUT /me:', err);
+    res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 

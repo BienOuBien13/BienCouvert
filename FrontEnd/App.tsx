@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { BottomNav } from './components/BottomNav';
 import { PolicyForm } from './components/PolicyForm';
+import { QuickPolicyForm } from './components/QuickPolicyForm';
 import { PolicyList } from './components/PolicyList';
 import { ChatInterface } from './components/ChatInterface';
 import { AnalysisView } from './components/AnalysisView';
@@ -30,6 +31,7 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [useQuickForm, setUseQuickForm] = useState(true); // Toggle entre QuickForm et PolicyForm classique
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
@@ -303,13 +305,32 @@ function App() {
       case 'policies':
         return (
           <div className="space-y-8 animate-fadeIn">
-            <PolicyForm 
-              onAddPolicy={handleAddPolicy} 
-              onUpdatePolicy={handleUpdatePolicy}
-              initialData={editingPolicy}
-              onCancelEdit={() => setEditingPolicy(null)}
-              existingPolicies={policies}
-            />
+            {useQuickForm && !editingPolicy ? (
+              <QuickPolicyForm 
+                user={user}
+                onAddPolicy={handleAddPolicy}
+                onCancel={() => setActiveView('home')}
+              />
+            ) : (
+              <>
+                <div className="flex justify-end px-4">
+                  <button
+                    onClick={() => setUseQuickForm(!useQuickForm)}
+                    className="px-4 py-2 text-sm font-bold text-primary-600 hover:text-primary-700 flex items-center gap-2"
+                  >
+                    <Zap className="w-4 h-4" />
+                    {useQuickForm ? 'Mode classique' : 'Mode rapide'}
+                  </button>
+                </div>
+                <PolicyForm 
+                  onAddPolicy={handleAddPolicy} 
+                  onUpdatePolicy={handleUpdatePolicy}
+                  initialData={editingPolicy}
+                  onCancelEdit={() => setEditingPolicy(null)}
+                  existingPolicies={policies}
+                />
+              </>
+            )}
             <PolicyList 
               policies={policies} 
               onDelete={handleDeletePolicy} 
