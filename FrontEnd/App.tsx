@@ -305,32 +305,21 @@ function App() {
         );
       case 'policies':
         return (
-          <div className="space-y-8 animate-fadeIn">
-            {/* Assistant Chat Intelligent */}
-            {!showSmartChat ? (
-              <div className="flex justify-center">
-                <button
-                  onClick={() => setShowSmartChat(true)}
-                  className="group relative overflow-hidden bg-gradient-to-r from-primary-600 via-cyan-600 to-primary-700 text-white px-10 py-5 rounded-3xl font-black text-xl shadow-2xl hover:shadow-cyan-500/50 transition-all hover:scale-105 active:scale-95"
-                >
-                  <div className="relative z-10 flex items-center gap-4">
-                    <Sparkles className="w-7 h-7 animate-pulse" />
-                    <div className="text-left">
-                      <div>Assistant Intelligent</div>
-                      <div className="text-xs font-medium text-white/80">Ajout rapide & en masse avec IA</div>
-                    </div>
-                    <ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 to-primary-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
+          <div className="space-y-6 animate-fadeIn">
+            {/* Header avec navigation */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 mb-2">Mon Portefeuille</h2>
+                <p className="text-slate-600 font-medium">{policies.length} contrat(s) d'assurance</p>
               </div>
-            ) : (
-              <SmartChatAssistant 
-                user={user}
-                onAddPolicy={handleAddPolicy}
-                onCancel={() => setShowSmartChat(false)}
-              />
-            )}
+              <button
+                onClick={() => setActiveView('add')}
+                className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-primary-600 to-cyan-600 text-white rounded-2xl font-black hover:shadow-xl hover:scale-105 transition-all"
+              >
+                <Sparkles className="w-5 h-5" />
+                Ajouter des contrats
+              </button>
+            </div>
 
             <PolicyList 
               policies={policies} 

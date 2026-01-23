@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Home, Files, MessageSquare, Zap, Users, User as UserIcon } from 'lucide-react';
+import { Home, Files, MessageSquare, Zap, Users, User as UserIcon, Plus } from 'lucide-react';
 import { AppView } from '../types';
 
 interface Props {
@@ -11,8 +11,9 @@ interface Props {
 export const BottomNav: React.FC<Props> = ({ activeView, setActiveView }) => {
   const navItems = [
     { id: 'home' as AppView, label: 'Accueil', icon: Home },
-    { id: 'policies' as AppView, label: 'Mes Contrats', icon: Files },
-    { id: 'chat' as AppView, label: 'Assistant', icon: MessageSquare, isCentral: true },
+    { id: 'add' as AppView, label: 'Ajouter', icon: Plus, isCentral: true },
+    { id: 'policies' as AppView, label: 'Contrats', icon: Files },
+    { id: 'chat' as AppView, label: 'Assistant', icon: MessageSquare },
     { id: 'analysis' as AppView, label: 'Optimisation', icon: Zap },
     { id: 'experts' as AppView, label: 'Experts', icon: Users },
   ];
