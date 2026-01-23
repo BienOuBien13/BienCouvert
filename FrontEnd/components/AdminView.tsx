@@ -225,6 +225,7 @@ export const AdminView: React.FC = () => {
                 <th className="px-8 py-4">Assureur</th>
                 <th className="px-8 py-4">Nom</th>
                 <th className="px-8 py-4">Type</th>
+                <th className="px-8 py-4">URL</th>
                 <th className="px-8 py-4">Intelligence</th>
                 <th className="px-8 py-4 text-right">Actions</th>
               </tr>
@@ -242,6 +243,23 @@ export const AdminView: React.FC = () => {
                     <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase">
                       {entry.type}
                     </span>
+                  </td>
+                  <td className="px-6 py-5">
+                    {entry.documentUrl ? (
+                      <a 
+                        href={entry.documentUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-xs font-medium group/link"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span className="max-w-[200px] truncate group-hover/link:underline">
+                          {entry.documentUrl.replace(/^https?:\/\//, '').split('/')[0]}
+                        </span>
+                      </a>
+                    ) : (
+                      <span className="text-slate-300 text-xs">-</span>
+                    )}
                   </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">

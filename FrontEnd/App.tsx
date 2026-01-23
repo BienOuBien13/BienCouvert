@@ -92,9 +92,8 @@ function App() {
     const policyWithUser: Policy = { ...policy, userId: user.id };
     try {
       await storageService.savePolicy(policyWithUser);
-      setShowWizard(false); // Fermer le wizard
       setPolicies(prev => [policyWithUser, ...prev]);
-      setActiveView('policies');
+      // Reste sur la vue 'add' pour permettre l'ajout de plusieurs contrats
     } catch (error) {
       console.error('Failed to save policy:', error);
       alert('Erreur lors de la sauvegarde du contrat');
