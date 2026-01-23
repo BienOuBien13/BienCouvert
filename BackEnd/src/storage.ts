@@ -161,14 +161,19 @@ export const storage = {
     const result = await query('SELECT * FROM central_cg ORDER BY id');
     return result.rows.map(row => ({
       id: row.id,
-      insurer: row.insurer,
-      productName: row.product_name,
+      provider: row.insurer,                    // Mapping insurer → provider pour le frontend
+      policyName: row.product_name,             // Mapping product_name → policyName pour le frontend
+      type: row.metadata?.type || 'Autre',     // Type depuis metadata
       version: row.version,
       documentUrl: row.document_url,
       documentHash: row.document_hash,
       contentText: row.content_text,
       embedding: row.embedding,
-      metadata: row.metadata
+      indexedFormulas: row.metadata?.indexedFormulas || [],
+      indexedOptions: row.metadata?.indexedOptions || [],
+      semanticSummary: row.metadata?.semanticSummary || '',
+      metadata: row.metadata,
+      lastVerified: row.updated_at || row.created_at
     })) as T[];
   },
 

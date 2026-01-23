@@ -303,6 +303,12 @@ function App() {
             </div>
           </div>
         );
+      case 'add':
+        return (
+          <div className="space-y-6 animate-fadeIn max-w-5xl mx-auto">
+            <SmartChatAssistant user={user} onAddPolicy={handleAddPolicy} onCancel={() => setActiveView('home')} />
+          </div>
+        );
       case 'policies':
         return (
           <div className="space-y-6 animate-fadeIn">
