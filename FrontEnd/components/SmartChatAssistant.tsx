@@ -57,14 +57,54 @@ const TYPES = [
 ];
 
 const INSURERS = [
-  { id: 'maif', name: 'MAIF', logo: '🟢', color: 'bg-green-600' },
-  { id: 'axa', name: 'AXA', logo: '🔵', color: 'bg-blue-700' },
-  { id: 'allianz', name: 'Allianz', logo: '🔷', color: 'bg-blue-600' },
-  { id: 'macif', name: 'MACIF', logo: '🔴', color: 'bg-red-600' },
-  { id: 'groupama', name: 'Groupama', logo: '🟠', color: 'bg-orange-600' },
-  { id: 'generali', name: 'Generali', logo: '🦁', color: 'bg-red-700' },
-  { id: 'mma', name: 'MMA', logo: '⚫', color: 'bg-slate-700' },
-  { id: 'matmut', name: 'Matmut', logo: '🟡', color: 'bg-yellow-600' },
+  { 
+    id: 'maif', 
+    name: 'MAIF', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/Logo_MAIF.svg/200px-Logo_MAIF.svg.png',
+    color: 'bg-green-600' 
+  },
+  { 
+    id: 'axa', 
+    name: 'AXA', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/AXA_Logo.svg/200px-AXA_Logo.svg.png',
+    color: 'bg-blue-700' 
+  },
+  { 
+    id: 'allianz', 
+    name: 'Allianz', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Allianz_logo.svg/200px-Allianz_logo.svg.png',
+    color: 'bg-blue-600' 
+  },
+  { 
+    id: 'macif', 
+    name: 'MACIF', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Logo_Macif.svg/200px-Logo_Macif.svg.png',
+    color: 'bg-red-600' 
+  },
+  { 
+    id: 'groupama', 
+    name: 'Groupama', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/Logo_Groupama.svg/200px-Logo_Groupama.svg.png',
+    color: 'bg-orange-600' 
+  },
+  { 
+    id: 'generali', 
+    name: 'Generali', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Generali_logo.svg/200px-Generali_logo.svg.png',
+    color: 'bg-red-700' 
+  },
+  { 
+    id: 'mma', 
+    name: 'MMA', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/MMA_Logo.svg/200px-MMA_Logo.svg.png',
+    color: 'bg-slate-700' 
+  },
+  { 
+    id: 'matmut', 
+    name: 'Matmut', 
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Logo_Matmut.svg/200px-Logo_Matmut.svg.png',
+    color: 'bg-yellow-600' 
+  },
 ];
 
 export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCancel }) => {
@@ -166,7 +206,7 @@ Exemples pour Habitation:
   };
 
   const handleInsurerSelect = async (insurerName: string, insurerLogo: string) => {
-    addMessage(`${insurerLogo} ${insurerName}`, 'user');
+    addMessage(`${insurerName}`, 'user');
     setSelectedInsurer(insurerName);
     setSelectedInsurerLogo(insurerLogo);
     
@@ -209,8 +249,11 @@ Exemples pour Habitation:
     setPendingContracts(contracts);
     
     setTimeout(() => {
+      const logoDisplay = selectedInsurerLogo.startsWith('http') 
+        ? `<img src="${selectedInsurerLogo}" alt="${selectedInsurer}" style="display:inline-block;width:20px;height:20px;vertical-align:middle;margin-right:4px;" />`
+        : selectedInsurerLogo;
       addMessage(
-        `✅ Parfait ! Récapitulatif :\n\n${selectedInsurerLogo} ${selectedInsurer}\n📋 ${contractCount} contrat(s) ${selectedType}\n📦 Formule: ${formula.name}\n🎯 Options: ${formula.options.join(', ')}\n\nVoulez-vous confirmer ?`,
+        `✅ Parfait ! Récapitulatif :\n\n${selectedInsurer}\n📋 ${contractCount} contrat(s) ${selectedType}\n📦 Formule: ${formula.name}\n🎯 Options: ${formula.options.join(', ')}\n\nVoulez-vous confirmer ?`,
         'bot',
         { showConfirm: true }
       );
@@ -223,15 +266,16 @@ Exemples pour Habitation:
     
     setTimeout(() => {
       pendingContracts.forEach(contract => {
+        const logoUrl = contract.insurerLogo.startsWith('http') ? contract.insurerLogo : '';
         const newPolicy: Omit<Policy, 'userId'> = {
           id: uuid(),
           name: contract.name,
           provider: contract.insurer,
           type: contract.type,
-          coverageDetail: `${contract.insurerLogo} ${contract.insurer}\n\n📦 Formule: ${contract.formula}\n\n🎯 Options incluses:\n${contract.options.map(opt => `• ${opt}`).join('\n')}`,
+          coverageDetail: `${contract.insurer}\n\n📦 Formule: ${contract.formula}\n\n🎯 Options incluses:\n${contract.options.map(opt => `• ${opt}`).join('\n')}`,
           options: contract.options,
           summary: `${contract.type} - ${contract.formula}`,
-          sourceUrl: null,
+          sourceUrl: logoUrl || null,
           isInternalSource: true,
           addedAt: Date.now(),
           fileData: null,
@@ -269,16 +313,16 @@ Exemples pour Habitation:
   };
 
   return (
-    <div className="bg-white rounded-3xl shadow-2xl h-[750px] flex flex-col overflow-hidden">
+    <div className="bg-white rounded-3xl shadow-2xl border-2 border-slate-100 flex flex-col overflow-hidden" style={{ height: 'calc(100vh - 280px)', minHeight: '600px', maxHeight: '800px' }}>
       {/* Header */}
-      <div className="bg-gradient-to-r from-primary-600 via-cyan-600 to-primary-700 p-6 flex items-center justify-between">
+      <div className="bg-gradient-to-r from-primary-600 via-cyan-600 to-primary-700 p-5 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center">
-            <MessageSquare className="w-6 h-6 text-white" />
+          <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center">
+            <MessageSquare className="w-7 h-7 text-white" />
           </div>
           <div>
             <h2 className="text-2xl font-black text-white">Assistant Intelligent</h2>
-            <p className="text-sm text-white/80 font-medium">Ajout rapide & en masse avec IA</p>
+            <p className="text-sm text-white/90 font-medium">✨ Ajout rapide & en masse avec suggestions IA</p>
           </div>
         </div>
         <button onClick={onCancel} className="text-white/80 hover:text-white p-2 hover:bg-white/20 rounded-xl transition-all">
@@ -287,11 +331,11 @@ Exemples pour Habitation:
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-br from-slate-50 to-slate-100">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] ${message.sender === 'user' ? 'bg-primary-600 text-white' : 'bg-white text-slate-900'} rounded-2xl p-4 shadow-sm`}>
-              <p className="text-sm font-medium whitespace-pre-line">{message.text}</p>
+            <div className={`max-w-[85%] ${message.sender === 'user' ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white shadow-lg shadow-primary-200' : 'bg-white text-slate-900 shadow-md'} rounded-2xl p-5`}>
+              <p className="text-sm font-medium whitespace-pre-line leading-relaxed">{message.text}</p>
               
               {/* Types d'assurance */}
               {!selectedType && message.sender === 'bot' && (
@@ -311,15 +355,27 @@ Exemples pour Habitation:
 
               {/* Logos assureurs */}
               {message.showInsurerLogos && (
-                <div className="grid grid-cols-4 gap-2 mt-4">
+                <div className="grid grid-cols-4 gap-3 mt-4">
                   {INSURERS.map((insurer) => (
                     <button
                       key={insurer.id}
                       onClick={() => handleInsurerSelect(insurer.name, insurer.logo)}
-                      className={`${insurer.color} text-white p-3 rounded-xl hover:scale-110 transition-all flex flex-col items-center gap-1 font-black text-xs`}
+                      className="bg-white border-2 border-slate-200 hover:border-primary-500 p-3 rounded-xl hover:scale-105 transition-all flex flex-col items-center gap-2 group"
                     >
-                      <span className="text-2xl">{insurer.logo}</span>
-                      {insurer.name}
+                      <div className="w-16 h-16 flex items-center justify-center bg-white rounded-lg overflow-hidden">
+                        <img 
+                          src={insurer.logo} 
+                          alt={insurer.name}
+                          className="w-full h-full object-contain"
+                          onError={(e) => {
+                            // Fallback vers couleur de fond si l'image ne charge pas
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.parentElement!.className = `w-16 h-16 flex items-center justify-center ${insurer.color} rounded-lg`;
+                            e.currentTarget.parentElement!.innerHTML = `<span class="text-white font-black text-xs">${insurer.name}</span>`;
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-slate-700 group-hover:text-primary-600">{insurer.name}</span>
                     </button>
                   ))}
                 </div>
@@ -417,18 +473,19 @@ Exemples pour Habitation:
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-slate-200">
-        <div className="flex gap-2">
+      <form onSubmit={handleSubmit} className="p-5 bg-white border-t-2 border-slate-100 flex-shrink-0">
+        <div className="flex gap-3">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Tapez votre message..."
-            className="flex-1 px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium"
+            placeholder="Tapez votre message ou posez une question..."
+            className="flex-1 px-5 py-4 border-2 border-slate-200 rounded-2xl focus:border-primary-500 outline-none font-medium text-sm"
           />
           <button
             type="submit"
-            className="px-6 py-3 bg-gradient-to-r from-primary-600 to-cyan-600 text-white rounded-xl hover:shadow-lg transition-all font-black"
+            disabled={!input.trim()}
+            className="px-8 py-4 bg-gradient-to-r from-primary-600 to-cyan-600 text-white rounded-2xl hover:shadow-xl transition-all font-black disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-5 h-5" />
           </button>

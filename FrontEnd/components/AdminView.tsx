@@ -88,10 +88,12 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  const filteredRepo = repo.filter(e => 
-    e.provider.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    e.policyName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredRepo = repo.filter(e => {
+    const provider = e.provider?.toLowerCase() || '';
+    const policyName = e.policyName?.toLowerCase() || '';
+    const search = searchTerm.toLowerCase();
+    return provider.includes(search) || policyName.includes(search);
+  });
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-fadeIn pb-20">

@@ -32,7 +32,6 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [showSmartChat, setShowSmartChat] = useState(false); // Assistant chat intelligent
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
