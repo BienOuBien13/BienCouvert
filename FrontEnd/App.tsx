@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { BottomNav } from './components/BottomNav';
 import { PolicyForm } from './components/PolicyForm';
+import { ModernPolicyWizard } from './components/ModernPolicyWizard';
 import { QuickPolicyForm } from './components/QuickPolicyForm';
 import { PolicyList } from './components/PolicyList';
 import { ChatInterface } from './components/ChatInterface';
@@ -31,7 +32,8 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [useQuickForm, setUseQuickForm] = useState(true); // Toggle entre QuickForm et PolicyForm classique
+  const [showWizard, setShowWizard] = useState(false); // Nouveau wizard moderne
+  const [useQuickForm, setUseQuickForm] = useState(false); // QuickForm conversationnel
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
@@ -92,6 +94,7 @@ function App() {
     const policyWithUser: Policy = { ...policy, userId: user.id };
     try {
       await storageService.savePolicy(policyWithUser);
+      setShowWizard(false); // Fermer le wizard
       setPolicies(prev => [policyWithUser, ...prev]);
       setActiveView('policies');
     } catch (error) {
@@ -305,32 +308,21 @@ function App() {
       case 'policies':
         return (
           <div className="space-y-8 animate-fadeIn">
-            {useQuickForm && !editingPolicy ? (
-              <QuickPolicyForm 
-                user={user}
-                onAddPolicy={handleAddPolicy}
-                onCancel={() => setActiveView('home')}
-              />
-            ) : (
-              <>
-                <div className="flex justify-end px-4">
-                  <button
-                    onClick={() => setUseQuickForm(!useQuickForm)}
-                    className="px-4 py-2 text-sm font-bold text-primary-600 hover:text-primary-700 flex items-center gap-2"
-                  >
-                    <Zap className="w-4 h-4" />
-                    {useQuickForm ? 'Mode classique' : 'Mode rapide'}
-                  </button>
+            {/* Bouton d'ajout principal */}
+            <div className="flex justify-center">
+              <button
+                onClick={() => setShowWizard(true)}
+                className="group relative overflow-hidden bg-gradient-to-r from-primary-600 via-primary-500 to-cyan-500 text-white px-8 py-4 rounded-3xl font-black text-lg shadow-xl hover:shadow-2xl transition-all hover:scale-105 active:scale-95"
+              >
+                <div className="relative z-10 flex items-center gap-3">
+                  <Sparkles className="w-6 h-6" />
+                  Ajouter un contrat
+                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </div>
-                <PolicyForm 
-                  onAddPolicy={handleAddPolicy} 
-                  onUpdatePolicy={handleUpdatePolicy}
-                  initialData={editingPolicy}
-                  onCancelEdit={() => setEditingPolicy(null)}
-                  existingPolicies={policies}
-                />
-              </>
-            )}
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-primary-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            </div>
+
             <PolicyList 
               policies={policies} 
               onDelete={handleDeletePolicy} 
@@ -362,6 +354,30 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 md:bg-slate-50 pb-32">
+      {/* Wizard Modal */}
+      {showWizard && (
+        <ModernPolicyWizard 
+          user={user}
+          onAddPolicy={handleAddPolicy}
+          onCancel={() => setShowWizard(false)}
+        />
+      )}
+      
+      {/* Modal d'édition (mode classique) */}
+      {editingPolicy && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <PolicyForm 
+              onAddPolicy={() => {}} 
+              onUpdatePolicy={handleUpdatePolicy}
+              initialData={editingPolicy}
+              onCancelEdit={() => setEditingPolicy(null)}
+              existingPolicies={policies}
+            />
+          </div>
+        </div>
+      )}
+
       <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60]">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView('home')}>
           <div className="bg-primary-600 p-1.5 rounded-xl shadow-lg shadow-primary-200 group-hover:rotate-12 transition-transform"><ShieldCheck className="w-5 h-5 text-white" /></div>
