@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { BottomNav } from './components/BottomNav';
 import { PolicyForm } from './components/PolicyForm';
 import { ModernPolicyWizard } from './components/ModernPolicyWizard';
-import { QuickPolicyForm } from './components/QuickPolicyForm';
+import { SmartChatAssistant } from './components/SmartChatAssistant';
 import { PolicyList } from './components/PolicyList';
 import { ChatInterface } from './components/ChatInterface';
 import { AnalysisView } from './components/AnalysisView';
@@ -32,8 +32,7 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [showWizard, setShowWizard] = useState(false); // Nouveau wizard moderne
-  const [useQuickForm, setUseQuickForm] = useState(false); // QuickForm conversationnel
+  const [showSmartChat, setShowSmartChat] = useState(false); // Assistant chat intelligent
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
@@ -308,20 +307,31 @@ function App() {
       case 'policies':
         return (
           <div className="space-y-8 animate-fadeIn">
-            {/* Bouton d'ajout principal */}
-            <div className="flex justify-center">
-              <button
-                onClick={() => setShowWizard(true)}
-                className="group relative overflow-hidden bg-gradient-to-r from-primary-600 via-primary-500 to-cyan-500 text-white px-8 py-4 rounded-3xl font-black text-lg shadow-xl hover:shadow-2xl transition-all hover:scale-105 active:scale-95"
-              >
-                <div className="relative z-10 flex items-center gap-3">
-                  <Sparkles className="w-6 h-6" />
-                  Ajouter un contrat
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-primary-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
-            </div>
+            {/* Assistant Chat Intelligent */}
+            {!showSmartChat ? (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setShowSmartChat(true)}
+                  className="group relative overflow-hidden bg-gradient-to-r from-primary-600 via-cyan-600 to-primary-700 text-white px-10 py-5 rounded-3xl font-black text-xl shadow-2xl hover:shadow-cyan-500/50 transition-all hover:scale-105 active:scale-95"
+                >
+                  <div className="relative z-10 flex items-center gap-4">
+                    <Sparkles className="w-7 h-7 animate-pulse" />
+                    <div className="text-left">
+                      <div>Assistant Intelligent</div>
+                      <div className="text-xs font-medium text-white/80">Ajout rapide & en masse avec IA</div>
+                    </div>
+                    <ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 to-primary-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </div>
+            ) : (
+              <SmartChatAssistant 
+                user={user}
+                onAddPolicy={handleAddPolicy}
+                onCancel={() => setShowSmartChat(false)}
+              />
+            )}
 
             <PolicyList 
               policies={policies} 
@@ -354,15 +364,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 md:bg-slate-50 pb-32">
-      {/* Wizard Modal */}
-      {showWizard && (
-        <ModernPolicyWizard 
-          user={user}
-          onAddPolicy={handleAddPolicy}
-          onCancel={() => setShowWizard(false)}
-        />
-      )}
-      
       {/* Modal d'édition (mode classique) */}
       {editingPolicy && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -384,16 +385,14 @@ function App() {
           <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">AssurClair</span>
         </div>
         <div className="flex items-center gap-2">
-           {user.isAdmin && (
-             <button 
-               onClick={() => setActiveView('admin')} 
-               className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'admin' ? 'bg-primary-600 text-white border-primary-600 shadow-primary-200' : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300 hover:text-primary-600'}`}
-               title="Administration - Base de Connaissances"
-             >
-               <Database className="w-4 h-4" />
-               <span className="text-sm font-bold hidden sm:inline">Admin</span>
-             </button>
-           )}
+           <button 
+             onClick={() => setActiveView('admin')} 
+             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'admin' ? 'bg-primary-600 text-white border-primary-600 shadow-primary-200' : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300 hover:text-primary-600'}`}
+             title="Administration - Base de Connaissances"
+           >
+             <Database className="w-4 h-4" />
+             <span className="text-sm font-bold hidden sm:inline">Admin</span>
+           </button>
            <button onClick={() => setActiveView('profile')} className={`p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
              <Settings className="w-5 h-5" />
            </button>

@@ -229,8 +229,15 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     const { name, email, password, profile } = req.body;
     
     // Mise à jour des champs fournis (ne modifie que les champs présents dans la requête)
-    if (name !== undefined) user.name = name;
-    if (email !== undefined) user.email = email;
+    // ⚠️ L'email est une clé unique et ne peut pas être modifié après création du compte
+    if (name !== undefined) {
+      console.log(`📝 Updating name: "${user.name}" -> "${name}"`);
+      user.name = name;
+    }
+    if (email !== undefined && email !== user.email) {
+      console.warn('⚠️ Email modification blocked - email is a unique key');
+      return res.status(400).json({ message: 'Email cannot be changed' });
+    }
     if (profile !== undefined) user.profile = profile;
     
     console.log('📝 Updated user data:', { id: user.id, name: user.name, email: user.email, profile: user.profile });

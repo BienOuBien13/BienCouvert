@@ -50,7 +50,7 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
       
       const updatedUser = await authService.updateUser(user.id, {
         name,
-        email,
+        // Email n'est plus envoyé car non modifiable
         password: password || undefined,
         profile
       });
@@ -146,17 +146,20 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Adresse Email</label>
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">
+                    Adresse Email <span className="text-red-500">(non modifiable)</span>
+                  </label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                     <input
                       type="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none font-bold"
-                      required
+                      disabled
+                      className="w-full pl-12 pr-4 py-4 bg-slate-100 border border-slate-200 rounded-2xl font-bold text-slate-500 cursor-not-allowed"
+                      title="L'email est une clé unique et ne peut pas être modifié"
                     />
                   </div>
+                  <p className="text-xs text-slate-500 ml-1">L'email est votre identifiant unique et ne peut pas être changé</p>
                 </div>
               </div>
 
