@@ -2,7 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
 import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare } from 'lucide-react';
 import { uuid } from '../utils/uuid';
-import { geminiService } from '../services/geminiService';
+
+// Simple AI API call helper
+const getAIResponse = async (prompt: string): Promise<string> => {
+  try {
+    const API_URL = (import.meta as any).env?.VITE_API_URL ?? '';
+    const response = await fetch(`${API_URL}/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt, policies: [], history: [] })
+    });
+    if (!response.ok) throw new Error('AI API error');
+    const data = await response.json();
+    return data.response || '';
+  } catch (error) {
+    console.error('AI Error:', error);
+    return '';
+  }
+};
 
 interface Props {
   user: User;
@@ -105,11 +122,13 @@ Exemples pour Habitation:
 - Essentielle avec: Incendie, Dégâts des eaux, Vol
 - Confort avec: Incendie, Dégâts des eaux, Vol, Bris de glace, Responsabilité civile`;
       
-      const response = await geminiService.analyzeText(prompt);
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[0]);
-        return data.formulas;
+      const response = await getAIResponse(prompt);
+      if (response) {
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const data = JSON.parse(jsonMatch[0]);
+          return data.formulas;
+        }
       }
     } catch (error) {
       console.error('Erreur IA:', error);
