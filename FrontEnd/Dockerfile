@@ -1,11 +1,19 @@
 # --- Build
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+
+# Copier les manifests
+COPY package.json package-lock.json ./
+
+# Installer toutes les dépendances (dev + prod) pour le build
+RUN npm ci --include=dev
+
+# Copier le reste du code
 COPY . .
+
 # Copie le fichier .env.production comme .env pour le build
 COPY .env.production .env
+
 # Build avec les variables d'environnement de production
 RUN npm run build
 

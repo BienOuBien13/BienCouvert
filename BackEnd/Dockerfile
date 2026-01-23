@@ -3,8 +3,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copier juste les manifests pour optimiser le cache
-COPY package*.json ./
-RUN npm ci
+COPY package.json package-lock.json ./
+
+# Installer TOUTES les dépendances (dev + prod) pour le build
+RUN npm ci --include=dev
 
 # Copier le reste et builder
 COPY . .
