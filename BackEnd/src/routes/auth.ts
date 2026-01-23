@@ -206,13 +206,15 @@ router.put('/me', authMiddleware, async (req: any, res) => {
   
   storage.writeUsers(users);
   
-  // Retourne les données mises à jour (sans le mot de passe)
+  // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
   res.json({ 
-    id: users[idx].id, 
-    email: users[idx].email, 
-    name: users[idx].name,
-    profile: users[idx].profile,
-    isAdmin: users[idx].isAdmin || false
+    user: {
+      id: users[idx].id, 
+      email: users[idx].email, 
+      name: users[idx].name,
+      profile: users[idx].profile,
+      isAdmin: users[idx].isAdmin || false
+    }
   });
 });
 
