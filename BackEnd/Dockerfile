@@ -24,9 +24,8 @@ RUN npm ci --omit=dev
 # Copier les sources compilés
 COPY --from=builder /app/dist ./dist
 
-# (Optionnel) Si tu lis des fichiers statiques .env/.json au runtime, copie-les :
-# COPY --from=builder /app/.env ./
-# COPY --from=builder /app/src/public ./public
+# Copier le fichier .env de production
+COPY .env.production ./.env
 
 EXPOSE 4000
 
