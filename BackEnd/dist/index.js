@@ -10,10 +10,12 @@ const body_parser_1 = __importDefault(require("body-parser"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const policies_1 = __importDefault(require("./routes/policies"));
 const ai_1 = __importDefault(require("./routes/ai"));
+require("./db"); // Initialisation de la connexion PostgreSQL
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
 // Ce fichier configure Express avec les middlewares nécessaires et monte
 // les différentes routes de l'API REST.
+// Configuration PostgreSQL : connecté à la VM Azure
 // -----------------------------------------------------------------------------
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
@@ -70,5 +72,7 @@ app.use('/api/ai', ai_1.default); // Routes d'interaction avec l'IA (chat, analy
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
 // -----------------------------------------------------------------------------
-const PORT = process.env.PORT || 4000; // Port configurable via variable d'environnement
-app.listen(PORT, () => console.log(`AssurClair backend listening on port ${PORT}`));
+const PORT = parseInt(process.env.PORT || '4000', 10); // Port configurable via variable d'environnement
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
+});

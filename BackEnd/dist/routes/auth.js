@@ -67,39 +67,45 @@ router.post('/register', async (req, res) => {
     // Validation des champs requis
     if (!email || !password)
         return res.status(400).json({ message: 'Email and password are required' });
-    // Vérification de l'unicité de l'email (insensible à la casse)
-    const users = storage_1.storage.readUsers();
-    if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
-        return res.status(400).json({ message: 'Email is already used' });
-    }
-    // Hachage sécurisé du mot de passe avec bcrypt (coût facteur 10)
-    const hashed = await bcryptjs_1.default.hash(password, 10);
-    // Génération automatique d'un nom d'affichage à partir de l'email
-    // Ex: "jean.dupont@email.com" -> "Jean Dupont"
-    const displayName = email.split('@')[0].split('.').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-    // Création du nouvel utilisateur avec profil vide et accès non-admin par défaut
-    const newUser = {
-        id: cryptoId(), // Génération d'un UUID unique
-        email,
-        name: displayName,
-        password: hashed, // Mot de passe haché (jamais stocké en clair)
-        profile: {}, // Profil initialisé vide (à compléter ultérieurement)
-        isAdmin: false // Par défaut, les nouveaux utilisateurs ne sont pas admin
-    };
-    users.push(newUser);
-    storage_1.storage.writeUsers(users);
-    // Génération d'un token JWT pour connexion automatique après inscription
-    const token = signToken(newUser);
-    res.json({
-        token,
-        user: {
-            id: newUser.id,
-            email: newUser.email,
-            name: newUser.name,
-            profile: newUser.profile,
-            isAdmin: newUser.isAdmin
+    try {
+        // Vérification de l'unicité de l'email (insensible à la casse)
+        const users = await storage_1.storage.readUsers();
+        if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
+            return res.status(400).json({ message: 'Email is already used' });
         }
-    });
+        // Hachage sécurisé du mot de passe avec bcrypt (coût facteur 10)
+        const hashed = await bcryptjs_1.default.hash(password, 10);
+        // Génération automatique d'un nom d'affichage à partir de l'email
+        // Ex: "jean.dupont@email.com" -> "Jean Dupont"
+        const displayName = email.split('@')[0].split('.').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+        // Création du nouvel utilisateur avec profil vide et accès non-admin par défaut
+        const newUser = {
+            email,
+            name: displayName,
+            password: hashed, // Mot de passe haché (jamais stocké en clair)
+            profile: {}, // Profil initialisé vide (à compléter ultérieurement)
+            isAdmin: false // Par défaut, les nouveaux utilisateurs ne sont pas admin
+        };
+        // Insertion dans PostgreSQL et récupération de l'ID généré
+        const userId = await storage_1.storage.writeUser(newUser);
+        newUser.id = userId;
+        // Génération d'un token JWT pour connexion automatique après inscription
+        const token = signToken(newUser);
+        res.json({
+            token,
+            user: {
+                id: newUser.id,
+                email: newUser.email,
+                name: newUser.name,
+                profile: newUser.profile,
+                isAdmin: newUser.isAdmin
+            }
+        });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route POST /api/auth/login
@@ -111,27 +117,33 @@ router.post('/login', async (req, res) => {
     // Validation des champs requis
     if (!email || !password)
         return res.status(400).json({ message: 'Email and password are required' });
-    // Recherche de l'utilisateur par email (insensible à la casse)
-    const users = storage_1.storage.readUsers();
-    const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (!found)
-        return res.status(400).json({ message: 'Invalid credentials' });
-    // Vérification du mot de passe avec bcrypt (compare le hash stocké avec le mot de passe fourni)
-    const ok = await bcryptjs_1.default.compare(password, found.password);
-    if (!ok)
-        return res.status(400).json({ message: 'Invalid credentials' });
-    // Génération d'un token JWT pour la session
-    const token = signToken(found);
-    res.json({
-        token,
-        user: {
-            id: found.id,
-            email: found.email,
-            name: found.name,
-            profile: found.profile || {}, // Retourne un objet vide si pas de profil
-            isAdmin: found.isAdmin || false // Retourne false si pas défini
-        }
-    });
+    try {
+        // Recherche de l'utilisateur par email (insensible à la casse)
+        const users = await storage_1.storage.readUsers();
+        const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        if (!found)
+            return res.status(400).json({ message: 'Invalid credentials' });
+        // Vérification du mot de passe avec bcrypt (compare le hash stocké avec le mot de passe fourni)
+        const ok = await bcryptjs_1.default.compare(password, found.password);
+        if (!ok)
+            return res.status(400).json({ message: 'Invalid credentials' });
+        // Génération d'un token JWT pour la session
+        const token = signToken(found);
+        res.json({
+            token,
+            user: {
+                id: found.id,
+                email: found.email,
+                name: found.name,
+                profile: found.profile || {}, // Retourne un objet vide si pas de profil
+                isAdmin: found.isAdmin || false // Retourne false si pas défini
+            }
+        });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route POST /api/auth/reset
@@ -144,35 +156,49 @@ router.post('/reset', async (req, res) => {
     // Validation des champs requis
     if (!email || !newPassword)
         return res.status(400).json({ message: 'Invalid' });
-    // Recherche de l'utilisateur par email
-    const users = storage_1.storage.readUsers();
-    const idx = users.findIndex((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (idx === -1)
-        return res.status(404).json({ message: 'User not found' });
-    // Hachage du nouveau mot de passe et mise à jour
-    users[idx].password = await bcryptjs_1.default.hash(newPassword, 10);
-    storage_1.storage.writeUsers(users);
-    res.json({ ok: true });
+    try {
+        // Recherche de l'utilisateur par email
+        const users = await storage_1.storage.readUsers();
+        const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        // Hachage du nouveau mot de passe et mise à jour
+        user.password = await bcryptjs_1.default.hash(newPassword, 10);
+        await storage_1.storage.writeUser(user);
+        res.json({ ok: true });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route GET /api/auth/me (protégée)
  * Récupération des informations de l'utilisateur actuellement connecté.
  * Nécessite un token JWT valide dans le header Authorization.
  */
-router.get('/me', authMiddleware, (req, res) => {
-    const users = storage_1.storage.readUsers();
-    // Recherche de l'utilisateur par ID extrait du token JWT
-    const u = users.find((x) => x.id === req.user.id);
-    if (!u)
-        return res.status(404).json({ message: 'User not found' });
-    // Retourne les données utilisateur (sans le mot de passe)
-    res.json({
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        profile: u.profile || {},
-        isAdmin: u.isAdmin || false
-    });
+router.get('/me', authMiddleware, async (req, res) => {
+    try {
+        const users = await storage_1.storage.readUsers();
+        // Recherche de l'utilisateur par ID extrait du token JWT
+        const u = users.find((x) => x.id === req.user.id);
+        if (!u)
+            return res.status(404).json({ message: 'User not found' });
+        // Retourne les données utilisateur (sans le mot de passe) avec structure cohérente
+        res.json({
+            user: {
+                id: u.id,
+                email: u.email,
+                name: u.name,
+                profile: u.profile || {},
+                isAdmin: u.isAdmin || false
+            }
+        });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route PUT /api/auth/me (protégée)
@@ -181,28 +207,36 @@ router.get('/me', authMiddleware, (req, res) => {
  * Nécessite un token JWT valide dans le header Authorization.
  */
 router.put('/me', authMiddleware, async (req, res) => {
-    const users = storage_1.storage.readUsers();
-    // Recherche de l'utilisateur par ID extrait du token JWT
-    const idx = users.findIndex((x) => x.id === req.user.id);
-    if (idx === -1)
-        return res.status(404).json({ message: 'User not found' });
-    const { name, email, password, profile } = req.body;
-    // Mise à jour des champs fournis (ne modifie que les champs présents dans la requête)
-    users[idx].name = name || users[idx].name;
-    users[idx].email = email || users[idx].email;
-    users[idx].profile = profile !== undefined ? profile : (users[idx].profile || {});
-    // Si un nouveau mot de passe est fourni, le hache avant de le stocker
-    if (password)
-        users[idx].password = await bcryptjs_1.default.hash(password, 10);
-    storage_1.storage.writeUsers(users);
-    // Retourne les données mises à jour (sans le mot de passe)
-    res.json({
-        id: users[idx].id,
-        email: users[idx].email,
-        name: users[idx].name,
-        profile: users[idx].profile,
-        isAdmin: users[idx].isAdmin || false
-    });
+    try {
+        const users = await storage_1.storage.readUsers();
+        // Recherche de l'utilisateur par ID extrait du token JWT
+        const user = users.find((x) => x.id === req.user.id);
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        const { name, email, password, profile } = req.body;
+        // Mise à jour des champs fournis (ne modifie que les champs présents dans la requête)
+        user.name = name || user.name;
+        user.email = email || user.email;
+        user.profile = profile !== undefined ? profile : (user.profile || {});
+        // Si un nouveau mot de passe est fourni, le hache avant de le stocker
+        if (password)
+            user.password = await bcryptjs_1.default.hash(password, 10);
+        await storage_1.storage.writeUser(user);
+        // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                profile: user.profile,
+                isAdmin: user.isAdmin || false
+            }
+        });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Génère un identifiant unique pour un utilisateur.

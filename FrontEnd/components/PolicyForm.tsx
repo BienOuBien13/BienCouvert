@@ -49,10 +49,15 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   const [smartText, setSmartText] = useState('');
   const [isAnalyzingText, setIsAnalyzingText] = useState(false);
   
-  // États pour le chatbot conversationnel
+  // États pour le chatbot conversationnel avec vocal
   const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'assistant', text: string}>>([]);
   const [isWaitingResponse, setIsWaitingResponse] = useState(false);
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [foundCgDocs, setFoundCgDocs] = useState<any[]>([]);
+  const [isSearchingCg, setIsSearchingCg] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const cleanupVoiceRef = useRef<(() => void) | null>(null);
   
   // Raffinement State
   const [refiningPolicy, setRefiningPolicy] = useState<Partial<Policy> & { 
@@ -107,8 +112,27 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
   const initializeChatbot = (catType: PolicyType) => {
     const categoryName = GUIDE_CATEGORIES.find(c => c.type === catType)?.label || 'assurance';
-    const initialMessage = `Bonjour ! 👋 Je vais vous aider à enregistrer votre ${categoryName.toLowerCase()}. Pour commencer, chez quel assureur êtes-vous ?`;
+    const initialMessage = `Bonjour ! 👋 Je vais vous aider à enregistrer votre ${categoryName.toLowerCase()}. Pour commencer, chez quel assureur êtes-vous ? (Vous pouvez me parler ou écrire)`;
     setChatMessages([{ role: 'assistant', text: initialMessage }]);
+  };
+
+  // Recherche dans les CG documents
+  const searchInCgDocs = async (provider: string, policyType: PolicyType) => {
+    setIsSearchingCg(true);
+    try {
+      const cgRepo = await storageService.getCentralCgRepo();
+      const found = cgRepo.filter(doc => 
+        doc.provider.toLowerCase().includes(provider.toLowerCase()) &&
+        doc.type === policyType
+      );
+      setFoundCgDocs(found);
+      return found;
+    } catch (err) {
+      console.error('Erreur recherche CG:', err);
+      return [];
+    } finally {
+      setIsSearchingCg(false);
+    }
   };
 
   const resetForm = () => {
@@ -116,6 +140,12 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     setCoverageDetail(''); setSelectedOptions([]); setSummary('');
     setSourceUrl(''); setSmartText(''); setRefiningPolicy(null);
     setChatMessages([]); setIsWaitingResponse(false);
+    setFoundCgDocs([]); setVoiceTranscript('');
+    if (cleanupVoiceRef.current) {
+      cleanupVoiceRef.current();
+      cleanupVoiceRef.current = null;
+    }
+    setIsVoiceActive(false);
     setMode('smart');
     setFormView('selector');
     if (onCancelEdit) onCancelEdit();
@@ -165,29 +195,46 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     setIsWaitingResponse(true);
     
     try {
-      // Construire le contexte pour l'IA
-      const conversationContext = newMessages.map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.text}`).join('\n');
-      const fullContext = `Tu es un assistant qui aide à enregistrer des contrats d'assurance. Pose des questions courtes et précises pour obtenir : 1) l'assureur, 2) le nom/numéro du contrat, 3) la formule si applicable. Quand tu as assez d'infos, dis "[COMPLET]" suivi des informations extraites au format JSON.\n\nConversation:\n${conversationContext}\nAssistant:`;
+      // Extraire les infos de la conversation
+      const result = await parsePoliciesFromText(userMessage);
+      const extractedProvider = result.policies[0]?.provider;
       
-      const result = await parsePoliciesFromText(fullContext);
+      // Rechercher dans les CG si un assureur est mentionné
+      if (extractedProvider) {
+        const cgDocs = await searchInCgDocs(extractedProvider, type);
+        
+        if (cgDocs.length > 0) {
+          // On a trouvé des CG ! Utiliser ces infos
+          const doc = cgDocs[0];
+          const responseWithCg = `Super ! J'ai trouvé les conditions générales de ${doc.provider} pour ${doc.policyName}. `;
+          
+          if (doc.indexedFormulas && doc.indexedFormulas.length > 0) {
+            setChatMessages([...newMessages, { 
+              role: 'assistant', 
+              text: responseWithCg + `Les formules disponibles sont : ${doc.indexedFormulas.join(', ')}. Laquelle avez-vous souscrite ?`
+            }]);
+          } else {
+            setChatMessages([...newMessages, { 
+              role: 'assistant', 
+              text: responseWithCg + "Quelle est votre formule ?"
+            }]);
+          }
+          setIsWaitingResponse(false);
+          return;
+        }
+      }
       
-      // Vérifier si on a assez d'informations
-      if (result.policies.length > 0 && result.policies[0].provider && result.policies[0].name) {
+      // Vérifier si on a assez d'informations pour raffiner
+      if (result.policies.length > 0 && result.policies[0].provider) {
+        // Enrichir avec les CG si disponibles
+        if (foundCgDocs.length > 0) {
+          result.policies[0].suggestedFormulas = foundCgDocs[0].indexedFormulas;
+          result.policies[0].suggestedOptions = foundCgDocs[0].indexedOptions;
+        }
         startRefining(result.policies[0]);
-      } else if (result.clarificationQuestions) {
-        // Poser une question de clarification
-        setChatMessages([...newMessages, { role: 'assistant', text: result.clarificationQuestions }]);
       } else {
         // Question par défaut basée sur ce qui manque
-        let nextQuestion = "Pouvez-vous me donner plus de détails sur votre contrat ?";
-        const lastMsg = conversationContext.toLowerCase();
-        
-        if (!lastMsg.includes('axa') && !lastMsg.includes('maif') && !lastMsg.includes('macif') && !lastMsg.includes('allianz')) {
-          nextQuestion = "Chez quel assureur avez-vous souscrit ce contrat ?";
-        } else if (!result.policies[0]?.name) {
-          nextQuestion = "Parfait ! Connaissez-vous le nom ou le numéro de votre contrat ? Sinon, quelle est votre formule (Tiers, Tous Risques, etc.) ?";
-        }
-        
+        let nextQuestion = "Chez quel assureur avez-vous souscrit ce contrat ?";
         setChatMessages([...newMessages, { role: 'assistant', text: nextQuestion }]);
       }
     } catch (err) {
@@ -201,6 +248,55 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   const handleSmartExtraction = async (text: string) => {
     handleChatMessage(text);
   };
+
+  const toggleVoiceMode = async () => {
+    if (isVoiceActive) {
+      // Arrêter le mode vocal
+      if (cleanupVoiceRef.current) {
+        cleanupVoiceRef.current();
+        cleanupVoiceRef.current = null;
+      }
+      setIsVoiceActive(false);
+      setVoiceTranscript('');
+    } else {
+      // Démarrer le mode vocal
+      setIsVoiceActive(true);
+      try {
+        const { connectLiveSession } = await import('../services/geminiService');
+        const cleanup = await connectLiveSession(
+          [],
+          (transcript) => {
+            setVoiceTranscript(transcript);
+          },
+          (response) => {
+            // Réponse de l'IA
+            setChatMessages(prev => [...prev, { role: 'assistant', text: response }]);
+          },
+          () => {
+            // Fin du tour de parole
+            if (voiceTranscript) {
+              setChatMessages(prev => [...prev, { role: 'user', text: voiceTranscript }]);
+              handleChatMessage(voiceTranscript);
+              setVoiceTranscript('');
+            }
+          }
+        );
+        cleanupVoiceRef.current = cleanup;
+      } catch (err) {
+        console.error('Erreur mode vocal:', err);
+        setIsVoiceActive(false);
+      }
+    }
+  };
+
+  // Cleanup vocal au démontage
+  useEffect(() => {
+    return () => {
+      if (cleanupVoiceRef.current) {
+        cleanupVoiceRef.current();
+      }
+    };
+  }, []);
 
   const handleManualNext = () => {
     if (!provider || !name) return;
@@ -410,6 +506,24 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
         {mode === 'smart' ? (
           <div className="space-y-4">
+             {/* Documents CG trouvés */}
+             {foundCgDocs.length > 0 && (
+               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-start gap-3 animate-slideUp">
+                 <Database className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                 <div className="flex-1">
+                   <p className="text-xs font-bold text-emerald-900 mb-1">📄 Conditions Générales trouvées</p>
+                   {foundCgDocs.map((doc, idx) => (
+                     <div key={idx} className="text-[10px] text-emerald-700 font-medium">
+                       {doc.provider} - {doc.policyName}
+                       {doc.indexedFormulas && doc.indexedFormulas.length > 0 && (
+                         <span className="ml-2 text-emerald-600">({doc.indexedFormulas.length} formules)</span>
+                       )}
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             )}
+
              {/* Zone de conversation */}
              <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 min-h-[300px] max-h-[400px] overflow-y-auto space-y-3">
                {chatMessages.length === 0 && (
@@ -417,6 +531,9 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                    <Sparkles className="w-10 h-10 text-primary-300 mb-3" />
                    <p className="text-xs text-slate-400 font-medium max-w-xs">
                      L'assistant IA va vous poser quelques questions pour identifier votre contrat rapidement.
+                   </p>
+                   <p className="text-[10px] text-slate-300 font-medium mt-2">
+                     🎤 Parlez ou 📝 écrivez, c'est vous qui choisissez !
                    </p>
                  </div>
                )}
@@ -429,32 +546,55 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                  </div>
                ))}
                
-               {isWaitingResponse && (
+               {/* Transcription vocale en cours */}
+               {isVoiceActive && voiceTranscript && (
+                 <div className="flex justify-end">
+                   <div className="max-w-[85%] rounded-2xl px-4 py-3 text-xs bg-primary-400 text-white rounded-br-none animate-pulse">
+                     {voiceTranscript}...
+                   </div>
+                 </div>
+               )}
+               
+               {(isWaitingResponse || isSearchingCg) && (
                  <div className="flex justify-start">
                    <div className="bg-white rounded-2xl rounded-bl-none px-4 py-3 flex items-center gap-2 border border-slate-200">
-                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
-                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                     <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                     {isSearchingCg ? (
+                       <><Database className="w-4 h-4 text-primary-600 animate-pulse" />
+                       <span className="text-[10px] text-slate-500">Recherche dans les CG...</span></>
+                     ) : (
+                       <>
+                       <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
+                       <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                       <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                       </>
+                     )}
                    </div>
                  </div>
                )}
                <div ref={messagesEndRef} />
              </div>
              
-             {/* Zone de saisie */}
+             {/* Zone de saisie avec bouton vocal */}
              <div className="relative flex gap-2">
+                <button
+                  onClick={toggleVoiceMode}
+                  className={`p-4 rounded-2xl transition-all shadow-sm flex-shrink-0 ${isVoiceActive ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200' : 'bg-white text-slate-600 border-2 border-slate-200 hover:border-primary-400'}`}
+                  title={isVoiceActive ? 'Arrêter le mode vocal' : 'Activer le mode vocal'}
+                >
+                  {isVoiceActive ? '⏸️' : '🎤'}
+                </button>
                 <input 
                   type="text"
                   className="flex-1 px-4 py-4 bg-white border-2 border-slate-200 rounded-2xl outline-none text-sm font-medium placeholder:text-slate-300 focus:border-primary-400 transition-colors"
-                  placeholder="Répondez à l'assistant..."
+                  placeholder={isVoiceActive ? "Mode vocal actif..." : "Ou écrivez votre réponse..."}
                   value={smartText}
                   onChange={e => setSmartText(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSmartExtraction(smartText))}
-                  disabled={isWaitingResponse}
+                  disabled={isWaitingResponse || isVoiceActive}
                 />
                 <button 
                   onClick={() => handleSmartExtraction(smartText)}
-                  disabled={!smartText.trim() || isWaitingResponse}
+                  disabled={!smartText.trim() || isWaitingResponse || isVoiceActive}
                   className="px-6 py-4 bg-primary-600 text-white rounded-2xl hover:bg-primary-700 disabled:opacity-50 transition-all shadow-sm active:scale-95 flex items-center gap-2"
                 >
                   {isWaitingResponse ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
@@ -462,7 +602,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
              </div>
              
              <div className="text-[10px] text-center text-slate-400 font-medium">
-               💡 Répondez naturellement aux questions de l'assistant
+               💡 {isVoiceActive ? 'Parlez naturellement, l\'IA vous écoute' : 'Cliquez sur 🎤 pour parler ou écrivez votre réponse'}
              </div>
           </div>
         ) : (

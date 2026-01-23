@@ -3,15 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const geminiService_1 = require("../services/geminiService");
 const router = (0, express_1.Router)();
-// Endpoint chat utilisÃ© par le frontend : envoie un message, le contexte des
-// polices et l'historique. RÃ©ponse : `{ reply: string }`.
+// Endpoint chat utilisé par le frontend : envoie un message, le contexte des
+// polices et l'historique. Réponse : `{ response: string }`.
 router.post('/chat', async (req, res) => {
     const { message, policies, history } = req.body;
     if (!message)
         return res.status(400).json({ message: 'Missing message' });
     try {
-        const reply = await (0, geminiService_1.sendMessageToAssistant)(message, policies || [], history || []);
-        res.json({ reply });
+        const response = await (0, geminiService_1.sendMessageToAssistant)(message, policies || [], history || []);
+        res.json({ response });
     }
     catch (e) {
         console.error(e);
@@ -32,14 +32,14 @@ router.post('/search-policy', async (req, res) => {
         res.status(500).json({ message: 'Search error' });
     }
 });
-// Endpoint dÃ©tection de doublons entre polices
+// Endpoint détection de doublons/optimisations entre polices avec profil utilisateur
 router.post('/detect-duplicates', async (req, res) => {
-    const { policies } = req.body;
+    const { policies, profile } = req.body;
     if (!policies || !Array.isArray(policies))
         return res.status(400).json({ message: 'Invalid policies' });
     try {
-        const duplicates = await (0, geminiService_1.detectDuplicates)(policies);
-        res.json({ duplicates });
+        const result = await (0, geminiService_1.detectDuplicates)(policies, profile || {});
+        res.json(result);
     }
     catch (e) {
         console.error(e);
@@ -58,6 +58,34 @@ router.post('/parse-text', async (req, res) => {
     catch (e) {
         console.error(e);
         res.status(500).json({ message: 'Parse error' });
+    }
+});
+// Endpoint indexation d'un document CG depuis une URL
+router.post('/index-cg', async (req, res) => {
+    const { provider, type, pdfUrl } = req.body;
+    if (!provider || !type || !pdfUrl)
+        return res.status(400).json({ message: 'Missing parameters' });
+    try {
+        const result = await (0, geminiService_1.indexCgDocument)(provider, type, pdfUrl);
+        res.json(result);
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Index CG error' });
+    }
+});
+// Endpoint génération de rapport partageable
+router.post('/generate-report', async (req, res) => {
+    const { policies, findings } = req.body;
+    if (!policies || !Array.isArray(policies))
+        return res.status(400).json({ message: 'Invalid policies' });
+    try {
+        const text = await (0, geminiService_1.generateShareableReport)(policies, findings || []);
+        res.json({ text });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Report generation error' });
     }
 });
 exports.default = router;

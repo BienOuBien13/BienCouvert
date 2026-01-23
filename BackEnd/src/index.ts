@@ -6,11 +6,13 @@ import authRoutes from './routes/auth';
 import policyRoutes from './routes/policies';
 import aiRoutes from './routes/ai';
 import path from 'path';
+import './db';  // Initialisation de la connexion PostgreSQL
 
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
 // Ce fichier configure Express avec les middlewares nécessaires et monte
 // les différentes routes de l'API REST.
+// Configuration PostgreSQL : connecté à la VM Azure
 // -----------------------------------------------------------------------------
 
 // Chargement des variables d'environnement depuis le fichier .env

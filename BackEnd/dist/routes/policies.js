@@ -21,13 +21,16 @@ const router = (0, express_1.Router)();
  * Si le paramètre query ?userId=xxx est fourni, filtre les polices pour cet utilisateur uniquement.
  * Sinon, retourne toutes les polices (utile pour l'admin).
  */
-router.get('/', (req, res) => {
-    const userId = req.query.userId;
-    const policies = storage_1.storage.readPolicies();
-    // Filtrage conditionnel par userId si fourni
-    if (userId)
-        return res.json(policies.filter((p) => p.userId === userId));
-    res.json(policies);
+router.get('/', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const policies = await storage_1.storage.readPolicies(userId ? parseInt(userId) : undefined);
+        res.json(policies);
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route POST /api/policies
@@ -41,68 +44,66 @@ router.post('/', upload.single('file'), async (req, res) => {
     try {
         const body = req.body;
         // Validation minimale côté serveur : au moins un nom ou un document
-        // (Le frontend effectue une validation plus stricte selon le mode de saisie)
         if (!body.name && !req.file && !(body.fileData && body.fileName)) {
             return res.status(400).json({ message: 'Missing required fields (name or file)' });
         }
-        // Lecture du stockage actuel des polices
-        const policies = storage_1.storage.readPolicies();
         // Construction de l'objet police avec toutes les propriétés nécessaires
         const newPolicy = {
-            id: cryptoId(), // Génération d'un UUID unique
             userId: body.userId || 'anonymous', // ID de l'utilisateur propriétaire
-            name: body.name, // Nom de la police
-            provider: body.provider, // Assureur
+            policyNumber: body.policyNumber || null,
+            insurer: body.provider || body.insurer, // Assureur
             type: body.type, // Type d'assurance
-            coverageDetail: body.coverageDetail || undefined, // Formule (Tiers, Tous Risques, etc.)
-            options: body.options || [], // Options souscrites
-            fileData: null, // Document en base64 (rempli plus bas)
-            fileName: null, // Nom du fichier (rempli plus bas)
-            mimeType: body.mimeType || 'text/html', // Type MIME du document
-            sourceUrl: body.sourceUrl || undefined, // URL source si provient du web
-            summary: body.summary || undefined, // Résumé (généré plus bas si absent)
-            addedAt: Date.now(), // Timestamp de création
-            annualPremium: body.annualPremium || undefined, // Prime annuelle en €
-            isInternalSource: body.isInternalSource || false // Provient du référentiel CG ?
+            premium: body.annualPremium || null, // Prime annuelle en €
+            coverage: body.coverage || null,
+            startDate: body.startDate || null,
+            endDate: body.endDate || null,
+            status: 'active',
+            documentUrl: body.sourceUrl || null, // URL source si provient du web
+            documentData: null, // Document en base64 (rempli plus bas)
+            metadata: {
+                name: body.name,
+                fileName: null,
+                mimeType: body.mimeType || 'text/html',
+                coverageDetail: body.coverageDetail,
+                options: body.options || [],
+                summary: body.summary,
+                isInternalSource: body.isInternalSource || false
+            }
         };
         // --- Mode 1 : Upload via multipart/form-data (fichier reçu par multer) ---
         if (req.file) {
-            // Encodage du buffer du fichier en base64 pour stockage JSON
-            newPolicy.fileData = req.file.buffer.toString('base64');
-            newPolicy.fileName = req.file.originalname;
-            newPolicy.mimeType = req.file.mimetype;
-            // Tentative de génération d'un résumé via l'IA (service Gemini)
-            // En cas d'échec, on continue sans bloquer la création
+            newPolicy.documentData = req.file.buffer.toString('base64');
+            newPolicy.metadata.fileName = req.file.originalname;
+            newPolicy.metadata.mimeType = req.file.mimetype;
+            // Tentative de génération d'un résumé via l'IA
             try {
-                newPolicy.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.fileData, newPolicy.mimeType);
+                newPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.documentData, newPolicy.metadata.mimeType);
             }
             catch (e) {
                 console.warn('Résumé automatique échoué pour upload de fichier', e);
             }
         }
-        // --- Mode 2 : Upload JSON avec base64 (utilisé par le frontend React) ---
+        // --- Mode 2 : Upload JSON avec base64 ---
         else if (body.fileData && body.fileName) {
-            newPolicy.fileData = body.fileData;
-            newPolicy.fileName = body.fileName;
-            newPolicy.mimeType = body.mimeType || newPolicy.mimeType;
-            // Génération du résumé si pas déjà fourni
-            if (!newPolicy.summary) {
+            newPolicy.documentData = body.fileData;
+            newPolicy.metadata.fileName = body.fileName;
+            newPolicy.metadata.mimeType = body.mimeType || newPolicy.metadata.mimeType;
+            if (!newPolicy.metadata.summary) {
                 try {
-                    newPolicy.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.fileData, newPolicy.mimeType);
+                    newPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.documentData, newPolicy.metadata.mimeType);
                 }
                 catch (e) {
                     console.warn('Résumé automatique échoué pour fileData', e);
                 }
             }
         }
-        // Ajout de la nouvelle police au tableau et sauvegarde
-        policies.push(newPolicy);
-        storage_1.storage.writePolicies(policies);
+        // Insertion dans PostgreSQL
+        const policyId = await storage_1.storage.writePolicy(newPolicy);
+        newPolicy.id = policyId;
         res.json(newPolicy);
     }
     catch (err) {
         console.error(err);
-        // Erreur serveur générale
         res.status(500).json({ message: 'Server error' });
     }
 });
@@ -113,63 +114,79 @@ router.post('/', upload.single('file'), async (req, res) => {
  * Supporte les mêmes modes d'upload que la création (multipart ou JSON base64).
  */
 router.put('/:id', upload.single('file'), async (req, res) => {
-    const id = req.params.id;
-    const policies = storage_1.storage.readPolicies();
-    // Recherche de la police à modifier
-    const idx = policies.findIndex((p) => p.id === id);
-    if (idx === -1)
-        return res.status(404).json({ message: 'Not found' });
-    const existing = policies[idx];
-    const body = req.body;
-    // Mise à jour des propriétés de base (ne modifie que les champs fournis)
-    existing.name = body.name || existing.name;
-    existing.provider = body.provider || existing.provider;
-    existing.type = body.type || existing.type;
-    existing.coverageDetail = body.coverageDetail || existing.coverageDetail;
-    existing.options = body.options || existing.options;
-    existing.sourceUrl = body.sourceUrl || existing.sourceUrl;
-    existing.summary = body.summary || existing.summary;
-    existing.annualPremium = body.annualPremium !== undefined ? body.annualPremium : existing.annualPremium;
-    existing.isInternalSource = body.isInternalSource !== undefined ? body.isInternalSource : existing.isInternalSource;
-    // Si un nouveau fichier est uploadé via multipart
-    if (req.file) {
-        existing.fileData = req.file.buffer.toString('base64');
-        existing.fileName = req.file.originalname;
-        existing.mimeType = req.file.mimetype;
-        // Regénération du résumé pour le nouveau document
-        try {
-            existing.summary = await (0, geminiService_1.summarizePolicy)(existing.fileData, existing.mimeType);
-        }
-        catch (e) { }
-    }
-    // Si un nouveau fichier est fourni en base64
-    else if (body.fileData && body.fileName) {
-        existing.fileData = body.fileData;
-        existing.fileName = body.fileName;
-        existing.mimeType = body.mimeType || existing.mimeType;
-        if (!existing.summary) {
+    try {
+        const id = parseInt(req.params.id);
+        const policies = await storage_1.storage.readPolicies();
+        // Recherche de la police à modifier
+        const existing = policies.find((p) => p.id === id);
+        if (!existing)
+            return res.status(404).json({ message: 'Not found' });
+        const body = req.body;
+        // Mise à jour des propriétés de base
+        if (body.name)
+            existing.metadata.name = body.name;
+        if (body.provider || body.insurer)
+            existing.insurer = body.provider || body.insurer;
+        if (body.type)
+            existing.type = body.type;
+        if (body.coverageDetail)
+            existing.metadata.coverageDetail = body.coverageDetail;
+        if (body.options)
+            existing.metadata.options = body.options;
+        if (body.sourceUrl)
+            existing.documentUrl = body.sourceUrl;
+        if (body.summary)
+            existing.metadata.summary = body.summary;
+        if (body.annualPremium !== undefined)
+            existing.premium = body.annualPremium;
+        if (body.isInternalSource !== undefined)
+            existing.metadata.isInternalSource = body.isInternalSource;
+        // Si un nouveau fichier est uploadé via multipart
+        if (req.file) {
+            existing.documentData = req.file.buffer.toString('base64');
+            existing.metadata.fileName = req.file.originalname;
+            existing.metadata.mimeType = req.file.mimetype;
             try {
-                existing.summary = await (0, geminiService_1.summarizePolicy)(existing.fileData, existing.mimeType);
+                existing.metadata.summary = await (0, geminiService_1.summarizePolicy)(existing.documentData, existing.metadata.mimeType);
             }
             catch (e) { }
         }
+        // Si un nouveau fichier est fourni en base64
+        else if (body.fileData && body.fileName) {
+            existing.documentData = body.fileData;
+            existing.metadata.fileName = body.fileName;
+            existing.metadata.mimeType = body.mimeType || existing.metadata.mimeType;
+            if (!existing.metadata.summary) {
+                try {
+                    existing.metadata.summary = await (0, geminiService_1.summarizePolicy)(existing.documentData, existing.metadata.mimeType);
+                }
+                catch (e) { }
+            }
+        }
+        // Sauvegarde des modifications
+        await storage_1.storage.writePolicy(existing);
+        res.json(existing);
     }
-    // Sauvegarde des modifications
-    policies[idx] = existing;
-    storage_1.storage.writePolicies(policies);
-    res.json(existing);
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route DELETE /api/policies/:id
  * Suppression d'une police d'assurance par son ID.
  */
-router.delete('/:id', (req, res) => {
-    const id = req.params.id;
-    const policies = storage_1.storage.readPolicies();
-    // Filtrage : on garde toutes les polices sauf celle à supprimer
-    const newPolicies = policies.filter((p) => p.id !== id);
-    storage_1.storage.writePolicies(newPolicies);
-    res.json({ ok: true });
+router.delete('/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        // La suppression se fait directement dans PostgreSQL via DELETE
+        await storage_1.storage.deletePolicy(id);
+        res.json({ ok: true });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route POST /api/policies/search
@@ -229,49 +246,69 @@ router.post('/detect-duplicates', async (req, res) => {
  * Liste toutes les entrées du référentiel central des CG.
  * Utilisé par la vue d'administration pour gérer le référentiel.
  */
-router.get('/central-cg', (req, res) => {
-    const entries = storage_1.storage.readCentralCg();
-    res.json(entries);
+router.get('/central-cg', async (req, res) => {
+    try {
+        const entries = await storage_1.storage.readCentralCg();
+        res.json(entries);
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route POST /api/policies/central-cg
  * Ajout d'une nouvelle entrée au référentiel central des CG.
  * Permet d'indexer un nouveau document CG avec ses métadonnées.
  */
-router.post('/central-cg', (req, res) => {
-    const { provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary } = req.body;
-    // Validation des champs obligatoires
-    if (!provider || !policyName || !type || !pdfUrl) {
-        return res.status(400).json({ message: 'Missing required fields' });
+router.post('/central-cg', async (req, res) => {
+    try {
+        const { provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary } = req.body;
+        // Validation des champs obligatoires
+        if (!provider || !policyName || !type || !pdfUrl) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+        // Création de la nouvelle entrée
+        const newEntry = {
+            insurer: provider,
+            productName: policyName,
+            version: null,
+            documentUrl: pdfUrl,
+            documentHash: null,
+            contentText: null,
+            embedding: null,
+            metadata: {
+                lastVerified: Date.now(),
+                indexedFormulas: indexedFormulas || [],
+                indexedOptions: indexedOptions || [],
+                semanticSummary: semanticSummary || '',
+                type
+            }
+        };
+        const entryId = await storage_1.storage.writeCentralCgEntry(newEntry);
+        newEntry.id = entryId;
+        res.json(newEntry);
     }
-    const entries = storage_1.storage.readCentralCg();
-    // Création de la nouvelle entrée avec génération de l'ID et du timestamp
-    const newEntry = {
-        id: cryptoId(), // UUID unique
-        provider, // Nom de l'assureur
-        policyName, // Nom du produit
-        type, // Type d'assurance
-        pdfUrl, // URL du document PDF
-        lastVerified: Date.now(), // Timestamp de vérification
-        indexedFormulas: indexedFormulas || [], // Formules indexées (Tiers, Tous Risques, etc.)
-        indexedOptions: indexedOptions || [], // Options indexées
-        semanticSummary: semanticSummary || '' // Résumé pour recherche sémantique
-    };
-    entries.push(newEntry);
-    storage_1.storage.writeCentralCg(entries);
-    res.json(newEntry);
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route DELETE /api/policies/central-cg/:id
  * Suppression d'une entrée du référentiel central par son ID.
  * Accès restreint aux administrateurs.
  */
-router.delete('/central-cg/:id', (req, res) => {
-    const id = req.params.id;
-    const entries = storage_1.storage.readCentralCg();
-    const filtered = entries.filter((e) => e.id !== id);
-    storage_1.storage.writeCentralCg(filtered);
-    res.json({ ok: true });
+router.delete('/central-cg/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        await storage_1.storage.deleteCentralCgEntry(id);
+        res.json({ ok: true });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Route GET /api/policies/central-cg/search
@@ -279,21 +316,27 @@ router.delete('/central-cg/:id', (req, res) => {
  * Utilisé pour vérifier si une CG existe déjà avant d'uploader un document.
  * Retourne null si aucune correspondance n'est trouvée.
  */
-router.get('/central-cg/search', (req, res) => {
-    const { provider, name, type } = req.query;
-    const entries = storage_1.storage.readCentralCg();
-    // Vérification des paramètres requis
-    if (!provider || !name || !type) {
-        return res.json(null);
+router.get('/central-cg/search', async (req, res) => {
+    try {
+        const { provider, name, type } = req.query;
+        // Vérification des paramètres requis
+        if (!provider || !name || !type) {
+            return res.json(null);
+        }
+        const entries = await storage_1.storage.readCentralCg();
+        // Normalisation pour recherche insensible à la casse
+        const p = provider.toLowerCase().trim();
+        const n = name.toLowerCase().trim();
+        // Recherche par correspondance partielle sur le provider et le nom
+        const found = entries.find((entry) => entry.insurer.toLowerCase().includes(p) &&
+            (entry.productName.toLowerCase().includes(n) || n.includes(entry.productName.toLowerCase())) &&
+            entry.metadata?.type === type);
+        res.json(found || null);
     }
-    // Normalisation pour recherche insensible à la casse
-    const p = provider.toLowerCase().trim();
-    const n = name.toLowerCase().trim();
-    // Recherche par correspondance partielle sur le provider et le nom
-    const found = entries.find((entry) => entry.provider.toLowerCase().includes(p) &&
-        (entry.policyName.toLowerCase().includes(n) || n.includes(entry.policyName.toLowerCase())) &&
-        entry.type === type);
-    res.json(found || null);
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
 /**
  * Génère un identifiant unique pour une police ou une entrée CG.
