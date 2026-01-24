@@ -113,9 +113,9 @@ export const storageService = {
     return (
       repo.find(
         (entry) =>
-          entry.provider.toLowerCase().includes(p) &&
-          (entry.policyName.toLowerCase().includes(n) ||
-            n.includes(entry.policyName.toLowerCase())) &&
+          entry.insurer.toLowerCase().includes(p) &&
+          (entry.productName.toLowerCase().includes(n) ||
+            n.includes(entry.productName.toLowerCase())) &&
           entry.type === type
       ) || null
     );

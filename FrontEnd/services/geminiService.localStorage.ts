@@ -22,9 +22,9 @@ export interface SmartExtractionResult {
   clarificationQuestions: string[] | null;
 }
 
-export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<Partial<CentralCgEntry>> => {
+export const indexCgDocument = async (insurer: string, type: string, pdfUrl: string): Promise<Partial<CentralCgEntry>> => {
   const ai = getAiClient();
-  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} via l'URL : ${pdfUrl}.
+  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${insurer} via l'URL : ${pdfUrl}.
   Extrais : 1. Les formules commerciales. 2. Les options complémentaires. 3. Un résumé sémantique.`;
 
   try {
@@ -74,12 +74,12 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
                 type: Type.OBJECT,
                 properties: {
                   name: { type: Type.STRING, description: "Nom commercial du contrat" },
-                  provider: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
+                  insurer: { type: Type.STRING, description: "Nom de l'assureur normalisé" },
                   type: { type: Type.STRING, enum: Object.values(PolicyType) },
                   coverageDetail: { type: Type.STRING, description: "Formule détectée" },
                   options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Options spécifiques citées" }
                 },
-                required: ["name", "provider", "type"]
+                required: ["name", "insurer", "type"]
               }
             }
           },
@@ -93,9 +93,9 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
   }
 };
 
-export const searchPolicyInfo = async (provider: string, type: string, name: string): Promise<WebSearchResult> => {
+export const searchPolicyInfo = async (insurer: string, type: string, name: string): Promise<WebSearchResult> => {
   const ai = getAiClient();
-  const prompt = `Recherche les Conditions Générales officielles (PDF) pour l'assurance ${type} "${name}" chez l'assureur ${provider}. 
+  const prompt = `Recherche les Conditions Générales officielles (PDF) pour l'assurance ${type} "${name}" chez l'assureur ${insurer}. 
   Identifie précisément les noms des formules (ex: Tiers, Tous Risques, Initiale, Confort, Intégrale) et les options (ex: Assistance 0km, Prêt de véhicule).`;
   try {
     const response = await ai.models.generateContent({
@@ -125,7 +125,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
   const ai = getAiClient();
   let context = "Tu es BienCouvert, un assistant IA spécialisé en assurances. Contrats actuels de l'utilisateur :\n";
-  policies.forEach(p => context += `- ${p.type} "${p.name}" chez ${p.provider}\n`);
+  policies.forEach(p => context += `- ${p.type} "${p.name}" chez ${p.insurer}\n`);
   
   try {
     const response = await ai.models.generateContent({
@@ -186,7 +186,7 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
 
 export const generateShareableReport = async (policies: Policy[], findings: OptimizationFinding[]): Promise<string> => {
   const ai = getAiClient();
-  const prompt = `Génère un court texte de partage résumant mon bilan BienCouvert. Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.`;
+  const prompt = `Génère un court texte de partage résumant mon bilan BienCouvert. Mes contrats : ${policies.map(p => `${p.insurer} (${p.type})`).join(', ')}.`;
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash-latest',

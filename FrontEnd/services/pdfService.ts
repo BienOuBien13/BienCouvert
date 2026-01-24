@@ -82,7 +82,7 @@ export const generateOptimizationPDF = (user: User, policies: Policy[], findings
   policies.forEach((policy, i) => {
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${policy.name} (${policy.provider})`, 15, cursorY);
+    doc.text(`${policy.name} (${policy.insurer})`, 15, cursorY);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
@@ -170,7 +170,7 @@ export const generatePortfolioPDF = (user: User, policies: Policy[]) => {
       
       doc.setFontSize(10);
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.text(policy.provider.toUpperCase(), 22, cursorY + 17);
+      doc.text(policy.insurer.toUpperCase(), 22, cursorY + 17);
 
       doc.setTextColor(71, 85, 105);
       doc.setFont('helvetica', 'normal');

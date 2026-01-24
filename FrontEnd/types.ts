@@ -24,8 +24,8 @@ export interface User {
 
 export interface CentralCgEntry {
   id: string;
-  provider: string;
-  policyName: string;
+  insurer: string;
+  productName: string;
   type: PolicyType;
   pdfUrl: string;
   lastVerified: number;
@@ -78,7 +78,7 @@ export interface Policy {
   id: string;
   userId: string;
   name: string;
-  provider: string;
+  insurer: string;
   type: PolicyType;
   coverageDetail?: string;
   options?: string[];
@@ -90,6 +90,7 @@ export interface Policy {
   addedAt: number;
   annualPremium?: number;
   isInternalSource?: boolean;
+  centralCgId?: number;
 }
 
 export interface WebSearchResult {

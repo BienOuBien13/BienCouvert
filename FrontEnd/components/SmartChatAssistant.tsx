@@ -342,7 +342,7 @@ Exemples pour Habitation:
         const newPolicy: Omit<Policy, 'userId'> = {
           id: uuid(),
           name: contractName,
-          provider: contract.insurer,
+          insurer: contract.insurer,
           type: contract.type,
           coverageDetail: `${contract.insurer}\n\n📦 Formule: ${contract.formula}\n\n🎯 Options incluses:\n${contract.options.map(opt => `• ${opt}`).join('\n')}`,
           options: contract.options,
@@ -717,7 +717,7 @@ Exemples pour Habitation:
                 const newPolicy: Omit<Policy, 'userId'> = {
                   id: uuid(),
                   name: manualData.name,
-                  provider: manualData.insurer,
+                  insurer: manualData.insurer,
                   type: manualData.type,
                   coverageDetail: `${manualData.insurer}\n\n📦 Formule: ${manualData.formula}\n\n🎯 Options:\n${manualData.options.split(',').map(opt => `• ${opt.trim()}`).join('\n')}`,
                   options: manualData.options ? manualData.options.split(',').map(o => o.trim()) : [],

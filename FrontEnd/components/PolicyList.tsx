@@ -39,7 +39,7 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
   const handleRepairLink = async (policy: Policy) => {
     setIsSearchingLink(policy.id);
     try {
-      const result = await searchPolicyInfo(policy.provider, policy.type, policy.name);
+      const result = await searchPolicyInfo(policy.insurer, policy.type, policy.name);
       if (result.sourceUrl && onUpdatePolicy) {
         onUpdatePolicy({ ...policy, sourceUrl: result.sourceUrl, summary: result.summary });
       }
@@ -94,7 +94,7 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                 <div className="flex-grow min-w-0">
                   <h4 className="font-black text-slate-900 truncate">{policy.name}</h4>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{policy.provider}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{policy.insurer}</p>
                     {policy.coverageDetail && (
                       <span className="text-[8px] font-black text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full uppercase">
                         {policy.coverageDetail}
@@ -136,7 +136,7 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                           className="w-full p-6 bg-white border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs font-bold hover:border-primary-400 hover:text-primary-600 transition-all flex flex-col items-center gap-2"
                         >
                           {isSearchingLink === policy.id ? <Loader2 className="w-6 h-6 animate-spin" /> : <Search className="w-6 h-6" />}
-                          Rechercher les conditions chez {policy.provider}
+                          Rechercher les conditions chez {policy.insurer}
                         </button>
                       )}
                     </div>

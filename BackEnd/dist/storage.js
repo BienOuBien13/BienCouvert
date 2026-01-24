@@ -79,7 +79,7 @@ exports.storage = {
                 id: row.id.toString(),
                 userId: row.user_id.toString(),
                 name: metadata.name || 'Contrat sans nom',
-                provider: row.insurer || 'Non spécifié',
+                insurer: row.insurer || 'Non spécifié',
                 type: row.type || 'Autre',
                 coverageDetail: metadata.coverageDetail || null,
                 options: metadata.options || [],
@@ -148,9 +148,9 @@ exports.storage = {
         const result = await (0, db_1.query)('SELECT * FROM central_cg ORDER BY id');
         return result.rows.map(row => ({
             id: row.id,
-            provider: row.insurer, // Mapping insurer → provider pour le frontend
-            policyName: row.product_name, // Mapping product_name → policyName pour le frontend
-            type: row.metadata?.type || 'Autre', // Type depuis metadata
+            insurer: row.insurer,
+            productName: row.product_name,
+            type: row.metadata?.type || 'Autre',
             version: row.version,
             documentUrl: row.document_url,
             documentHash: row.document_hash,

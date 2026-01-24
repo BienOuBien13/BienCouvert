@@ -15,8 +15,8 @@ export const AdminView: React.FC = () => {
   const [isIndexing, setIsIndexing] = useState(false);
   
   const [newEntry, setNewEntry] = useState({
-    provider: '',
-    policyName: '',
+    insurer: '',
+    productName: '',
     type: PolicyType.AUTO,
     pdfUrl: ''
   });
@@ -43,16 +43,32 @@ export const AdminView: React.FC = () => {
   }, []);
 
   const handleStartIndexing = async () => {
-    if (!newEntry.provider || !newEntry.pdfUrl) {
+    if (!newEntry.insurer || !newEntry.pdfUrl) {
       alert('Veuillez remplir l\'assureur et l\'URL du PDF');
       return;
     }
+    
+    // Reset complet de l'état avant indexation
+    setIndexingResult(null);
     setIsIndexing(true);
+    
     try {
-      const result = await indexCgDocument(newEntry.provider, newEntry.type, newEntry.pdfUrl);
-      if (!result || (!result.indexedFormulas && !result.indexedOptions)) {
-        throw new Error('Résultat d\'indexation invalide');
+      const result = await indexCgDocument(newEntry.insurer, newEntry.type, newEntry.pdfUrl);
+      
+      // Vérifier que le résultat contient des données valides
+      if (!result) {
+        throw new Error('Aucun résultat reçu du serveur');
       }
+      
+      // Vérifier si l'indexation a vraiment fonctionné
+      const hasData = (result.indexedFormulas && result.indexedFormulas.length > 0) || 
+                      (result.indexedOptions && result.indexedOptions.length > 0) ||
+                      (result.semanticSummary && result.semanticSummary !== "Erreur d'indexation" && result.semanticSummary !== "Service IA non disponible");
+      
+      if (!hasData) {
+        throw new Error('Indexation échouée: aucune donnée extraite. Vérifiez que le PDF est accessible et que l\'API Gemini fonctionne.');
+      }
+      
       setIndexingResult({
         indexedFormulas: result.indexedFormulas || [],
         indexedOptions: result.indexedOptions || [],
@@ -61,6 +77,7 @@ export const AdminView: React.FC = () => {
     } catch (e: any) {
       console.error('Erreur indexation:', e);
       alert(`Erreur lors de l'indexation: ${e.message || 'Erreur inconnue'}`);
+      setIndexingResult(null); // Reset en cas d'erreur
     } finally {
       setIsIndexing(false);
     }
@@ -77,7 +94,7 @@ export const AdminView: React.FC = () => {
       });
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
-      setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
+      setNewEntry({ insurer: '', productName: '', type: PolicyType.AUTO, pdfUrl: '' });
       setIndexingResult(null);
       setShowAddForm(false);
     } catch (error: any) {
@@ -100,10 +117,10 @@ export const AdminView: React.FC = () => {
 
   const filteredRepo = (repo || []).filter(e => {
     if (!e) return false;
-    const provider = e.provider?.toLowerCase() || '';
-    const policyName = e.policyName?.toLowerCase() || '';
+    const provider = e.insurer?.toLowerCase() || '';
+    const productName = e.productName?.toLowerCase() || '';
     const search = searchTerm.toLowerCase();
-    return provider.includes(search) || policyName.includes(search);
+    return provider.includes(search) || productName.includes(search);
   });
 
   return (
@@ -133,7 +150,7 @@ export const AdminView: React.FC = () => {
               <input 
                 type="text" required placeholder="AXA, Maif..." 
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.provider} onChange={e => setNewEntry({...newEntry, provider: e.target.value})}
+                value={newEntry.insurer} onChange={e => setNewEntry({...newEntry, insurer: e.target.value})}
               />
             </div>
             <div className="space-y-1">
@@ -141,7 +158,7 @@ export const AdminView: React.FC = () => {
               <input 
                 type="text" required placeholder="Auto Zen..." 
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.policyName} onChange={e => setNewEntry({...newEntry, policyName: e.target.value})}
+                value={newEntry.productName} onChange={e => setNewEntry({...newEntry, productName: e.target.value})}
               />
             </div>
             <div className="space-y-1">
@@ -245,10 +262,10 @@ export const AdminView: React.FC = () => {
               {filteredRepo.map((entry) => (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-8 py-5">
-                    <span className="font-black text-slate-900">{entry.provider}</span>
+                    <span className="font-black text-slate-900">{entry.insurer}</span>
                   </td>
                   <td className="px-8 py-5">
-                    <span className="font-bold text-slate-600">{entry.policyName}</span>
+                    <span className="font-bold text-slate-600">{entry.productName}</span>
                   </td>
                   <td className="px-8 py-5">
                     <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase">

@@ -68,7 +68,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
   // Manual Mode Fields
   const [name, setName] = useState('');
-  const [provider, setProvider] = useState('');
+  const [insurer, setInsurer] = useState('');
   const [type, setType] = useState<PolicyType>(PolicyType.AUTO);
   const [coverageDetail, setCoverageDetail] = useState('');
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
@@ -79,7 +79,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     if (initialData) {
       setFormView('input');
       setName(initialData.name);
-      setProvider(initialData.provider);
+      setInsurer(initialData.insurer);
       setType(initialData.type);
       setCoverageDetail(initialData.coverageDetail || '');
       setSelectedOptions(initialData.options || []);
@@ -136,7 +136,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   };
 
   const resetForm = () => {
-    setName(''); setProvider(''); setType(PolicyType.AUTO); 
+    setName(''); setInsurer(''); setType(PolicyType.AUTO); 
     setCoverageDetail(''); setSelectedOptions([]); setSummary('');
     setSourceUrl(''); setSmartText(''); setRefiningPolicy(null);
     setChatMessages([]); setIsWaitingResponse(false);
@@ -158,7 +158,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
     try {
       // Priorité 1 : Recherche dans la base vérifiée (Admin Base)
-      const internal = await storageService.findCgInRepo(extracted.provider!, extracted.name || 'Contrat', extracted.type as PolicyType);
+      const internal = await storageService.findCgInRepo(extracted.insurer!, extracted.name || 'Contrat', extracted.type as PolicyType);
       let data;
       if (internal) {
         data = { 
@@ -170,7 +170,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
         };
       } else {
         // Priorité 2 : Recherche Web (Google Search Grounding)
-        const info = await searchPolicyInfo(extracted.provider!, extracted.type as PolicyType, extracted.name || 'Contrat');
+        const info = await searchPolicyInfo(extracted.insurer!, extracted.type as PolicyType, extracted.name || 'Contrat');
         data = { 
           sourceUrl: info.sourceUrl, 
           summary: info.summary, 
@@ -197,7 +197,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     try {
       // Extraire les infos de la conversation
       const result = await parsePoliciesFromText(userMessage);
-      const extractedProvider = result.policies[0]?.provider;
+      const extractedProvider = result.policies[0]?.insurer;
       
       // Rechercher dans les CG si un assureur est mentionné
       if (extractedProvider) {
@@ -206,7 +206,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
         if (cgDocs.length > 0) {
           // On a trouvé des CG ! Utiliser ces infos
           const doc = cgDocs[0];
-          const responseWithCg = `Super ! J'ai trouvé les conditions générales de ${doc.provider} pour ${doc.policyName}. `;
+          const responseWithCg = `Super ! J'ai trouvé les conditions générales de ${doc.insurer} pour ${doc.productName}. `;
           
           if (doc.indexedFormulas && doc.indexedFormulas.length > 0) {
             setChatMessages([...newMessages, { 
@@ -225,7 +225,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       }
       
       // Vérifier si on a assez d'informations pour raffiner
-      if (result.policies.length > 0 && result.policies[0].provider) {
+      if (result.policies.length > 0 && result.policies[0].insurer) {
         // Enrichir avec les CG si disponibles
         if (foundCgDocs.length > 0) {
           result.policies[0].suggestedFormulas = foundCgDocs[0].indexedFormulas;
@@ -299,8 +299,8 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
   }, []);
 
   const handleManualNext = () => {
-    if (!provider || !name) return;
-    startRefining({ provider, name, type, coverageDetail, options: selectedOptions });
+    if (!insurer || !name) return;
+    startRefining({ insurer, name, type, coverageDetail, options: selectedOptions });
   };
 
   const finalizeSave = () => {
@@ -308,7 +308,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     const finalPolicy: Omit<Policy, 'userId'> = {
       id: initialData?.id || uuid(),
       name: refiningPolicy.name || name || 'Sans nom',
-      provider: refiningPolicy.provider || provider,
+      insurer: refiningPolicy.insurer || insurer,
       type: refiningPolicy.type || type,
       coverageDetail: refiningPolicy.coverageDetail || coverageDetail,
       options: refiningPolicy.options || selectedOptions,
@@ -383,7 +383,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
               </div>
               <div>
                  <h3 className="text-2xl font-black text-slate-900 tracking-tighter">{refiningPolicy?.name || name}</h3>
-                 <p className="text-[10px] font-black uppercase text-primary-600 tracking-widest">{refiningPolicy?.provider || provider}</p>
+                 <p className="text-[10px] font-black uppercase text-primary-600 tracking-widest">{refiningPolicy?.insurer || insurer}</p>
               </div>
            </div>
 
@@ -395,7 +395,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                   </div>
                   <div className="absolute inset-0 border-4 border-primary-100 border-t-primary-500 rounded-full animate-spin" />
                 </div>
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">L'IA parcourt le catalogue de {refiningPolicy.provider}...</p>
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">L'IA parcourt le catalogue de {refiningPolicy.insurer}...</p>
              </div>
            ) : (
              <div className="space-y-8 animate-slideUp">
@@ -514,7 +514,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                    <p className="text-xs font-bold text-emerald-900 mb-1">📄 Conditions Générales trouvées</p>
                    {foundCgDocs.map((doc, idx) => (
                      <div key={idx} className="text-[10px] text-emerald-700 font-medium">
-                       {doc.provider} - {doc.policyName}
+                       {doc.insurer} - {doc.productName}
                        {doc.indexedFormulas && doc.indexedFormulas.length > 0 && (
                          <span className="ml-2 text-emerald-600">({doc.indexedFormulas.length} formules)</span>
                        )}
@@ -613,9 +613,9 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                 {MAJOR_INSURERS.map((ins) => (
                   <button
                     key={ins.name}
-                    onClick={() => setProvider(ins.name)}
+                    onClick={() => setInsurer(ins.name)}
                     className={`flex-shrink-0 flex items-center gap-3 px-5 py-3 rounded-2xl border-2 transition-all ${
-                      provider === ins.name 
+                      insurer === ins.name 
                       ? 'border-primary-600 bg-primary-50 ring-2 ring-primary-100' 
                       : 'border-slate-100 bg-white hover:border-slate-200'
                     }`}
@@ -632,7 +632,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
             <div className="grid grid-cols-1 gap-4">
               <div className="space-y-1">
                 <label className="text-[9px] font-black uppercase text-slate-400 ml-1">Assureur</label>
-                <input type="text" placeholder="AXA, Maif, Allianz..." className="w-full rounded-2xl border-slate-100 border-2 px-6 py-4 text-xs font-bold focus:border-primary-500 outline-none transition-colors" value={provider} onChange={e => setProvider(e.target.value)} />
+                <input type="text" placeholder="AXA, Maif, Allianz..." className="w-full rounded-2xl border-slate-100 border-2 px-6 py-4 text-xs font-bold focus:border-primary-500 outline-none transition-colors" value={insurer} onChange={e => setInsurer(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <label className="text-[9px] font-black uppercase text-slate-400 ml-1">Nom du Contrat</label>
@@ -642,7 +642,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
             <button 
               onClick={handleManualNext}
-              disabled={!provider || !name}
+              disabled={!insurer || !name}
               className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl active:scale-95 disabled:opacity-30 flex items-center justify-center gap-2"
             >
               Suivant <ArrowRight className="w-4 h-4" />

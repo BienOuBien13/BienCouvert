@@ -309,16 +309,40 @@ const sendMessageToAssistant = async (message, policies, history) => {
     }
     try {
         const storage = require('../storage').storage;
-        // Étape 1: Générer l'embedding de la question
-        const questionEmbedding = await (0, exports.generateEmbedding)(message);
+        // Étape 1: Générer l'embedding de la question (peut échouer si ZScaler)
+        let questionEmbedding;
+        try {
+            questionEmbedding = await (0, exports.generateEmbedding)(message);
+            console.log(`✅ Embedding généré pour: "${message.substring(0, 50)}..."`);
+        }
+        catch (embErr) {
+            console.warn('⚠️ Échec embedding, mode dégradé sans RAG:', embErr);
+            questionEmbedding = new Array(768).fill(0);
+        }
         // Étape 2: Rechercher dans les embeddings des contrats utilisateurs
-        const policyIds = policies.map(p => parseInt(p.id));
-        const policyChunks = policyIds.length > 0
-            ? await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5)
-            : [];
+        let policyChunks = [];
+        try {
+            const policyIds = policies.map(p => parseInt(p.id));
+            if (policyIds.length > 0) {
+                policyChunks = await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5);
+                console.log(`✅ RAG Policies: ${policyChunks.length} chunks trouvés`);
+            }
+        }
+        catch (ragErr) {
+            console.warn('⚠️ Échec recherche policy_embeddings:', ragErr);
+        }
         // Étape 3: Rechercher dans les CG centralisées
-        const insurers = policies.map(p => p.provider);
-        const cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
+        let cgChunks = [];
+        try {
+            const insurers = policies.map(p => p.provider);
+            if (insurers.length > 0) {
+                cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
+                console.log(`✅ RAG CG: ${cgChunks.length} documents trouvés`);
+            }
+        }
+        catch (cgErr) {
+            console.warn('⚠️ Échec recherche central_cg:', cgErr);
+        }
         // Étape 4: Construire le contexte enrichi
         let enrichedContext = '';
         if (policyChunks.length > 0) {
@@ -335,6 +359,7 @@ const sendMessageToAssistant = async (message, policies, history) => {
         }
         // Si aucun contexte RAG, fallback sur metadata
         if (!enrichedContext) {
+            console.log('⚠️ Aucun contexte RAG - utilisation metadata');
             enrichedContext = 'Vos contrats:\n' + policies.map(p => `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`).join('\n');
         }
         const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.
@@ -361,13 +386,17 @@ CONSIGNES:
                 { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance en m\'appuyant sur les documents fournis.' }] }
             ] : chatHistory
         });
+        console.log(`📤 Envoi du message à Gemini...`);
         const result = await chat.sendMessage(message);
         const response = await result.response;
-        return response.text() || "Désolé, je n'ai pas pu générer de réponse.";
+        const responseText = response.text();
+        console.log(`✅ Réponse Gemini reçue (${responseText.length} chars)`);
+        return responseText || "Désolé, je n'ai pas pu générer de réponse.";
     }
     catch (err) {
-        console.error('gemini sendMessageToAssistant error', err);
-        return "Une erreur s'est produite lors de la communication avec l'assistant.";
+        console.error('❌ gemini sendMessageToAssistant error:', err);
+        console.error('Stack:', err?.stack);
+        return `Une erreur s'est produite lors de la communication avec l'assistant: ${err?.message || 'Erreur inconnue'}`;
     }
 };
 exports.sendMessageToAssistant = sendMessageToAssistant;

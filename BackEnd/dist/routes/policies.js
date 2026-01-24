@@ -56,7 +56,7 @@ router.post('/', upload.single('file'), async (req, res) => {
         const newPolicy = {
             userId: userId, // ID de l'utilisateur propriétaire (INTEGER requis)
             policyNumber: body.policyNumber || `POL-${Date.now()}`, // Génère un numéro si absent
-            insurer: body.provider || body.insurer || 'Non spécifié', // Assureur (requis)
+            insurer: body.insurer || 'Non spécifié', // Assureur (requis)
             type: body.type || 'Autre', // Type d'assurance (requis)
             premium: body.annualPremium ? parseFloat(body.annualPremium) : null, // Prime annuelle en €
             coverage: body.coverage ? parseFloat(body.coverage) : null, // Montant couverture
@@ -154,8 +154,8 @@ router.put('/:id', upload.single('file'), async (req, res) => {
         // Mise à jour des propriétés de base
         if (body.name)
             existing.metadata.name = body.name;
-        if (body.provider || body.insurer)
-            existing.insurer = body.provider || body.insurer;
+        if (body.insurer)
+            existing.insurer = body.insurer;
         if (body.type)
             existing.type = body.type;
         if (body.coverageDetail)
@@ -284,17 +284,17 @@ router.get('/central-cg', async (req, res) => {
         let filtered = entries;
         if (req.query.type) {
             const requestedType = req.query.type.toLowerCase();
-            filtered = filtered.filter((e) => e.metadata?.type?.toLowerCase() === requestedType);
+            filtered = filtered.filter((e) => e.metadata?.type?.toLowerCase() === requestedType || e.type?.toLowerCase() === requestedType);
         }
         if (req.query.insurer) {
             const requestedInsurer = req.query.insurer.toLowerCase();
-            filtered = filtered.filter((e) => e.insurer.toLowerCase().includes(requestedInsurer));
+            filtered = filtered.filter((e) => (e.insurer || '').toLowerCase().includes(requestedInsurer));
         }
         res.json(filtered);
     }
     catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Server error' });
+        console.error('❌ Error in GET /central-cg:', err);
+        res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
     }
 });
 /**
@@ -396,7 +396,7 @@ router.get('/central-cg/search', async (req, res) => {
         // Normalisation pour recherche insensible à la casse
         const p = provider.toLowerCase().trim();
         const n = name.toLowerCase().trim();
-        // Recherche par correspondance partielle sur le provider et le nom
+        // Recherche par correspondance partielle sur l'insurer et le nom
         const found = entries.find((entry) => entry.insurer.toLowerCase().includes(p) &&
             (entry.productName.toLowerCase().includes(n) || n.includes(entry.productName.toLowerCase())) &&
             entry.metadata?.type === type);

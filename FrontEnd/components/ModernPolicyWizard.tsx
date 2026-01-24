@@ -96,7 +96,7 @@ export const ModernPolicyWizard: React.FC<Props> = ({ user, onAddPolicy, onCance
     const newPolicy: Omit<Policy, 'userId'> = {
       id: uuid(),
       name: formData.name || `${typeName} ${formData.insurer}`,
-      provider: formData.insurer,
+      insurer: formData.insurer,
       type: typeName,
       coverageDetail: formData.coverage || '',
       options: [],

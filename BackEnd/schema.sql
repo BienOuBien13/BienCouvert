@@ -15,7 +15,8 @@
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
     password VARCHAR(255) NOT NULL,        -- Hash bcrypt du mot de passe
     profile TEXT,                          -- JSON stringifié du profil utilisateur
     is_admin BOOLEAN DEFAULT false,
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS policies (
     document_url TEXT,                    -- URL ou chemin du document
     document_data TEXT,                   -- Données du document en base64
     metadata JSONB,                       -- Métadonnées supplémentaires en JSON
+    central_cg_id INTEGER REFERENCES central_cg(id) ON DELETE SET NULL,  -- Lien vers CG indexée
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
