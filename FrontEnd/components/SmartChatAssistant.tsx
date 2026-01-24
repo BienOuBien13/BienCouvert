@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
-import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare } from 'lucide-react';
+import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare, Edit3, FileText } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 
 // Simple AI API call helper
@@ -49,11 +49,11 @@ interface PendingContract {
 }
 
 const TYPES = [
-  { id: 'auto', name: 'Auto', icon: Car, color: 'from-red-500 to-orange-500', emoji: '🚗' },
-  { id: 'habitation', name: 'Habitation', icon: Home, color: 'from-blue-500 to-cyan-500', emoji: '🏠' },
-  { id: 'sante', name: 'Santé', icon: Heart, color: 'from-pink-500 to-rose-500', emoji: '❤️' },
-  { id: 'pro', name: 'Professionnelle', icon: Briefcase, color: 'from-purple-500 to-indigo-500', emoji: '💼' },
-  { id: 'autre', name: 'Autre', icon: Shield, color: 'from-slate-500 to-slate-600', emoji: '🛡️' },
+  { id: 'auto', name: 'Auto', icon: Car, color: 'from-red-500 to-orange-500' },
+  { id: 'habitation', name: 'Habitation', icon: Home, color: 'from-blue-500 to-cyan-500' },
+  { id: 'sante', name: 'Santé', icon: Heart, color: 'from-pink-500 to-rose-500' },
+  { id: 'pro', name: 'Professionnelle', icon: Briefcase, color: 'from-purple-500 to-indigo-500' },
+  { id: 'autre', name: 'Autre', icon: Shield, color: 'from-slate-500 to-slate-600' },
 ];
 
 const INSURERS = [
@@ -122,6 +122,17 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
   const [selectedInsurerLogo, setSelectedInsurerLogo] = useState('');
   const [contractCount, setContractCount] = useState(1);
   const [pendingContracts, setPendingContracts] = useState<PendingContract[]>([]);
+  const [contractNames, setContractNames] = useState<string[]>([]);
+  const [showNameInput, setShowNameInput] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualData, setManualData] = useState({
+    type: 'auto',
+    insurer: '',
+    name: '',
+    formula: '',
+    options: '',
+    pdfUrl: ''
+  });
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [currentFormulas, setCurrentFormulas] = useState<Array<{ name: string; options: string[] }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -261,15 +272,23 @@ Exemples pour Habitation:
   };
 
   const handleConfirm = () => {
+    // Si pas encore de noms, demander
+    if (contractNames.length === 0 && pendingContracts.length > 0) {
+      setShowNameInput(true);
+      addMessage('📝 Donnez un nom à chaque contrat (ou laissez vide pour utiliser le nom par défaut)', 'bot');
+      return;
+    }
+    
     addMessage('✅ Oui, confirmer !', 'user');
     addMessage('⏳ Création des contrats en cours...', 'bot');
     
     setTimeout(() => {
-      pendingContracts.forEach(contract => {
+      pendingContracts.forEach((contract, index) => {
         const logoUrl = contract.insurerLogo.startsWith('http') ? contract.insurerLogo : '';
+        const contractName = contractNames[index]?.trim() || contract.name;
         const newPolicy: Omit<Policy, 'userId'> = {
           id: uuid(),
-          name: contract.name,
+          name: contractName,
           provider: contract.insurer,
           type: contract.type,
           coverageDetail: `${contract.insurer}\n\n📦 Formule: ${contract.formula}\n\n🎯 Options incluses:\n${contract.options.map(opt => `• ${opt}`).join('\n')}`,
@@ -291,6 +310,8 @@ Exemples pour Habitation:
         { showConfirm: true }
       );
       setPendingContracts([]);
+      setContractNames([]);
+      setShowNameInput(false);
     }, 1000);
   };
 
@@ -339,18 +360,30 @@ Exemples pour Habitation:
               
               {/* Types d'assurance */}
               {!selectedType && message.sender === 'bot' && (
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  {TYPES.map((type) => (
-                    <button
-                      key={type.id}
-                      onClick={() => handleTypeSelect(type.emoji, type.name)}
-                      className="bg-gradient-to-br text-white from-primary-500 to-cyan-500 p-4 rounded-xl hover:scale-105 transition-all text-left font-black shadow-lg"
-                    >
-                      <span className="text-3xl block mb-2">{type.emoji}</span>
-                      <span className="text-sm">{type.name}</span>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="grid grid-cols-3 gap-3 mt-4">
+                    {TYPES.map((type) => {
+                      const Icon = type.icon;
+                      return (
+                        <button
+                          key={type.id}
+                          onClick={() => handleTypeSelect(type.name, type.name)}
+                          className={`bg-gradient-to-br ${type.color} text-white p-3 rounded-xl hover:scale-105 transition-all text-center font-bold shadow-lg flex flex-col items-center gap-2`}
+                        >
+                          <Icon className="w-5 h-5" />
+                          <span className="text-xs">{type.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setManualMode(true)}
+                    className="mt-3 w-full bg-slate-700 text-white p-3 rounded-xl hover:bg-slate-800 transition-all text-center font-bold text-xs flex items-center justify-center gap-2"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    Saisie manuelle complète
+                  </button>
+                </>
               )}
 
               {/* Logos assureurs */}
@@ -471,6 +504,164 @@ Exemples pour Habitation:
         ))}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Saisie des noms de contrats */}
+      {showNameInput && pendingContracts.length > 0 && (
+        <div className="p-6 bg-gradient-to-br from-primary-50 to-cyan-50 border-t-2 border-primary-200 space-y-4">
+          <h3 className="font-black text-lg text-primary-900 flex items-center gap-2">
+            <Edit3 className="w-5 h-5" />
+            Nommez vos contrats
+          </h3>
+          {pendingContracts.map((contract, index) => (
+            <div key={index}>
+              <label className="text-xs font-bold text-slate-600 mb-1 block">
+                Contrat #{index + 1} - {contract.insurer} {contract.type}
+              </label>
+              <input
+                type="text"
+                value={contractNames[index] || ''}
+                onChange={(e) => {
+                  const newNames = [...contractNames];
+                  newNames[index] = e.target.value;
+                  setContractNames(newNames);
+                }}
+                placeholder={contract.name}
+                className="w-full p-3 border-2 border-primary-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <button
+              onClick={handleConfirm}
+              className="flex-1 bg-gradient-to-r from-primary-600 to-cyan-600 text-white p-4 rounded-2xl font-black hover:shadow-xl hover:scale-105 transition-all"
+            >
+              ✓ Valider et enregistrer
+            </button>
+            <button
+              onClick={() => {
+                setContractNames([]);
+                setShowNameInput(false);
+              }}
+              className="px-6 bg-slate-300 text-slate-700 p-4 rounded-2xl font-black hover:bg-slate-400 transition-all"
+            >
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Formulaire de saisie manuelle */}
+      {manualMode && (
+        <div className="p-6 bg-white border-t-2 border-primary-200 space-y-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-black text-lg flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary-600" />
+              Saisie manuelle
+            </h3>
+            <button onClick={() => setManualMode(false)} className="text-slate-400 hover:text-slate-600">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-slate-500 mb-1 block">Type d'assurance</label>
+              <select 
+                value={manualData.type}
+                onChange={(e) => setManualData({...manualData, type: e.target.value})}
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              >
+                {TYPES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            
+            <div>
+              <label className="text-xs font-bold text-slate-500 mb-1 block">Assureur</label>
+              <input
+                type="text"
+                value={manualData.insurer}
+                onChange={(e) => setManualData({...manualData, insurer: e.target.value})}
+                placeholder="MAIF, AXA..."
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+            
+            <div className="col-span-2">
+              <label className="text-xs font-bold text-slate-500 mb-1 block">Nom du contrat</label>
+              <input
+                type="text"
+                value={manualData.name}
+                onChange={(e) => setManualData({...manualData, name: e.target.value})}
+                placeholder="Auto Zen, Habitation Confort..."
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+            
+            <div>
+              <label className="text-xs font-bold text-slate-500 mb-1 block">Formule</label>
+              <input
+                type="text"
+                value={manualData.formula}
+                onChange={(e) => setManualData({...manualData, formula: e.target.value})}
+                placeholder="Tiers, Tous Risques..."
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+            
+            <div>
+              <label className="text-xs font-bold text-slate-500 mb-1 block">Options (séparées par des virgules)</label>
+              <input
+                type="text"
+                value={manualData.options}
+                onChange={(e) => setManualData({...manualData, options: e.target.value})}
+                placeholder="Assistance, Protection juridique..."
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+            
+            <div className="col-span-2">
+              <label className="text-xs font-bold text-slate-500 mb-1 block">URL du PDF (optionnel)</label>
+              <input
+                type="url"
+                value={manualData.pdfUrl}
+                onChange={(e) => setManualData({...manualData, pdfUrl: e.target.value})}
+                placeholder="https://..."
+                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
+              />
+            </div>
+          </div>
+          
+          <button
+            onClick={() => {
+              if (manualData.insurer && manualData.name) {
+                const newPolicy: Omit<Policy, 'userId'> = {
+                  id: uuid(),
+                  name: manualData.name,
+                  provider: manualData.insurer,
+                  type: manualData.type,
+                  coverageDetail: `${manualData.insurer}\n\n📦 Formule: ${manualData.formula}\n\n🎯 Options:\n${manualData.options.split(',').map(opt => `• ${opt.trim()}`).join('\n')}`,
+                  options: manualData.options ? manualData.options.split(',').map(o => o.trim()) : [],
+                  summary: `${manualData.type} - ${manualData.formula}`,
+                  sourceUrl: manualData.pdfUrl || null,
+                  isInternalSource: true,
+                  addedAt: Date.now(),
+                  fileData: null,
+                  fileName: null,
+                  mimeType: 'text/plain'
+                };
+                onAddPolicy(newPolicy);
+                setManualMode(false);
+                setManualData({ type: 'auto', insurer: '', name: '', formula: '', options: '', pdfUrl: '' });
+                addMessage('✅ Contrat ajouté avec succès !', 'bot');
+              }
+            }}
+            disabled={!manualData.insurer || !manualData.name}
+            className="w-full bg-gradient-to-r from-primary-600 to-cyan-600 text-white p-4 rounded-2xl font-black hover:shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ✓ Enregistrer le contrat
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-5 bg-white border-t-2 border-slate-100 flex-shrink-0">
