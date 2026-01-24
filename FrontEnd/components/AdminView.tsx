@@ -33,23 +33,34 @@ export const AdminView: React.FC = () => {
     const loadRepo = async () => {
       try {
         const data = await storageService.getCentralCgRepo();
-        setRepo(data);
+        setRepo(data || []);
       } catch (error) {
         console.error('Failed to load CG repo:', error);
+        setRepo([]);
       }
     };
     loadRepo();
   }, []);
 
   const handleStartIndexing = async () => {
-    if (!newEntry.provider || !newEntry.pdfUrl) return;
+    if (!newEntry.provider || !newEntry.pdfUrl) {
+      alert('Veuillez remplir l\'assureur et l\'URL du PDF');
+      return;
+    }
     setIsIndexing(true);
     try {
       const result = await indexCgDocument(newEntry.provider, newEntry.type, newEntry.pdfUrl);
-      setIndexingResult(result as any);
-    } catch (e) {
-      console.error(e);
-      alert("Erreur lors de l'indexation sémantique.");
+      if (!result || (!result.indexedFormulas && !result.indexedOptions)) {
+        throw new Error('Résultat d\'indexation invalide');
+      }
+      setIndexingResult({
+        indexedFormulas: result.indexedFormulas || [],
+        indexedOptions: result.indexedOptions || [],
+        semanticSummary: result.semanticSummary || 'Aucun résumé disponible'
+      });
+    } catch (e: any) {
+      console.error('Erreur indexation:', e);
+      alert(`Erreur lors de l'indexation: ${e.message || 'Erreur inconnue'}`);
     } finally {
       setIsIndexing(false);
     }
@@ -60,35 +71,35 @@ export const AdminView: React.FC = () => {
     try {
       await storageService.saveCgEntry({
         ...newEntry,
-        indexedFormulas: indexingResult.indexedFormulas,
-        indexedOptions: indexingResult.indexedOptions,
-        semanticSummary: indexingResult.semanticSummary
+        indexedFormulas: indexingResult.indexedFormulas || [],
+        indexedOptions: indexingResult.indexedOptions || [],
+        semanticSummary: indexingResult.semanticSummary || ''
       });
       const data = await storageService.getCentralCgRepo();
-      setRepo(data);
+      setRepo(data || []);
       setNewEntry({ provider: '', policyName: '', type: PolicyType.AUTO, pdfUrl: '' });
       setIndexingResult(null);
       setShowAddForm(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save CG entry:', error);
-      alert('Erreur lors de la sauvegarde');
+      alert(`Erreur lors de la sauvegarde: ${error.message || 'Erreur inconnue'}`);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("Supprimer ce document de la base centrale ?")) {
-      try {
-        await storageService.deleteCgEntry(id);
-        const data = await storageService.getCentralCgRepo();
-        setRepo(data);
-      } catch (error) {
-        console.error('Failed to delete CG entry:', error);
-        alert('Erreur lors de la suppression');
-      }
+    if (!id || !confirm("Supprimer ce document de la base centrale ?")) return;
+    try {
+      await storageService.deleteCgEntry(id);
+      const data = await storageService.getCentralCgRepo();
+      setRepo(data || []);
+    } catch (error: any) {
+      console.error('Failed to delete CG entry:', error);
+      alert(`Erreur lors de la suppression: ${error.message || 'Erreur inconnue'}`);
     }
   };
 
-  const filteredRepo = repo.filter(e => {
+  const filteredRepo = (repo || []).filter(e => {
+    if (!e) return false;
     const provider = e.provider?.toLowerCase() || '';
     const policyName = e.policyName?.toLowerCase() || '';
     const search = searchTerm.toLowerCase();

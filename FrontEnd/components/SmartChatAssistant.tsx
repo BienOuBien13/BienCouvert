@@ -165,7 +165,7 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
   // Récupérer formules depuis central_cg
   const getFormulasFromCentralCg = async (insurerName: string, policyType: string) => {
     try {
-      const response = await fetch(`/api/central-cg?insurer=${encodeURIComponent(insurerName)}&type=${encodeURIComponent(policyType)}`);
+      const response = await fetch(`/api/policies/central-cg?insurer=${encodeURIComponent(insurerName)}&type=${encodeURIComponent(policyType)}`);
       if (response.ok) {
         const data = await response.json();
         if (data && data.length > 0) {
