@@ -27,7 +27,7 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, policies, finding
       const report = await generateShareableReport(policies, findings);
       setShareText(report);
     } catch (e) {
-      setShareText("Voici mon bilan AssurClair : j'ai optimisé mes contrats d'assurance !");
+      setShareText("Voici mon bilan BienCouvert : j'ai optimisé mes contrats d'assurance !");
     } finally {
       setIsGenerating(false);
     }
@@ -54,8 +54,8 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, policies, finding
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Mon Bilan AssurClair',
-          text: shareText || "J'ai audité mes assurances avec AssurClair !",
+          title: 'Mon Bilan BienCouvert',
+          text: shareText || "J'ai audité mes assurances avec BienCouvert !",
           url: window.location.href,
         });
       } catch (err) {}
@@ -68,7 +68,7 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, policies, finding
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `mes_contrats_assurclair_${new Date().toLocaleDateString()}.json`;
+    a.download = `mes_contrats_biencouvert_${new Date().toLocaleDateString()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -167,7 +167,7 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, policies, finding
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-bold">Télécharger mon export .json</p>
-                  <p className="text-[10px] opacity-60 font-medium">Format compatible Import AssurClair</p>
+                  <p className="text-[10px] opacity-60 font-medium">Format compatible Import BienCouvert</p>
                 </div>
               </div>
               <ChevronRightIcon className="w-5 h-5 opacity-40 group-hover:translate-x-1 transition-transform" />

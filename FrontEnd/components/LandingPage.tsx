@@ -35,13 +35,13 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
             <div className="bg-primary-600 p-2 rounded-xl shadow-lg shadow-primary-200">
               <ShieldCheck className="w-6 h-6 text-white" />
             </div>
-            <span className="text-2xl font-bold tracking-tight text-slate-900">AssurClair</span>
+            <span className="text-2xl font-bold tracking-tight text-slate-900">BienCouvert</span>
           </div>
           <button 
             onClick={onStart}
             className="px-6 py-2.5 bg-slate-900 text-white rounded-full font-semibold hover:bg-slate-800 transition-all active:scale-95"
           >
-            Démarrer l'audit
+            Se connecter
           </button>
         </div>
       </header>
@@ -50,13 +50,14 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         <div className="max-w-7xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-fadeIn">
             <Sparkles className="w-4 h-4" />
-            Propulsé par Gemini 3.0 Pro
+            TOTALEMENT GRATUIT
           </div>
           <h1 className="text-5xl lg:text-8xl font-black tracking-tighter text-slate-900 mb-8 max-w-5xl mx-auto leading-[0.95]">
-            L'assurance sans les <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600">zones d'ombre.</span>
+            Votre assitant pour comprendre et optimiser <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600"> TOUTES vos garanties d'assurances.</span>
           </h1>
           <p className="text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed font-bold">
-            Centralisez, analysez et optimisez votre protection en un clic. <br className="hidden md:block" /> Gagnez jusqu'à <span className="text-slate-900 font-black">240€ / an</span> en éliminant les doublons inutiles.
+            Centralisez, analysez et optimisez votre protection en un clic. <br className="hidden md:block" /> 
+            Ne payez plus <span className="text-slate-900 font-black"> les couvertures en doublon ou inutiles</span> et identifiez enfin les garanties qui vous manquent.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
@@ -137,7 +138,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         >
           Lancer l'audit gratuit
         </button>
-        <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2025 AssurClair - Protection Intelligente</p>
+        <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2025 BienCouvert - Protection Intelligente</p>
       </footer>
     </div>
   );

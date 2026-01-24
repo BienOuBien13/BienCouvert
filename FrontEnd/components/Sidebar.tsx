@@ -63,11 +63,9 @@ export const Sidebar: React.FC<Props> = ({
       <aside className={sidebarClasses}>
         <div className="p-6 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3 overflow-hidden" onClick={() => setActiveView('policies')}>
-            <div className="bg-primary-600 p-2 rounded-lg flex-shrink-0 cursor-pointer">
-              <ShieldCheck className="w-6 h-6 text-white" />
-            </div>
+            <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-10 w-auto flex-shrink-0 cursor-pointer" />
             <span className={`text-xl font-bold text-white whitespace-nowrap transition-opacity cursor-pointer ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
-              AssurClair
+              BienCouvert
             </span>
           </div>
           
@@ -125,7 +123,7 @@ export const Sidebar: React.FC<Props> = ({
               <UserIcon className="w-4 h-4" />
             </div>
             <div className={`text-left overflow-hidden transition-opacity ${isCollapsed ? 'lg:opacity-0 lg:hidden' : 'opacity-100'}`}>
-              <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+              <p className="text-sm font-semibold text-white truncate">{user.firstName} {user.lastName}</p>
               <p className="text-xs text-slate-500 truncate">Paramètres</p>
             </div>
           </button>

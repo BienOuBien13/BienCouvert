@@ -49,7 +49,7 @@ export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies 
           <div className="space-y-3">
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter">C'est noté !</h2>
             <p className="text-slate-500 font-medium leading-relaxed">
-              Un expert AssurClair vous rappellera au <span className="text-slate-900 font-bold">{phone}</span>.<br/>
+              Un expert BienCouvert vous rappellera au <span className="text-slate-900 font-bold">{phone}</span>.<br/>
               Créneau : <span className="text-slate-900 font-bold">{DAYS.find(d => d.id === selectedDay)?.label} ({SLOTS.find(s => s.id === selectedSlot)?.label})</span>.
             </p>
           </div>

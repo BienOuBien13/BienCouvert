@@ -121,10 +121,10 @@ export const generateShareableReport = async (policies: Policy[], findings: Opti
     const result = await apiFetch('/ai/generate-report', {
       body: JSON.stringify({ policies, findings })
     });
-    return result.text || "J'ai fait mon bilan AssurClair !";
+    return result.text || "J'ai fait mon bilan BienCouvert !";
   } catch (error) {
     console.error('Erreur generateShareableReport:', error);
-    return "J'ai fait mon bilan AssurClair !";
+    return "J'ai fait mon bilan BienCouvert !";
   }
 };
 

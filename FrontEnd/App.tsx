@@ -75,7 +75,7 @@ function App() {
       try {
         await Promise.all(policies.map(p => storageService.deletePolicy(p.id)));
         const resetProfile = { adultsCount: 1, childrenCount: 0 };
-        await authService.updateUser(user.id, { name: user.name, email: user.email, profile: resetProfile });
+        await authService.updateUser(user.id, { firstName: user.firstName, lastName: user.lastName, email: user.email, profile: resetProfile });
         setUserProfile(resetProfile);
         setPolicies([]);
         setMessages([]);
@@ -136,7 +136,7 @@ function App() {
       try {
         const updatedUser = { ...user, profile: newProfile };
         setUser(updatedUser);
-        await authService.updateUser(user.id, { name: user.name, email: user.email, profile: newProfile });
+        await authService.updateUser(user.id, { firstName: user.firstName, lastName: user.lastName, email: user.email, profile: newProfile });
       } catch (error) {
         console.error('Failed to update profile:', error);
         alert('Erreur lors de la mise à jour du profil');
@@ -160,7 +160,7 @@ function App() {
                   </h2>
                </div>
                <p className="text-slate-500 font-bold text-sm max-w-sm mx-auto md:mx-0 leading-relaxed">
-                  Fini les contrats oubliés et les garanties en doublon. AssurClair analyse tout pour vous en 2 minutes.
+                  Fini les contrats oubliés et les garanties en doublon. BienCouvert analyse tout pour vous en 2 minutes.
                </p>
                <div className="flex flex-wrap gap-3 justify-center md:justify-start">
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
@@ -342,14 +342,14 @@ function App() {
       case 'experts':
         return <div className="animate-fadeIn"><ExpertContact policies={policies} /></div>;
       case 'profile':
-        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} /></div>;
+        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} /></div>;
       case 'admin':
         return <AdminView />;
       default: return null;
     }
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center text-primary-600 font-black uppercase tracking-[0.4em] animate-pulse">AssurClair</div>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center text-primary-600 font-black uppercase tracking-[0.4em] animate-pulse">BienCouvert</div>;
   if (!user) {
     if (showAuth) return <AuthScreen onLogin={handleLogin} onBack={() => setShowAuth(false)} />;
     return <LandingPage onStart={() => setShowAuth(true)} />;
@@ -375,7 +375,7 @@ function App() {
       <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60]">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView('home')}>
           <div className="bg-primary-600 p-1.5 rounded-xl shadow-lg shadow-primary-200 group-hover:rotate-12 transition-transform"><ShieldCheck className="w-5 h-5 text-white" /></div>
-          <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">AssurClair</span>
+          <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">BienCouvert</span>
         </div>
         <div className="flex items-center gap-2">
            <button 

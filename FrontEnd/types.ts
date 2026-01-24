@@ -16,7 +16,8 @@ export type AppView = 'home' | 'add' | 'policies' | 'chat' | 'analysis' | 'exper
 export interface User {
   id: string;
   email: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   profile?: UserProfileData;
   isAdmin?: boolean;
 }

@@ -92,7 +92,8 @@ export interface UserProfileData {
 export interface User {
   id: string;                    // Identifiant unique UUID
   email: string;                 // Adresse email (utilisÃ©e pour la connexion)
-  name: string;                  // Nom d'affichage de l'utilisateur
+  firstName: string;             // PrÃ©nom de l'utilisateur
+  lastName: string;              // Nom de famille de l'utilisateur
   profile?: UserProfileData;     // DonnÃ©es du profil dÃ©taillÃ© (optionnel)
   isAdmin?: boolean;             // Indicateur d'accÃ¨s administrateur (dÃ©faut: false)
 }

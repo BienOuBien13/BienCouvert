@@ -40,7 +40,7 @@ export const PolicyStats: React.FC<Props> = ({ policies }) => {
           </div>
           <div className="space-y-1">
             <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Rang : {rank.label}</h3>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Score de Puissance AssurClair</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Score de Puissance BienCouvert</p>
           </div>
           
           <div className="w-full max-w-xs space-y-2">

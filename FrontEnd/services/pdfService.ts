@@ -19,7 +19,7 @@ const drawHeader = (doc: jsPDF, title: string, subtitle: string, userName: strin
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(24);
   doc.setFont('helvetica', 'bold');
-  doc.text('ASSURCLAIR', 15, 25);
+  doc.text('BIENCOUVERT', 15, 25);
   
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
@@ -35,7 +35,7 @@ const drawFooter = (doc: jsPDF) => {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    centerText(doc, `Page ${i} sur ${pageCount} - Document confidentiel généré par AssurClair.ia`, 285);
+    centerText(doc, `Page ${i} sur ${pageCount} - Document confidentiel généré par BienCouvert.ia`, 285);
   }
 };
 
@@ -44,7 +44,7 @@ export const generateOptimizationPDF = (user: User, policies: Policy[], findings
   const pageWidth = doc.internal.pageSize.getWidth();
   const profile = user.profile || {};
 
-  drawHeader(doc, 'ASSURCLAIR', 'Votre audit d\'assurances intelligent', user.name);
+  drawHeader(doc, 'BIENCOUVERT', 'Votre audit d\'assurances intelligent', `${user.firstName} ${user.lastName}`);
 
   // --- PROFILE SUMMARY ---
   let cursorY = 55;
@@ -127,14 +127,14 @@ export const generateOptimizationPDF = (user: User, policies: Policy[], findings
   });
 
   drawFooter(doc);
-  doc.save(`AssurClair_Audit_${user.name.replace(/\s/g, '_')}.pdf`);
+  doc.save(`BienCouvert_Audit_${user.lastName}.pdf`);
 };
 
 export const generatePortfolioPDF = (user: User, policies: Policy[]) => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  drawHeader(doc, 'ASSURCLAIR', 'Récapitulatif de votre portefeuille d\'assurances', user.name);
+  drawHeader(doc, 'BIENCOUVERT', 'Récapitulatif de votre portefeuille d\'assurances', `${user.firstName} ${user.lastName}`);
 
   let cursorY = 55;
   doc.setTextColor(slateColor[0], slateColor[1], slateColor[2]);
@@ -190,5 +190,5 @@ export const generatePortfolioPDF = (user: User, policies: Policy[]) => {
   }
 
   drawFooter(doc);
-  doc.save(`AssurClair_Portefeuille_${user.name.replace(/\s/g, '_')}.pdf`);
+  doc.save(`BienCouvert_Portefeuille_${user.lastName}.pdf`);
 };

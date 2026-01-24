@@ -17,13 +17,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 /**
  * Génère un token JWT pour un utilisateur authentifié.
- * Le token contient l'ID, l'email et le nom de l'utilisateur.
+ * Le token contient l'ID, l'email, le prénom et nom de l'utilisateur.
  * Durée de validité : 7 jours.
  * @param user - Objet utilisateur contenant les informations à encoder
  * @returns Token JWT signé
  */
 function signToken(user: User) {
-  return jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, JWT_SECRET, { expiresIn: '7d' });
 }
 
 /**
@@ -78,13 +78,16 @@ router.post('/register', async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     
     // Génération automatique d'un nom d'affichage à partir de l'email
-    // Ex: "jean.dupont@email.com" -> "Jean Dupont"
-    const displayName = email.split('@')[0].split('.').map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    // Ex: "jean.dupont@email.com" -> firstName: "Jean", lastName: "Dupont"
+    const nameParts = email.split('@')[0].split('.');
+    const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : 'Utilisateur';
+    const lastName = nameParts[1] ? nameParts[1].charAt(0).toUpperCase() + nameParts[1].slice(1) : '';
     
-    // Création du nouvel utilisateur avec profil vide et accès non-admin par défaut
+    // CrÃ©ation du nouvel utilisateur avec profil vide et accÃ¨s non-admin par dÃ©faut
     const newUser: any = { 
       email, 
-      name: displayName, 
+      firstName, 
+      lastName,
       password: hashed,            // Mot de passe haché (jamais stocké en clair)
       profile: {},                 // Profil initialisé vide (à compléter ultérieurement)
       isAdmin: false               // Par défaut, les nouveaux utilisateurs ne sont pas admin
@@ -101,7 +104,8 @@ router.post('/register', async (req, res) => {
       user: { 
         id: newUser.id, 
         email: newUser.email, 
-        name: newUser.name,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
         profile: newUser.profile,
         isAdmin: newUser.isAdmin
       } 
@@ -139,7 +143,8 @@ router.post('/login', async (req, res) => {
       user: { 
         id: found.id, 
         email: found.email, 
-        name: found.name,
+        firstName: found.firstName,
+        lastName: found.lastName,
         profile: found.profile || {},       // Retourne un objet vide si pas de profil
         isAdmin: found.isAdmin || false     // Retourne false si pas défini
       } 
@@ -194,7 +199,8 @@ router.get('/me', authMiddleware, async (req: any, res) => {
       user: {
         id: u.id, 
         email: u.email, 
-        name: u.name,
+        firstName: u.firstName,
+        lastName: u.lastName,
         profile: u.profile || {},
         isAdmin: u.isAdmin || false
       }
@@ -224,15 +230,19 @@ router.put('/me', authMiddleware, async (req: any, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    console.log('👤 Current user:', { id: user.id, name: user.name, email: user.email });
+    console.log('👤 Current user:', { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email });
     
-    const { name, email, password, profile } = req.body;
+    const { firstName, lastName, email, password, profile } = req.body;
     
-    // Mise à jour des champs fournis (ne modifie que les champs présents dans la requête)
-    // ⚠️ L'email est une clé unique et ne peut pas être modifié après création du compte
-    if (name !== undefined) {
-      console.log(`📝 Updating name: "${user.name}" -> "${name}"`);
-      user.name = name;
+    // Mise Ã  jour des champs fournis (ne modifie que les champs prÃ©sents dans la requÃªte)
+    // â ️ L'email est une clÃ© unique et ne peut pas Ãªtre modifiÃ© aprÃ¨s crÃ©ation du compte
+    if (firstName !== undefined) {
+      console.log(`📝 Updating firstName: "${user.firstName}" -> "${firstName}"`);
+      user.firstName = firstName;
+    }
+    if (lastName !== undefined) {
+      console.log(`📝 Updating lastName: "${user.lastName}" -> "${lastName}"`);
+      user.lastName = lastName;
     }
     if (email !== undefined && email !== user.email) {
       console.warn('⚠️ Email modification blocked - email is a unique key');
@@ -262,14 +272,15 @@ router.put('/me', authMiddleware, async (req: any, res) => {
       return res.status(500).json({ message: 'Failed to retrieve updated user' });
     }
     
-    console.log('✅ Updated user retrieved:', { id: updatedUser.id, name: updatedUser.name, email: updatedUser.email });
+    console.log('â Updated user retrieved:', { id: updatedUser.id, firstName: updatedUser.firstName, lastName: updatedUser.lastName, email: updatedUser.email });
     
-    // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
+    // Retourne les donnÃ©es mises Ã  jour (sans le mot de passe) avec la structure attendue
     res.json({ 
       user: {
         id: updatedUser.id, 
         email: updatedUser.email, 
-        name: updatedUser.name,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
         profile: updatedUser.profile,
         isAdmin: updatedUser.isAdmin || false
       }

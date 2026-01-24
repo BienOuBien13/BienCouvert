@@ -78,7 +78,7 @@ export const authService = {
   /**
    * Mise à jour du profil utilisateur
    */
-  updateUser: async (userId: string, data: { name: string; email: string; password?: string; profile?: UserProfileData }): Promise<User> => {
+  updateUser: async (userId: string, data: { firstName: string; lastName: string; email: string; password?: string; profile?: UserProfileData }): Promise<User> => {
     const response = await apiFetch('/auth/me', {
       method: 'PUT',
       body: JSON.stringify(data),

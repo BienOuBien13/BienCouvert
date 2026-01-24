@@ -157,10 +157,10 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       </button>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="mx-auto h-16 w-16 bg-primary-600 rounded-xl flex items-center justify-center shadow-lg mb-4">
-          <ShieldCheck className="h-10 w-10 text-white" />
+        <div className="mx-auto h-16 w-16 flex items-center justify-center mb-4">
+          <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-16 w-auto" />
         </div>
-        <h2 className="text-3xl font-extrabold text-slate-900">AssurClair</h2>
+        <h2 className="text-3xl font-extrabold text-slate-900">BienCouvert</h2>
         <p className="mt-2 text-sm text-slate-600">Votre assistant d'assurance personnel intelligent</p>
       </div>
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">

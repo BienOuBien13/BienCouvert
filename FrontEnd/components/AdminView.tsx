@@ -103,7 +103,7 @@ export const AdminView: React.FC = () => {
             <Database className="w-8 h-8 text-primary-600" />
             Gestionnaire de Connaissances
           </h2>
-          <p className="text-slate-500 font-medium mt-1">Base vectorisée pour l'IA d'AssurClair</p>
+          <p className="text-slate-500 font-medium mt-1">Base vectorisée pour l'IA de BienCouvert</p>
         </div>
         
         <button 

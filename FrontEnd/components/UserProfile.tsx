@@ -6,20 +6,22 @@ import { authService } from '../services/authService';
 import { 
   User as UserIcon, Mail, Lock, Save, Check, Briefcase, 
   Users, Home, ShieldAlert, Sparkles, ChevronRight, 
-  Settings2, Activity, Info, Loader2
+  Settings2, Activity, Info, Loader2, X
 } from 'lucide-react';
 
 interface Props {
   user: User;
   onUpdateUser: (user: User) => void;
   onUpdateProfile?: (profile: UserProfileData) => void;
+  onClose?: () => void;
 }
 
 type TabType = 'account' | 'personal' | 'housing' | 'lifestyle';
 
-export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile }) => {
+export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile, onClose }) => {
   const [activeTab, setActiveTab] = useState<TabType>('account');
-  const [name, setName] = useState(user.name);
+  const [firstName, setFirstName] = useState(user.firstName);
+  const [lastName, setLastName] = useState(user.lastName);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState('');
   const [profile, setProfile] = useState<UserProfileData>(user.profile || {
@@ -49,7 +51,8 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
       await new Promise(resolve => setTimeout(resolve, 800));
       
       const updatedUser = await authService.updateUser(user.id, {
-        name,
+        firstName,
+        lastName,
         // Email n'est plus envoyé car non modifiable
         password: password || undefined,
         profile
@@ -87,15 +90,26 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-fadeIn">
+      {/* Bouton fermeture */}
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold transition-colors"
+        >
+          <X className="w-5 h-5" />
+          <span>Retour</span>
+        </button>
+      )}
+
       {/* Profile Header Card */}
       <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-2xl">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center gap-6">
             <div className="w-20 h-20 bg-primary-500 rounded-3xl flex items-center justify-center text-3xl font-black shadow-lg shadow-primary-500/20">
-              {name.charAt(0).toUpperCase()}
+              {firstName.charAt(0).toUpperCase()}{lastName.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h2 className="text-3xl font-black tracking-tighter">{name}</h2>
+              <h2 className="text-3xl font-black tracking-tighter">{firstName} {lastName}</h2>
               <p className="text-primary-400 font-medium">{email}</p>
             </div>
           </div>
@@ -133,18 +147,33 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
             <div className="space-y-8 animate-fadeIn">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Nom complet</label>
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Prénom</label>
                   <div className="relative">
                     <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                     <input
                       type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
                       className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none font-bold"
                       required
                     />
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Nom</label>
+                  <div className="relative">
+                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none font-bold"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-8">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">
                     Adresse Email <span className="text-red-500">(non modifiable)</span>

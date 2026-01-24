@@ -124,7 +124,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
 
 export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
   const ai = getAiClient();
-  let context = "Tu es AssurClair, un assistant IA spécialisé en assurances. Contrats actuels de l'utilisateur :\n";
+  let context = "Tu es BienCouvert, un assistant IA spécialisé en assurances. Contrats actuels de l'utilisateur :\n";
   policies.forEach(p => context += `- ${p.type} "${p.name}" chez ${p.provider}\n`);
   
   try {
@@ -186,15 +186,15 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
 
 export const generateShareableReport = async (policies: Policy[], findings: OptimizationFinding[]): Promise<string> => {
   const ai = getAiClient();
-  const prompt = `Génère un court texte de partage résumant mon bilan AssurClair. Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.`;
+  const prompt = `Génère un court texte de partage résumant mon bilan BienCouvert. Mes contrats : ${policies.map(p => `${p.provider} (${p.type})`).join(', ')}.`;
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash-latest',
       contents: { parts: [{ text: prompt }] },
     });
-    return response.text?.trim() || "J'ai fait mon bilan AssurClair !";
+    return response.text?.trim() || "J'ai fait mon bilan BienCouvert !";
   } catch (error) {
-    return "J'ai fait mon bilan AssurClair !";
+    return "J'ai fait mon bilan BienCouvert !";
   }
 };
 
@@ -211,7 +211,7 @@ export const connectIntakeSession = async (
   const allRecommended = ["Automobile", "Habitation", "Santé/Mutuelle", "Protection Juridique", "Prévoyance/Décès"];
   const missing = allRecommended.filter(type => !existingPolicyTypes.includes(type as PolicyType));
   
-  const systemInstruction = `Tu es l'agent d'admission d'AssurClair. Ton rôle est d'être PRÉCIS.
+  const systemInstruction = `Tu es l'agent d'admission de BienCouvert. Ton rôle est d'être PRÉCIS.
   
   RÈGLES D'INTERACTION :
   1. Si l'utilisateur mentionne un contrat SANS l'assureur : Demande impérativement "Chez quel assureur ?"
@@ -324,7 +324,7 @@ export const connectLiveSession = async (
   if (!ai) {
     throw new Error('Fonction audio non disponible: VITE_GEMINI_API_KEY manquante');
   }
-  let context = "Tu es AssurClair. Contrats actuels :\n";
+  let context = "Tu es BienCouvert. Contrats actuels :\n";
   policies.forEach(p => context += `- [${p.type}] ${p.name} chez ${p.provider}.\n`);
   
   let nextStartTime = 0;

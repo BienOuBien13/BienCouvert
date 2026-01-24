@@ -16,7 +16,8 @@ export const storage = {
     return result.rows.map(row => ({
       id: row.id,
       email: row.email,
-      name: row.name,
+      firstName: row.first_name,
+      lastName: row.last_name,
       password: row.password,
       profile: row.profile ? JSON.parse(row.profile) : null,
       isAdmin: row.is_admin
@@ -28,17 +29,17 @@ export const storage = {
    * @param data - Objet utilisateur à sauvegarder
    */
   writeUser: async (data: any) => {
-    const { id, email, name, password, profile, isAdmin } = data;
+    const { id, email, firstName, lastName, password, profile, isAdmin } = data;
     const profileStr = profile ? JSON.stringify(profile) : null;
     
     if (id) {
       // Mise à jour
       const result = await query(
         `UPDATE users 
-         SET email = $1, name = $2, password = $3, profile = $4, is_admin = $5, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
+         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7
          RETURNING id`,
-        [email, name, password, profileStr, isAdmin || false, id]
+        [email, firstName, lastName, password, profileStr, isAdmin || false, id]
       );
       
       if (result.rows.length === 0) {
@@ -49,10 +50,10 @@ export const storage = {
     } else {
       // Insertion
       const result = await query(
-        `INSERT INTO users (email, name, password, profile, is_admin)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO users (email, first_name, last_name, password, profile, is_admin)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
-        [email, name, password, profileStr, isAdmin || false]
+        [email, firstName, lastName, password, profileStr, isAdmin || false]
       );
       return result.rows[0].id;
     }
@@ -85,22 +86,34 @@ export const storage = {
     queryText += ' ORDER BY id';
     
     const result = await query(queryText, params);
-    return result.rows.map(row => ({
-      id: row.id,
-      userId: row.user_id,
-      policyNumber: row.policy_number,
-      insurer: row.insurer,
-      type: row.type,
-      premium: row.premium ? parseFloat(row.premium) : null,
-      coverage: row.coverage ? parseFloat(row.coverage) : null,
-      startDate: row.start_date,
-      endDate: row.end_date,
-      status: row.status,
-      documentUrl: row.document_url,
-      documentData: row.document_data,
-      metadata: row.metadata,
-      centralCgId: row.central_cg_id  // Lien vers le référentiel central
-    })) as T[];
+    return result.rows.map(row => {
+      const metadata = row.metadata || {};
+      return {
+        id: row.id.toString(),
+        userId: row.user_id.toString(),
+        name: metadata.name || 'Contrat sans nom',
+        provider: row.insurer || 'Non spécifié',
+        type: row.type || 'Autre',
+        coverageDetail: metadata.coverageDetail || null,
+        options: metadata.options || [],
+        fileData: row.document_data || null,
+        fileName: metadata.fileName || null,
+        sourceUrl: row.document_url || null,
+        mimeType: metadata.mimeType || 'text/html',
+        summary: metadata.summary || null,
+        addedAt: row.start_date ? new Date(row.start_date).getTime() : Date.now(),
+        annualPremium: row.premium ? parseFloat(row.premium) : undefined,
+        isInternalSource: metadata.isInternalSource || false,
+        // Garder aussi les propriétés natives pour compatibilité
+        policyNumber: row.policy_number,
+        premium: row.premium ? parseFloat(row.premium) : null,
+        coverage: row.coverage ? parseFloat(row.coverage) : null,
+        startDate: row.start_date,
+        endDate: row.end_date,
+        status: row.status,
+        centralCgId: row.central_cg_id
+      };
+    }) as T[];
   },
 
   /**

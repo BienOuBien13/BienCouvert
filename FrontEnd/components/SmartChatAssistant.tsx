@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
-import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare, Edit3, FileText } from 'lucide-react';
+import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare, Edit3, FileText, CreditCard, Smartphone, Scale } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 
 // Simple AI API call helper
@@ -52,7 +52,14 @@ const TYPES = [
   { id: 'auto', name: 'Auto', icon: Car, color: 'from-red-500 to-orange-500' },
   { id: 'habitation', name: 'Habitation', icon: Home, color: 'from-blue-500 to-cyan-500' },
   { id: 'sante', name: 'Santé', icon: Heart, color: 'from-pink-500 to-rose-500' },
+  { id: 'prevoyance', name: 'Prévoyance', icon: Shield, color: 'from-green-500 to-emerald-500' },
   { id: 'pro', name: 'Professionnelle', icon: Briefcase, color: 'from-purple-500 to-indigo-500' },
+  { id: 'emprunteur', name: 'Emprunteur/Crédit', icon: CreditCard, color: 'from-amber-500 to-yellow-500' },
+  { id: 'bancaire', name: 'Carte Bancaire', icon: CreditCard, color: 'from-indigo-500 to-purple-500' },
+  { id: 'appareils', name: 'Appareils Électroniques', icon: Smartphone, color: 'from-slate-500 to-slate-600' },
+  { id: 'juridique', name: 'Juridique', icon: Scale, color: 'from-slate-600 to-slate-700' },
+  { id: 'voyage', name: 'Voyage', icon: Package, color: 'from-cyan-500 to-blue-500' },
+  { id: 'animaux', name: 'Animaux', icon: Heart, color: 'from-orange-500 to-red-500' },
   { id: 'autre', name: 'Autre', icon: Shield, color: 'from-slate-500 to-slate-600' },
 ];
 
@@ -131,8 +138,11 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
     name: '',
     formula: '',
     options: '',
-    pdfUrl: ''
+    pdfUrl: '',
+    pdfFile: null as File | null
   });
+  const [availableFormulas, setAvailableFormulas] = useState<string[]>([]);
+  const [availableOptions, setAvailableOptions] = useState<string[]>([]);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [currentFormulas, setCurrentFormulas] = useState<Array<{ name: string; options: string[] }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -150,6 +160,39 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
       ...options
     };
     setMessages(prev => [...prev, newMessage]);
+  };
+
+  // Récupérer formules depuis central_cg
+  const getFormulasFromCentralCg = async (insurerName: string, policyType: string) => {
+    try {
+      const response = await fetch(`/api/central-cg?insurer=${encodeURIComponent(insurerName)}&type=${encodeURIComponent(policyType)}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          // Extraire les formules uniques avec leurs options
+          const formulasMap = new Map<string, string[]>();
+          data.forEach((doc: any) => {
+            if (doc.indexedFormulas && Array.isArray(doc.indexedFormulas)) {
+              doc.indexedFormulas.forEach((formula: string) => {
+                if (!formulasMap.has(formula)) {
+                  formulasMap.set(formula, doc.indexedOptions || []);
+                }
+              });
+            }
+          });
+          
+          if (formulasMap.size > 0) {
+            return Array.from(formulasMap.entries()).map(([name, options]) => ({
+              name,
+              options
+            }));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Erreur récupération central_cg:', error);
+    }
+    return null;
   };
 
   const getAIFormulasAndOptions = async (insurerName: string, policyType: string) => {
@@ -232,7 +275,17 @@ Exemples pour Habitation:
     
     addMessage(`⏳ Je récupère les formules disponibles chez ${selectedInsurer}...`, 'bot');
     
-    const formulas = await getAIFormulasAndOptions(selectedInsurer, selectedType);
+    // Essayer d'abord de récupérer depuis central_cg
+    let formulas = await getFormulasFromCentralCg(selectedInsurer, selectedType);
+    
+    // Si pas de résultats dans central_cg, utiliser l'IA
+    if (!formulas || formulas.length === 0) {
+      addMessage(`💡 Pas de données dans la base, consultation de l'IA...`, 'bot');
+      formulas = await getAIFormulasAndOptions(selectedInsurer, selectedType);
+    } else {
+      addMessage(`✅ Formules trouvées dans la base de connaissances !`, 'bot');
+    }
+    
     setCurrentFormulas(formulas);
     
     setTimeout(() => {
@@ -620,20 +673,47 @@ Exemples pour Habitation:
             </div>
             
             <div className="col-span-2">
-              <label className="text-xs font-bold text-slate-500 mb-1 block">URL du PDF (optionnel)</label>
+              <label className="text-xs font-bold text-slate-500 mb-1 block">
+                Document PDF (optionnel) - stocké en base64 dans PostgreSQL
+              </label>
               <input
-                type="url"
-                value={manualData.pdfUrl}
-                onChange={(e) => setManualData({...manualData, pdfUrl: e.target.value})}
-                placeholder="https://..."
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setManualData({...manualData, pdfFile: file});
+                  }
+                }}
                 className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none font-medium text-sm"
               />
+              {manualData.pdfFile && (
+                <p className="text-xs text-green-600 mt-1 font-semibold">
+                  ✓ {manualData.pdfFile.name} ({(manualData.pdfFile.size / 1024).toFixed(0)} KB)
+                </p>
+              )}
             </div>
           </div>
           
           <button
-            onClick={() => {
+            onClick={async () => {
               if (manualData.insurer && manualData.name) {
+                let fileData: string | null = null;
+                let fileName: string | null = null;
+                
+                // Convertir le PDF en base64 si présent
+                if (manualData.pdfFile) {
+                  const reader = new FileReader();
+                  fileData = await new Promise<string>((resolve) => {
+                    reader.onload = () => {
+                      const base64 = reader.result as string;
+                      resolve(base64.split(',')[1]); // Enlever le préfixe data:application/pdf;base64,
+                    };
+                    reader.readAsDataURL(manualData.pdfFile!);
+                  });
+                  fileName = manualData.pdfFile.name;
+                }
+                
                 const newPolicy: Omit<Policy, 'userId'> = {
                   id: uuid(),
                   name: manualData.name,
@@ -642,16 +722,16 @@ Exemples pour Habitation:
                   coverageDetail: `${manualData.insurer}\n\n📦 Formule: ${manualData.formula}\n\n🎯 Options:\n${manualData.options.split(',').map(opt => `• ${opt.trim()}`).join('\n')}`,
                   options: manualData.options ? manualData.options.split(',').map(o => o.trim()) : [],
                   summary: `${manualData.type} - ${manualData.formula}`,
-                  sourceUrl: manualData.pdfUrl || null,
+                  sourceUrl: null,
                   isInternalSource: true,
                   addedAt: Date.now(),
-                  fileData: null,
-                  fileName: null,
-                  mimeType: 'text/plain'
+                  fileData, // base64 du PDF
+                  fileName, // nom original du fichier
+                  mimeType: fileData ? 'application/pdf' : 'text/plain'
                 };
                 onAddPolicy(newPolicy);
                 setManualMode(false);
-                setManualData({ type: 'auto', insurer: '', name: '', formula: '', options: '', pdfUrl: '' });
+                setManualData({ type: 'auto', insurer: '', name: '', formula: '', options: '', pdfFile: null });
                 addMessage('✅ Contrat ajouté avec succès !', 'bot');
               }
             }}

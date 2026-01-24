@@ -46,9 +46,15 @@ async function extractTextFromPDF(pdfUrl) {
           mimeType: 'application/pdf'
         }
       },
-      `Extrait TOUT le contenu textuel de ce document PDF d'assurance.
-      Ne résume pas, donne le texte complet.
-      Inclus toutes les formules, options, tarifs, conditions générales.`
+      `Extrait TOUT le contenu textuel EXACT de ce document PDF d'assurance.
+      
+      RÈGLES STRICTES:
+      - NE MODIFIE RIEN, recopie le texte tel quel
+      - N'INVENTE AUCUNE information
+      - Inclus TOUTES les formules mentionnées dans le document
+      - Inclus TOUTES les options/garanties listées dans le document
+      - Inclus les tableaux de garanties
+      - Conserve la structure du document`
     ]);
     
     const text = result.response.text();
@@ -71,18 +77,28 @@ async function analyzeDocument(text, insurer, type) {
   
   const prompt = `Analyse ce document d'assurance ${type} de ${insurer}.
 
+⚠️ RÈGLES ABSOLUES - ZÉRO HALLUCINATION:
+1. N'INVENTE AUCUNE formule qui n'est pas explicitement mentionnée dans le document
+2. N'INVENTE AUCUNE option qui n'est pas listée dans le document
+3. Si tu n'es pas SÛR à 100%, ne l'inclus PAS
+4. Utilise les NOMS EXACTS tels qu'écrits dans le document
+5. Si rien n'est trouvé, retourne des tableaux vides []
+
 TEXTE DU DOCUMENT:
 ${text}
 
 Extrait et retourne UNIQUEMENT un JSON valide avec cette structure exacte:
 {
-  "formules": ["Formule 1", "Formule 2", ...],
-  "options": ["Option 1", "Option 2", ...],
-  "resume": "Résumé en 2-3 phrases des principales garanties"
+  "formules": ["Nom exact formule 1", "Nom exact formule 2"],
+  "options": ["Nom exact option 1", "Nom exact option 2"],
+  "resume": "Résumé factuel basé UNIQUEMENT sur le document"
 }
 
-Les formules sont les différents niveaux de couverture (ex: Tiers, Tous Risques, Essentiel, Confort, Premium).
-Les options sont les garanties optionnelles additionnelles.`;
+Cherche dans le document:
+- Les FORMULES: sections "Nos formules", "Niveaux de garantie", tableaux comparatifs
+- Les OPTIONS: sections "Options", "Garanties optionnelles", "Extensions de garantie"
+
+Si tu ne trouves RIEN de certain, retourne {"formules": [], "options": [], "resume": "Document analysé - contenu à vérifier manuellement"}.`;
 
   try {
     const result = await model.generateContent(prompt);
@@ -94,7 +110,25 @@ Les options sont les garanties optionnelles additionnelles.`;
     
     console.log(`✅ Analyse terminée:`);
     console.log(`   - ${analysis.formules?.length || 0} formules identifiées`);
+    if (analysis.formules?.length > 0) {
+      console.log(`     Formules: ${analysis.formules.join(', ')}`);
+    }
     console.log(`   - ${analysis.options?.length || 0} options identifiées`);
+    if (analysis.options?.length > 0) {
+      console.log(`     Options: ${analysis.options.join(', ')}`);
+    }
+    console.log(`   - Résumé: ${analysis.resume?.substring(0, 100)}...`);
+    
+    // Validation: vérifier que les formules/options ne sont pas des génériques inventés
+    const suspiciousPatterns = ['formule 1', 'formule 2', 'option 1', 'option 2', 'formule de base', 'formule intermédiaire'];
+    const hasSuspicious = [...(analysis.formules || []), ...(analysis.options || [])].some(item => 
+      suspiciousPatterns.some(pattern => item.toLowerCase().includes(pattern))
+    );
+    
+    if (hasSuspicious) {
+      console.warn('⚠️  ATTENTION: Des noms génériques détectés - possible hallucination !');
+      console.warn('   Vérifiez manuellement les résultats avant utilisation.');
+    }
     
     return analysis;
   } catch (error) {

@@ -312,7 +312,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       type: refiningPolicy.type || type,
       coverageDetail: refiningPolicy.coverageDetail || coverageDetail,
       options: refiningPolicy.options || selectedOptions,
-      summary: refiningPolicy.summary || summary || "Vérifié par AssurClair.",
+      summary: refiningPolicy.summary || summary || "Vérifié par BienCouvert.",
       sourceUrl: refiningPolicy.sourceUrl || sourceUrl,
       isInternalSource: refiningPolicy.isInternalSource,
       addedAt: Date.now(),
