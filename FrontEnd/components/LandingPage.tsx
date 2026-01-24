@@ -32,9 +32,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
       <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md z-50 border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-primary-600 p-2 rounded-xl shadow-lg shadow-primary-200">
-              <ShieldCheck className="w-6 h-6 text-white" />
-            </div>
+            <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-12 w-auto" />
             <span className="text-2xl font-bold tracking-tight text-slate-900">BienCouvert</span>
           </div>
           <button 
@@ -81,7 +79,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="text-center">
             <p className="text-4xl font-black text-slate-900 tracking-tighter">100%</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Local & Privé</p>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Gratuit</p>
           </div>
           <div className="text-center">
             <p className="text-4xl font-black text-slate-900 tracking-tighter">~240€</p>
@@ -89,42 +87,38 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
           </div>
           <div className="text-center">
             <p className="text-4xl font-black text-slate-900 tracking-tighter">2 min</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Audit Express</p>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Analyse Express</p>
           </div>
           <div className="text-center">
             <p className="text-4xl font-black text-slate-900 tracking-tighter">24/7</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Expert IA</p>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Assistant IA</p>
           </div>
         </div>
       </section>
 
       <section id="concept" className="py-32 px-6 scroll-mt-24">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-24">
-            <h2 className="text-5xl font-black text-slate-900 mb-6 tracking-tighter leading-tight">Une gestion 3.0 de <br/>votre protection</h2>
-            <p className="text-slate-500 text-xl font-medium max-w-2xl mx-auto leading-relaxed">Oubliez la paperasse et les clauses incompréhensibles. <br/>Notre base de données vérifiée fait le travail pour vous.</p>
-          </div>
-
+       
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             <FeatureCard 
               icon={<Search className="w-8 h-8" />}
-              title="Base Certifiée"
-              description="Nous comparons vos contrats avec notre base de Conditions Générales indexée par l'IA pour une précision chirurgicale."
+              title="Personnalisation complète"
+              description="Vous composez en quelques cliques votre portefeuille d'assurances avec vos couvertures actuelles."
             />
             <FeatureCard 
               icon={<MessageSquare className="w-8 h-8" />}
-              title="Dialogue Naturel"
-              description="Posez des questions vocales en direct à votre assistant : 'Suis-je couvert pour le bris de glace ?'."
+              title="Assitant Assurance"
+              description="Posez des questions en direct à votre assistant : 'Suis-je couvert pour le bris de glace ?'."
             />
             <FeatureCard 
               icon={<Zap className="w-8 h-8" />}
-              title="Audit Doublons"
-              description="Analyse croisée automatique pour détecter si vous payez plusieurs fois pour la même garantie."
+              title="Optimisation"
+              description="Analyse croisée automatique pour détecter si vous payez plusieurs fois pour la même garantie et identification des couvertures manquantes"
             />
             <FeatureCard 
               icon={<Users className="w-8 h-8" />}
               title="Relais Expert"
-              description="Un doute ? Sollicitez un audit gratuit par l'un de nos experts partenaires pour finaliser vos économies."
+              description="Un doute ? Sollicitez un expert indépendant pour finaliser vos économies."
             />
           </div>
         </div>
@@ -136,7 +130,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
           onClick={onStart}
           className="px-16 py-7 bg-primary-600 text-white rounded-[2.5rem] font-black text-xl hover:bg-primary-700 transition-all shadow-3xl shadow-primary-900/30 active:scale-95"
         >
-          Lancer l'audit gratuit
+          C'est parti !
         </button>
         <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2025 BienCouvert - Protection Intelligente</p>
       </footer>

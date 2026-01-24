@@ -107,6 +107,33 @@ router.post('/', upload.single('file'), async (req: any, res) => {
     // Insertion dans PostgreSQL
     const policyId = await storage.writePolicy(newPolicy);
     newPolicy.id = policyId;
+    
+    // Vectorisation automatique si PDF présent
+    if (newPolicy.documentData && newPolicy.metadata.mimeType === 'application/pdf') {
+      try {
+        // Extraire le texte du PDF avec Gemini
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        
+        const result = await model.generateContent([
+          {
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: newPolicy.documentData
+            }
+          },
+          "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
+        ]);
+        
+        const pdfText = result.response.text();
+        await storage.vectorizePolicyPdf(policyId, pdfText);
+        console.log(`✅ PDF vectorisé pour policy ${policyId}`);
+      } catch (e) {
+        console.warn('⚠️ Vectorisation PDF échouée:', e);
+      }
+    }
+    
     res.json(newPolicy);
   } catch (err) {
     console.error(err);
@@ -241,7 +268,8 @@ router.post('/detect-duplicates', async (req, res) => {
  * Route GET /api/policies/central-cg
  * Liste toutes les entrées du référentiel central des CG.
  * Utilisé par la vue d'administration pour gérer le référentiel.
- * Supporte les query params : ?type=habitation, ?insurer=AXA
+ * Supporte les query params : ?type=auto, ?insurer=AXA
+ * Les types sont normalisés en minuscules (auto, habitation, bancaire, etc.)
  */
 router.get('/central-cg', async (req, res) => {
   try {
@@ -250,11 +278,15 @@ router.get('/central-cg', async (req, res) => {
     // Filtrage optionnel par type et/ou assureur
     let filtered = entries;
     if (req.query.type) {
-      filtered = filtered.filter((e: any) => e.metadata?.type === req.query.type);
+      const requestedType = (req.query.type as string).toLowerCase();
+      filtered = filtered.filter((e: any) => 
+        e.metadata?.type?.toLowerCase() === requestedType
+      );
     }
     if (req.query.insurer) {
+      const requestedInsurer = (req.query.insurer as string).toLowerCase();
       filtered = filtered.filter((e: any) => 
-        e.insurer.toLowerCase().includes((req.query.insurer as string).toLowerCase())
+        e.insurer.toLowerCase().includes(requestedInsurer)
       );
     }
     
@@ -299,6 +331,43 @@ router.post('/central-cg', async (req, res) => {
     
     const entryId = await storage.writeCentralCgEntry(newEntry);
     newEntry.id = entryId;
+    
+    // Vectorisation automatique du PDF
+    try {
+      const { GoogleGenerativeAI } = require('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      
+      // Télécharger et extraire le texte du PDF
+      const response = await fetch(pdfUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+      
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: pdfBase64
+          }
+        },
+        "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
+      ]);
+      
+      const pdfText = result.response.text();
+      
+      // Stocker le texte et vectoriser
+      const { query } = require('../db');
+      await query(
+        'UPDATE central_cg SET content_text = $1 WHERE id = $2',
+        [pdfText, entryId]
+      );
+      
+      await storage.vectorizeCentralCg(entryId, pdfText);
+      console.log(`✅ CG ${entryId} vectorisée`);
+    } catch (e) {
+      console.warn('⚠️ Vectorisation CG échouée:', e);
+    }
+    
     res.json(newEntry);
   } catch (err) {
     console.error(err);

@@ -250,5 +250,109 @@ export const storage = {
    */
   deleteCentralCgEntry: async (id: number) => {
     await query('DELETE FROM central_cg WHERE id = $1', [id]);
+  },
+
+  /**
+   * Vectorise un PDF de contrat utilisateur et stocke les chunks dans policy_embeddings
+   * @param policyId - ID de la police
+   * @param pdfText - Texte extrait du PDF
+   */
+  vectorizePolicyPdf: async (policyId: number, pdfText: string) => {
+    const { chunkText, generateEmbedding } = require('./services/geminiService');
+    
+    // Découper le texte en chunks
+    const chunks = chunkText(pdfText);
+    console.log(`📄 Vectorisation de ${chunks.length} chunks pour policy ${policyId}`);
+    
+    // Supprimer les anciens chunks si existe
+    await query('DELETE FROM policy_embeddings WHERE policy_id = $1', [policyId]);
+    
+    // Vectoriser chaque chunk
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const embedding = await generateEmbedding(chunk);
+      
+      await query(
+        `INSERT INTO policy_embeddings (policy_id, chunk_text, chunk_index, embedding, created_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+        [policyId, chunk, i, JSON.stringify(embedding)]
+      );
+    }
+    
+    console.log(`✅ ${chunks.length} chunks vectorisés pour policy ${policyId}`);
+  },
+
+  /**
+   * Vectorise un document CG admin et met à jour central_cg.embedding
+   * @param cgId - ID de l'entrée central_cg
+   * @param text - Texte complet du document
+   */
+  vectorizeCentralCg: async (cgId: number, text: string) => {
+    const { generateEmbedding } = require('./services/geminiService');
+    
+    console.log(`📄 Vectorisation CG ${cgId}...`);
+    const embedding = await generateEmbedding(text);
+    
+    await query(
+      `UPDATE central_cg SET embedding = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [JSON.stringify(embedding), cgId]
+    );
+    
+    console.log(`✅ CG ${cgId} vectorisé`);
+  },
+
+  /**
+   * Recherche sémantique dans les embeddings de contrats utilisateurs
+   * @param questionEmbedding - Embedding de la question
+   * @param policyIds - IDs des polices à chercher
+   * @param limit - Nombre max de résultats
+   * @returns Chunks pertinents avec métadonnées
+   */
+  searchPolicyEmbeddings: async (questionEmbedding: number[], policyIds: number[], limit: number = 5) => {
+    const result = await query(
+      `SELECT 
+        pe.chunk_text, pe.chunk_index,
+        p.insurer as provider, p.type, p.metadata->>'name' as name,
+        1 - (pe.embedding <=> $1::vector) as similarity
+       FROM policy_embeddings pe
+       JOIN policies p ON pe.policy_id = p.id
+       WHERE pe.policy_id = ANY($2)
+       ORDER BY pe.embedding <=> $1::vector
+       LIMIT $3`,
+      [JSON.stringify(questionEmbedding), policyIds, limit]
+    );
+    
+    return result.rows;
+  },
+
+  /**
+   * Recherche sémantique dans central_cg
+   * @param questionEmbedding - Embedding de la question
+   * @param insurers - Liste d'assureurs à filtrer (optionnel)
+   * @param limit - Nombre max de résultats
+   * @returns Documents CG pertinents
+   */
+  searchCentralCg: async (questionEmbedding: number[], insurers?: string[], limit: number = 3) => {
+    let queryText = `
+      SELECT 
+        insurer, product_name, content_text,
+        metadata->>'type' as type,
+        1 - (embedding <=> $1::vector) as similarity
+      FROM central_cg
+      WHERE embedding IS NOT NULL
+    `;
+    
+    const params: any[] = [JSON.stringify(questionEmbedding)];
+    
+    if (insurers && insurers.length > 0) {
+      params.push(insurers);
+      queryText += ` AND insurer = ANY($${params.length})`;
+    }
+    
+    queryText += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
+    params.push(limit);
+    
+    const result = await query(queryText, params);
+    return result.rows;
   }
 };

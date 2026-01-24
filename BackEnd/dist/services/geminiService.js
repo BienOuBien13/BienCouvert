@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateShareableReport = exports.indexCgDocument = exports.parsePoliciesFromText = exports.sendMessageToAssistant = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
+exports.generateShareableReport = exports.indexCgDocument = exports.parsePoliciesFromText = exports.sendMessageToAssistant = exports.chunkText = exports.generateEmbedding = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
@@ -77,6 +77,46 @@ const searchPolicyInfo = async (provider, type, name) => {
     if (!ai) {
         return { summary: `Recherche simulée pour ${provider} - ${type} - ${name}`, sourceUrl: undefined, detectedFormulas: [], availableOptions: [] };
     }
+    // ÉTAPE 1: Chercher dans central_cg (RAG) d'abord
+    try {
+        const storage = require('../storage').storage;
+        const questionText = `Informations sur le contrat ${name} de ${provider} (${type})`;
+        const questionEmbedding = await (0, exports.generateEmbedding)(questionText);
+        const cgResults = await storage.searchCentralCg(questionEmbedding, [provider], 1);
+        if (cgResults.length > 0 && cgResults[0].similarity > 0.7) {
+            const cg = cgResults[0];
+            console.log(`✅ CG trouvée dans RAG: ${cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity})`);
+            // Extraire formules et options du contenu
+            const promptExtract = `Analyse ce document de conditions générales et extrais:
+
+${cg.content_text?.substring(0, 5000) || ''}
+
+Réponds en JSON:
+{
+  "summary": "Résumé des garanties principales",
+  "formulas": ["liste des formules trouvées"],
+  "options": ["liste des options trouvées"]
+}`;
+            const model = ai.getGenerativeModel({
+                model: 'gemini-2.5-flash',
+                generationConfig: { responseMimeType: 'application/json' }
+            });
+            const extractResult = await model.generateContent([promptExtract]);
+            const extractText = extractResult.response.text();
+            const extracted = JSON.parse(extractText);
+            return {
+                summary: extracted.summary || 'Informations extraites des conditions générales',
+                sourceUrl: cg.document_url,
+                detectedFormulas: Array.isArray(extracted.formulas) ? extracted.formulas : [],
+                availableOptions: Array.isArray(extracted.options) ? extracted.options : []
+            };
+        }
+    }
+    catch (e) {
+        console.warn('⚠️ Recherche RAG échouée, fallback sur Internet:', e.message);
+    }
+    // ÉTAPE 2: Si pas trouvé dans RAG, chercher sur Internet
+    console.log('🌐 Recherche sur Internet pour', provider, name);
     const prompt = `Tu es un expert en assurances. Recherche sur Internet les conditions générales actuelles pour ce produit d'assurance :
   
   Assureur: ${provider}
@@ -129,6 +169,31 @@ const detectDuplicates = async (policies, profile = {}) => {
     const ai = getAiClient();
     if (!ai)
         return [];
+    // ÉTAPE 1: Enrichir les contrats avec RAG (extraits pertinents)
+    const storage = require('../storage').storage;
+    const enrichedPolicies = [];
+    for (const p of policies) {
+        let enrichedContext = `Contrat ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail || 'Non spécifiée'}.`;
+        try {
+            // Chercher dans les embeddings de ce contrat
+            const questionEmbedding = await (0, exports.generateEmbedding)(`Garanties et couvertures du contrat ${p.name}`);
+            const chunks = await storage.searchPolicyEmbeddings(questionEmbedding, [parseInt(p.id)], 3);
+            if (chunks.length > 0) {
+                enrichedContext += '\n\n📄 Extraits du contrat:\n';
+                chunks.forEach((chunk) => {
+                    enrichedContext += chunk.chunk_text.substring(0, 500) + '...\n';
+                });
+            }
+            else {
+                enrichedContext += ` Résumé : ${p.summary || 'Non disponible'}`;
+            }
+        }
+        catch (e) {
+            console.warn(`⚠️ RAG échoué pour policy ${p.id}, utilisation métadonnées`);
+            enrichedContext += ` Résumé : ${p.summary || 'Non disponible'}`;
+        }
+        enrichedPolicies.push(enrichedContext);
+    }
     const prompt = `Analyse ces contrats d'assurance en fonction du profil utilisateur et identifie les optimisations possibles (doublons, gaps de couverture, économies potentielles).
 
 PROFIL UTILISATEUR : ${JSON.stringify(profile)}
@@ -138,19 +203,19 @@ CRITÈRES D'ANALYSE PRIORITAIRES :
 2. HABITAT & RISQUES : Analyse la présence de piscine, jardin ou l'année de construction.
 3. LOCALISATION : Utilise le code postal pour évaluer les risques géographiques.
 4. ANIMAUX : Vérifie si une mutuelle santé animale ou RC adaptée existe.
-5. DOUBLONS & MANQUES : Détecte les chevauchements et manques critiques.
+5. DOUBLONS & MANQUES : Détecte les chevauchements et manques critiques en analysant les clauses exactes.
 
 Retourne un tableau JSON d'optimisations avec les champs:
 - title: titre court
-- description: explication détaillée
+- description: explication détaillée avec citations des clauses
 - type: 'duplicate' | 'gap' | 'saving'
 - severity: 'low' | 'medium' | 'high'
 - involvedPolicies: tableau d'IDs de polices concernées
 - savingsPotential: montant économisé estimé (nombre)
 - recommendation: recommandation d'action`;
     const parts = [{ text: prompt }];
-    policies.forEach(p => {
-        parts.push({ text: `Contrat ID: ${p.id}, Nom: ${p.name}, Type: ${p.type}, Assureur: ${p.provider}, Formule: ${p.coverageDetail || 'Non spécifiée'}. Résumé : ${p.summary || ''}` });
+    enrichedPolicies.forEach(enrichedText => {
+        parts.push({ text: enrichedText });
     });
     try {
         const model = ai.getGenerativeModel({
@@ -170,14 +235,118 @@ Retourne un tableau JSON d'optimisations avec les champs:
     }
 };
 exports.detectDuplicates = detectDuplicates;
+/**
+ * Génère un embedding de 768 dimensions pour un texte donné
+ * Utilise le modèle text-embedding-004 de Gemini
+ */
+const generateEmbedding = async (text) => {
+    const ai = getAiClient();
+    if (!ai) {
+        console.warn('No Gemini client - returning zero embedding');
+        return new Array(768).fill(0);
+    }
+    try {
+        const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
+        const result = await model.embedContent(text);
+        return result.embedding.values;
+    }
+    catch (err) {
+        console.error('generateEmbedding error:', err);
+        return new Array(768).fill(0);
+    }
+};
+exports.generateEmbedding = generateEmbedding;
+/**
+ * Découpe un texte en chunks de ~1000 tokens
+ * Utilise des séparateurs naturels (paragraphes, phrases)
+ */
+const chunkText = (text, maxChars = 3000) => {
+    if (!text)
+        return [];
+    // Diviser par paragraphes d'abord
+    const paragraphs = text.split(/\n\n+/);
+    const chunks = [];
+    let currentChunk = '';
+    for (const paragraph of paragraphs) {
+        if (currentChunk.length + paragraph.length < maxChars) {
+            currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+        }
+        else {
+            if (currentChunk)
+                chunks.push(currentChunk);
+            // Si le paragraphe est trop long, le découper par phrases
+            if (paragraph.length > maxChars) {
+                const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
+                let sentenceChunk = '';
+                for (const sentence of sentences) {
+                    if (sentenceChunk.length + sentence.length < maxChars) {
+                        sentenceChunk += sentence;
+                    }
+                    else {
+                        if (sentenceChunk)
+                            chunks.push(sentenceChunk);
+                        sentenceChunk = sentence;
+                    }
+                }
+                if (sentenceChunk)
+                    chunks.push(sentenceChunk);
+                currentChunk = '';
+            }
+            else {
+                currentChunk = paragraph;
+            }
+        }
+    }
+    if (currentChunk)
+        chunks.push(currentChunk);
+    return chunks;
+};
+exports.chunkText = chunkText;
 const sendMessageToAssistant = async (message, policies, history) => {
     const ai = getAiClient();
     if (!ai) {
         return "Le service d'assistant est temporairement indisponible. Veuillez configurer GEMINI_API_KEY.";
     }
     try {
-        const policyContext = policies.map(p => `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`).join('\n');
-        const systemInstruction = `Tu es un assistant expert en assurance. Voici les polices de l'utilisateur :\n${policyContext}\n\nRéponds en français de manière claire et concise.`;
+        const storage = require('../storage').storage;
+        // Étape 1: Générer l'embedding de la question
+        const questionEmbedding = await (0, exports.generateEmbedding)(message);
+        // Étape 2: Rechercher dans les embeddings des contrats utilisateurs
+        const policyIds = policies.map(p => parseInt(p.id));
+        const policyChunks = policyIds.length > 0
+            ? await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5)
+            : [];
+        // Étape 3: Rechercher dans les CG centralisées
+        const insurers = policies.map(p => p.provider);
+        const cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
+        // Étape 4: Construire le contexte enrichi
+        let enrichedContext = '';
+        if (policyChunks.length > 0) {
+            enrichedContext += '📄 Extraits de vos contrats:\n\n';
+            policyChunks.forEach((chunk, idx) => {
+                enrichedContext += `[${chunk.provider} - ${chunk.type}]\n${chunk.chunk_text.substring(0, 800)}...\n\n`;
+            });
+        }
+        if (cgChunks.length > 0) {
+            enrichedContext += '📚 Conditions générales:\n\n';
+            cgChunks.forEach((cg, idx) => {
+                enrichedContext += `[${cg.insurer} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
+            });
+        }
+        // Si aucun contexte RAG, fallback sur metadata
+        if (!enrichedContext) {
+            enrichedContext = 'Vos contrats:\n' + policies.map(p => `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`).join('\n');
+        }
+        const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.
+    
+Voici le contexte disponible pour répondre:
+
+${enrichedContext}
+
+CONSIGNES:
+- Cite toujours les clauses exactes quand tu réponds
+- Si une information n'est pas dans le contexte, dis que tu ne la trouves pas dans les documents fournis
+- Sois précis sur quel contrat tu parles`;
         const chatHistory = history.map(msg => ({
             role: msg.role === 'user' ? 'user' : 'model',
             parts: [{ text: msg.text }]
@@ -189,7 +358,7 @@ const sendMessageToAssistant = async (message, policies, history) => {
         const chat = model.startChat({
             history: chatHistory.length === 0 ? [
                 { role: 'user', parts: [{ text: systemInstruction }] },
-                { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance.' }] }
+                { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance en m\'appuyant sur les documents fournis.' }] }
             ] : chatHistory
         });
         const result = await chat.sendMessage(message);
