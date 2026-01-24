@@ -476,7 +476,7 @@ ${text}`;
 };
 
 /**
- * Indexe un document de Conditions Générales via l'URL d'un PDF
+ * Indexe un document de Conditions Générales via URL PDF
  * Retourne les formules, options et un résumé sémantique
  */
 export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<any> => {
@@ -485,18 +485,19 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
     return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Service IA non disponible" };
   }
 
-  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} via l'URL : ${pdfUrl}.
-  Extrais : 
-  1. Les formules commerciales (ex: Tiers, Tous Risques, Initiale, Confort).
-  2. Les options complémentaires (ex: Assistance 0km, Protection du conducteur).
-  3. Un résumé sémantique des garanties principales.
-  
-  Réponds au format JSON suivant :
-  {
-    "indexedFormulas": ["Formule 1", "Formule 2"],
-    "indexedOptions": ["Option 1", "Option 2"],
-    "semanticSummary": "Résumé des garanties"
-  }`;
+  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} disponible à l'URL : ${pdfUrl}
+
+Extrais : 
+1. Les formules commerciales (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+2. Les options complémentaires (ex: Assistance 0km, Protection du conducteur, Bris de glace).
+3. Un résumé sémantique concis des garanties principales (max 200 mots).
+
+Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
+{
+  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedOptions": ["Option 1", "Option 2"],
+  "semanticSummary": "Résumé des garanties principales..."
+}`;
 
   try {
     const model = ai.getGenerativeModel({
@@ -506,13 +507,45 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
       }
     });
     
+    console.log(`📤 Demande d'indexation à Gemini pour: ${pdfUrl}`);
     const result = await model.generateContent([prompt]);
     const response = await result.response;
-    const jsonText = response.text();
-    return JSON.parse(jsonText);
-  } catch (err) {
-    console.error('gemini indexCgDocument error', err);
-    return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Erreur d'indexation" };
+    let jsonText = response.text();
+    
+    console.log(`✅ Réponse Gemini reçue (${jsonText.length} chars)`);
+    
+    // Nettoyage robuste du JSON (enlever markdown, extraire JSON valide)
+    jsonText = jsonText.trim();
+    
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/^```json\s*/i, '').replace(/```\s*$/i, '');
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```\s*/i, '').replace(/```\s*$/i, '');
+    }
+    
+    const firstBrace = jsonText.indexOf('{');
+    const lastBrace = jsonText.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+      jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+    }
+    
+    const parsed = JSON.parse(jsonText);
+    
+    if (!parsed.indexedFormulas || !parsed.indexedOptions || !parsed.semanticSummary) {
+      throw new Error('Réponse Gemini incomplète');
+    }
+    
+    console.log(`✅ Indexation réussie: ${parsed.indexedFormulas.length} formules, ${parsed.indexedOptions.length} options`);
+    return parsed;
+    
+  } catch (err: any) {
+    console.error('❌ gemini indexCgDocument error:', err);
+    return { 
+      indexedFormulas: [], 
+      indexedOptions: [], 
+      semanticSummary: `Erreur: ${err?.message || 'Erreur inconnue'}` 
+    };
   }
 };
 
