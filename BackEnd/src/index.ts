@@ -38,6 +38,9 @@ const app = express();
 // en développement pour faciliter les tests en ligne de commande.
 // -----------------------------------------------------------------------------
 
+// ===============================================================================
+// CONFIGURATION CORS - Phase 2 Security (httpOnly cookies + HTTPS)
+// ===============================================================================
 // Récupération de la configuration CORS depuis les variables d'environnement
 const frontendOrigin = process.env.FRONTEND_ORIGIN || '*';
 let corsOptions: any = { origin: '*' };  // Par défaut : toutes origines autorisées
