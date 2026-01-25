@@ -89,8 +89,19 @@ export const authService = {
     return response.user;
   },
 
-  /**
-   * Déconnexion
+  /**   * Suppression du compte utilisateur (RGPD Art. 17 - Droit à l'effacement)
+   */
+  deleteAccount: async (): Promise<void> => {
+    await apiFetch('/auth/account', {
+      method: 'DELETE',
+    });
+    
+    // Effacer les données locales après suppression
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  },
+
+  /**   * Déconnexion
    */
   logout: (): void => {
     localStorage.removeItem(TOKEN_KEY);

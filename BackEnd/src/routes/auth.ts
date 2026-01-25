@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { storage } from '../storage';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { body, validationResult } from 'express-validator';
 import { User, UserProfileData } from '../types';
+import { validatePassword, getPasswordRequirements } from '../utils/passwordValidator';
+import { logAudit, AuditAction, getAuditContext } from '../services/auditService';
 
 // -----------------------------------------------------------------------------
 // Routes d'authentification
@@ -28,7 +31,7 @@ function signToken(user: User) {
 
 /**
  * Middleware d'authentification qui vérifie la validité du token JWT.
- * Extrait le token depuis le header "Authorization: Bearer <token>" et vérifie sa signature.
+ * Extrait le token depuis le cookie httpOnly OU le header "Authorization: Bearer <token>".
  * Si valide, injecte les données utilisateur dans req.user et passe au middleware suivant.
  * Sinon, retourne une erreur 401 Unauthorized.
  * @param req - Requête Express
@@ -36,17 +39,27 @@ function signToken(user: User) {
  * @param next - Fonction de passage au middleware suivant
  */
 function authMiddleware(req: any, res: any, next: any) {
-  // Récupération du header Authorization
-  const auth = req.headers.authorization;
-  if (!auth) return res.status(401).json({ message: 'Missing authorization' });
+  // 🔒 Priorité 1: Cookie httpOnly (sécurisé)
+  let token = req.cookies?.token;
   
-  // Vérification du format "Bearer <token>"
-  const parts = auth.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') return res.status(401).json({ message: 'Invalid auth' });
+  // 🔓 Fallback: Header Authorization (compatibilité ancienne version)
+  if (!token) {
+    const auth = req.headers.authorization;
+    if (auth) {
+      const parts = auth.split(' ');
+      if (parts.length === 2 && parts[0] === 'Bearer') {
+        token = parts[1];
+      }
+    }
+  }
+  
+  if (!token) {
+    return res.status(401).json({ message: 'Missing authentication token' });
+  }
   
   try {
     // Vérification de la signature du JWT et extraction du payload
-    const payload = jwt.verify(parts[1], JWT_SECRET) as any;
+    const payload = jwt.verify(token, JWT_SECRET) as any;
     // Injection des données utilisateur dans la requête pour les routes suivantes
     req.user = payload;
     next();
@@ -60,12 +73,48 @@ function authMiddleware(req: any, res: any, next: any) {
  * Route POST /api/auth/register
  * Inscription d'un nouvel utilisateur dans l'application.
  * Vérifie l'unicité de l'email, hache le mot de passe avec bcrypt,
- * crée le compte et retourne un token JWT pour connexion immédiate.
+ * crée le compte et retourne un token JWT en cookie httpOnly.
  */
-router.post('/register', async (req, res) => {
+router.post('/register', [
+  // 🔒 Validation des inputs avec express-validator
+  body('email')
+    .isEmail().withMessage('Email invalide')
+    .normalizeEmail(),
+  body('password')
+    .isLength({ min: 12 }).withMessage('Le mot de passe doit contenir au moins 12 caractères'),
+  body('firstName')
+    .optional()
+    .trim()
+    .isLength({ max: 50 }).withMessage('Prénom trop long (max 50 caractères)')
+    .matches(/^[a-zA-ZÀ-ſ\s-']+$/).withMessage('Prénom contient des caractères invalides'),
+  body('lastName')
+    .optional()
+    .trim()
+    .isLength({ max: 50 }).withMessage('Nom trop long (max 50 caractères)')
+    .matches(/^[a-zA-ZÀ-ſ\s-']+$/).withMessage('Nom contient des caractères invalides')
+], async (req: any, res: any) => {
+  // Vérifier les erreurs de validation
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ 
+      message: 'Données invalides',
+      errors: errors.array() 
+    });
+  }
+
   const { email, password } = req.body;
   // Validation des champs requis
   if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
+
+  // 🔒 Validation de la politique de mot de passe (ANSSI)
+  const passwordCheck = validatePassword(password);
+  if (!passwordCheck.valid) {
+    return res.status(400).json({ 
+      message: 'Le mot de passe ne respecte pas les critères de sécurité',
+      errors: passwordCheck.errors,
+      requirements: getPasswordRequirements()
+    });
+  }
 
   try {
     // Vérification de l'unicité de l'email (insensible à la casse)
@@ -97,17 +146,37 @@ router.post('/register', async (req, res) => {
     const userId = await storage.writeUser(newUser);
     newUser.id = userId;
 
+    // 📝 Audit: Enregistrement nouveau compte
+    await logAudit({
+      action: AuditAction.USER_REGISTER,
+      userId: newUser.id,
+      userEmail: newUser.email,
+      ...getAuditContext(req),
+      details: { profile: req.body.profile || 'client' }
+    });
+
     // Génération d'un token JWT pour connexion automatique après inscription
     const token = signToken(newUser);
+    
+    // 🔒 Envoi du token en cookie httpOnly (sécurisé contre XSS)
+    res.cookie('token', token, {
+      httpOnly: true,        // Inaccessible depuis JavaScript (protection XSS)
+      secure: process.env.NODE_ENV === 'production', // HTTPS uniquement en production
+      sameSite: 'strict',    // Protection CSRF
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+      path: '/'
+    });
+    
     res.json({ 
-      token, 
+      token,  // 📑 DEPRECATED: Envoyé pour compatibilité, utiliser cookie en priorité
       user: { 
         id: newUser.id, 
         email: newUser.email, 
         firstName: newUser.firstName,
         lastName: newUser.lastName,
         profile: newUser.profile,
-        isAdmin: newUser.isAdmin
+        isAdmin: newUser.isAdmin,
+        geminiAiConsent: newUser.geminiAiConsent || false
       } 
     });
   } catch (err) {
@@ -119,40 +188,120 @@ router.post('/register', async (req, res) => {
 /**
  * Route POST /api/auth/login
  * Connexion d'un utilisateur existant.
- * Vérifie les identifiants (email/mot de passe) et retourne un token JWT si valides.
+ * Vérifie les identifiants (email/mot de passe) et retourne un token JWT en cookie httpOnly.
  */
-router.post('/login', async (req, res) => {
+router.post('/login', [
+  // 🔒 Validation des inputs
+  body('email')
+    .isEmail().withMessage('Email invalide')
+    .normalizeEmail(),
+  body('password')
+    .notEmpty().withMessage('Mot de passe requis')
+], async (req: any, res: any) => {
+  // Vérifier les erreurs de validation
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ 
+      message: 'Données invalides',
+      errors: errors.array() 
+    });
+  }
+
   const { email, password } = req.body;
-  // Validation des champs requis
-  if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
   
   try {
     // Recherche de l'utilisateur par email (insensible à la casse)
     const users = await storage.readUsers();
     const found = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
-    if (!found) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!found) {
+      // 📝 Audit: Tentative de connexion avec email inexistant
+      await logAudit({
+        action: AuditAction.USER_FAILED_LOGIN,
+        userEmail: email,
+        ...getAuditContext(req),
+        details: { reason: 'User not found' }
+      });
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
     
     // Vérification du mot de passe avec bcrypt (compare le hash stocké avec le mot de passe fourni)
     const ok = await bcrypt.compare(password, found.password);
-    if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!ok) {
+      // 📝 Audit: Tentative de connexion échouée
+      await logAudit({
+        action: AuditAction.USER_FAILED_LOGIN,
+        userEmail: email,
+        ...getAuditContext(req),
+        details: { reason: 'Invalid password' }
+      });
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+    
+    // 📝 Audit: Connexion réussie
+    await logAudit({
+      action: AuditAction.USER_LOGIN,
+      userId: found.id,
+      userEmail: found.email,
+      ...getAuditContext(req)
+    });
     
     // Génération d'un token JWT pour la session
     const token = signToken(found);
+    
+    // 🔒 Envoi du token en cookie httpOnly (sécurisé contre XSS)
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+    
     res.json({ 
-      token, 
+      token,  // 📑 DEPRECATED: Pour compatibilité
       user: { 
         id: found.id, 
         email: found.email, 
         firstName: found.firstName,
         lastName: found.lastName,
         profile: found.profile || {},       // Retourne un objet vide si pas de profil
-        isAdmin: found.isAdmin || false     // Retourne false si pas défini
+        isAdmin: found.isAdmin || false,    // Retourne false si pas défini
+        geminiAiConsent: found.geminiAiConsent || false
       } 
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+/**
+ * Route POST /api/auth/logout
+ * Déconnecte l'utilisateur en supprimant le cookie de session.
+ */
+router.post('/logout', authMiddleware, async (req: any, res) => {
+  const userId = req.user?.id;
+  const userEmail = req.user?.email;
+  
+  // 📝 Audit: Déconnexion
+  if (userId) {
+    await logAudit({
+      action: AuditAction.USER_LOGOUT,
+      userId,
+      userEmail,
+      ...getAuditContext(req)
+    });
+  }
+  
+  // 🔒 Suppression du cookie httpOnly
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/'
+  });
+  
+  res.json({ ok: true, message: 'Logged out successfully' });
 });
 
 /**
@@ -166,6 +315,16 @@ router.post('/reset', async (req, res) => {
   // Validation des champs requis
   if (!email || !newPassword) return res.status(400).json({ message: 'Invalid' });
   
+  // 🔒 Validation de la politique de mot de passe (ANSSI)
+  const passwordCheck = validatePassword(newPassword);
+  if (!passwordCheck.valid) {
+    return res.status(400).json({ 
+      message: 'Le nouveau mot de passe ne respecte pas les critères de sécurité',
+      errors: passwordCheck.errors,
+      requirements: getPasswordRequirements()
+    });
+  }
+  
   try {
     // Recherche de l'utilisateur par email
     const users = await storage.readUsers();
@@ -175,6 +334,15 @@ router.post('/reset', async (req, res) => {
     // Hachage du nouveau mot de passe et mise à jour
     user.password = await bcrypt.hash(newPassword, 10);
     await storage.writeUser(user);
+    
+    // 📝 Audit: Réinitialisation mot de passe
+    await logAudit({
+      action: AuditAction.USER_PASSWORD_RESET,
+      userId: user.id,
+      userEmail: user.email,
+      ...getAuditContext(req)
+    });
+    
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -202,7 +370,8 @@ router.get('/me', authMiddleware, async (req: any, res) => {
         firstName: u.firstName,
         lastName: u.lastName,
         profile: u.profile || {},
-        isAdmin: u.isAdmin || false
+        isAdmin: u.isAdmin || false,
+        geminiAiConsent: u.geminiAiConsent || false
       }
     });
   } catch (err) {
@@ -232,7 +401,7 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     
     console.log('👤 Current user:', { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email });
     
-    const { firstName, lastName, email, password, profile } = req.body;
+    const { firstName, lastName, email, password, profile, geminiAiConsent } = req.body;
     
     // Mise Ã  jour des champs fournis (ne modifie que les champs prÃ©sents dans la requÃªte)
     // â ️ L'email est une clÃ© unique et ne peut pas Ãªtre modifiÃ© aprÃ¨s crÃ©ation du compte
@@ -249,6 +418,10 @@ router.put('/me', authMiddleware, async (req: any, res) => {
       return res.status(400).json({ message: 'Email cannot be changed' });
     }
     if (profile !== undefined) user.profile = profile;
+    if (geminiAiConsent !== undefined) {
+      console.log(`📝 Updating geminiAiConsent: ${user.geminiAiConsent} -> ${geminiAiConsent}`);
+      user.geminiAiConsent = geminiAiConsent;
+    }
     
     console.log('📝 Updated user data:', { id: user.id, name: user.name, email: user.email, profile: user.profile });
     
@@ -262,6 +435,18 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     console.log('💾 Saving to database...');
     await storage.writeUser(user);
     console.log('✅ User saved successfully');
+    
+    // 📝 Audit: Modification des données utilisateur
+    await logAudit({
+      action: AuditAction.USER_DATA_MODIFIED,
+      userId: user.id,
+      userEmail: user.email,
+      ...getAuditContext(req),
+      details: {
+        fields: Object.keys(req.body).filter(k => k !== 'password'),
+        geminiAiConsentChanged: geminiAiConsent !== undefined
+      }
+    });
     
     // Relire les données depuis la base pour être sûr d'avoir les valeurs à jour
     const updatedUsers = await storage.readUsers();
@@ -282,12 +467,66 @@ router.put('/me', authMiddleware, async (req: any, res) => {
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
         profile: updatedUser.profile,
-        isAdmin: updatedUser.isAdmin || false
+        isAdmin: updatedUser.isAdmin || false,
+        geminiAiConsent: updatedUser.geminiAiConsent || false
       }
     });
   } catch (err) {
     console.error('❌ Error in PUT /me:', err);
     res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * Route DELETE /api/auth/account (protégée)
+ * Suppression définitive et irréversible du compte utilisateur.
+ * Supprime toutes les données associées : profil, contrats, embeddings.
+ * Conforme RGPD Art. 17 (droit à l'effacement).
+ */
+router.delete('/account', authMiddleware, async (req: any, res) => {
+  const userId = req.user.id;
+  const userEmail = req.user.email;
+  
+  try {
+    console.log(`🗑️ Deleting account for user ${userId}`);
+    
+    // 1. Supprimer tous les contrats de l'utilisateur (cascade vers embeddings)
+    const policies = await storage.readPolicies();
+    const userPolicies = policies.filter((p: any) => p.userId === userId);
+    
+    console.log(`📄 Deleting ${userPolicies.length} policies...`);
+    for (const policy of userPolicies) {
+      await storage.deletePolicy(policy.id);
+    }
+    
+    // 2. Supprimer l'utilisateur de la base
+    console.log(`👤 Deleting user account...`);
+    await storage.deleteUser(userId);
+    
+    // 📝 Audit: Suppression du compte (RGPD Art. 17)
+    await logAudit({
+      action: AuditAction.USER_ACCOUNT_DELETED,
+      userId: userId,
+      userEmail: userEmail,
+      ...getAuditContext(req),
+      details: { 
+        deletionType: 'user_requested',
+        policiesCount: userPolicies.length
+      }
+    });
+    
+    console.log(`✅ Account ${userId} successfully deleted`);
+    
+    res.json({ 
+      ok: true, 
+      message: 'Account successfully deleted. All your data has been permanently removed.' 
+    });
+  } catch (err) {
+    console.error('❌ Error deleting account:', err);
+    res.status(500).json({ 
+      message: 'Failed to delete account', 
+      error: err instanceof Error ? err.message : 'Unknown error' 
+    });
   }
 });
 

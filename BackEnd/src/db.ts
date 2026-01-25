@@ -19,6 +19,10 @@ const pool = new Pool({
   max: 20,                          // Nombre maximum de clients dans le pool
   idleTimeoutMillis: 30000,        // Temps avant de fermer une connexion inactive
   connectionTimeoutMillis: 5000,    // Timeout pour établir une connexion
+  // 🔒 Connexion SSL/TLS pour chiffrer les communications avec PostgreSQL (RGPD + Cybersécu)
+  ssl: process.env.NODE_ENV === 'production' || process.env.POSTGRES_SSL === 'true' 
+    ? { rejectUnauthorized: false }  // En production Azure, accepter les certificats auto-signés
+    : false                          // En développement local, pas de SSL
 });
 
 // Gestion des erreurs du pool

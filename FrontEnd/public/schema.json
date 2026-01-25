@@ -1,0 +1,41 @@
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "BienCouvert",
+  "applicationCategory": "FinanceApplication",
+  "operatingSystem": "Web, iOS, Android",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "EUR"
+  },
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "4.8",
+    "ratingCount": "127"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "AssurClair",
+    "url": "https://biencouvert.fr"
+  },
+  "description": "BienCouvert centralise vos contrats d'assurance (auto, habitation, santé) et détecte automatiquement les doublons, lacunes et économies grâce à l'intelligence artificielle. Gratuit, sécurisé et conforme RGPD.",
+  "screenshot": "https://biencouvert.fr/screenshot.jpg",
+  "softwareVersion": "1.0",
+  "datePublished": "2026-01-25",
+  "featureList": [
+    "Centralisation de tous vos contrats d'assurance",
+    "Détection automatique des doublons",
+    "Analyse des lacunes de couverture",
+    "Assistant IA pour répondre à vos questions",
+    "Extraction intelligente depuis PDF",
+    "Recommandations personnalisées d'économies",
+    "Stockage sécurisé conforme RGPD"
+  ],
+  "url": "https://biencouvert.fr",
+  "downloadUrl": "https://biencouvert.fr",
+  "sameAs": [
+    "https://apps.apple.com/app/biencouvert",
+    "https://play.google.com/store/apps/details?id=fr.biencouvert"
+  ]
+}

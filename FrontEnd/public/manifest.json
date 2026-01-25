@@ -1,0 +1,41 @@
+{
+  "name": "BienCouvert",
+  "short_name": "BienCouvert",
+  "description": "Gérez vos assurances intelligemment avec l'IA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0284c7",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.jpg",
+      "sizes": "1080x1920",
+      "type": "image/jpeg",
+      "platform": "narrow"
+    },
+    {
+      "src": "/screenshot-desktop.jpg",
+      "sizes": "1920x1080",
+      "type": "image/jpeg",
+      "platform": "wide"
+    }
+  ],
+  "categories": ["finance", "productivity", "utilities"],
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
+  "lang": "fr-FR"
+}

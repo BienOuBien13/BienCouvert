@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,        -- Hash bcrypt du mot de passe
     profile TEXT,                          -- JSON stringifié du profil utilisateur
     is_admin BOOLEAN DEFAULT false,
+    gemini_ai_consent BOOLEAN DEFAULT false, -- Consentement pour traitement par Gemini AI (RGPD)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

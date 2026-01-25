@@ -14,16 +14,19 @@ interface Props {
   onUpdateUser: (user: User) => void;
   onUpdateProfile?: (profile: UserProfileData) => void;
   onClose?: () => void;
+  onDeleteAccount?: () => void;
 }
 
 type TabType = 'account' | 'personal' | 'housing' | 'lifestyle';
 
-export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile, onClose }) => {
+export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile, onClose, onDeleteAccount }) => {
   const [activeTab, setActiveTab] = useState<TabType>('account');
   const [firstName, setFirstName] = useState(user.firstName);
   const [lastName, setLastName] = useState(user.lastName);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [profile, setProfile] = useState<UserProfileData>(user.profile || {
     adultsCount: 1,
     childrenCount: 0,
@@ -210,6 +213,46 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
                   <p className="text-[10px] text-slate-400 italic ml-1">Laissez vide pour conserver le mot de passe actuel.</p>
                 </div>
               </div>
+
+              {/* Consentement Gemini AI (RGPD) */}
+              <div className="pt-6 border-t border-slate-50">
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6">
+                  <div className="flex items-start gap-4">
+                    <input 
+                      type="checkbox" 
+                      id="gemini-consent"
+                      checked={user.geminiAiConsent || false}
+                      onChange={(e) => {
+                        const updatedUser = { ...user, geminiAiConsent: e.target.checked };
+                        onUpdateUser(updatedUser);
+                        // Sauvegarder immédiatement
+                        authService.updateUser(user.id, { 
+                          firstName: user.firstName, 
+                          lastName: user.lastName, 
+                          email: user.email, 
+                          geminiAiConsent: e.target.checked 
+                        }).catch(err => console.error('Failed to update consent:', err));
+                      }}
+                      className="mt-1 h-5 w-5 text-primary-600 border-blue-300 rounded focus:ring-primary-500"
+                    />
+                    <label htmlFor="gemini-consent" className="flex-1">
+                      <span className="font-bold text-blue-900 text-sm">🤖 Consentement Google Gemini AI</span>
+                      <p className="mt-2 text-xs text-blue-800 leading-relaxed">
+                        J'autorise BienCouvert à envoyer mes documents d'assurance à <strong>Google Gemini AI</strong> pour analyse automatique 
+                        (extraction de garanties, détection de doublons, assistant conversationnel).
+                      </p>
+                      <p className="mt-2 text-xs text-blue-700">
+                        ⚠️ <strong>Sans ce consentement</strong>, l'analyse sera limitée et l'assistant IA sera désactivé.
+                      </p>
+                      <p className="mt-2 text-xs text-blue-600">
+                        📄 <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" className="underline font-medium">
+                          Politique de confidentialité Google
+                        </a>
+                      </p>
+                    </label>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -368,6 +411,66 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
             </button>
           </div>
         </form>
+
+        {/* Zone de suppression de compte (RGPD) */}
+        {activeTab === 'account' && (
+          <div className="mt-8 pt-8 border-t border-red-200">
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-red-900 mb-2">🗑️ Zone de danger</h3>
+              <p className="text-sm text-red-700 mb-4">
+                La suppression de votre compte est <strong>définitive et irréversible</strong>. 
+                Toutes vos données (contrats, profil, documents) seront définitivement supprimées.
+              </p>
+              
+              {!showDeleteConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="px-6 py-3 bg-white border-2 border-red-500 text-red-700 rounded-xl font-bold text-sm hover:bg-red-50 transition-all"
+                >
+                  Supprimer mon compte
+                </button>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-red-800 font-bold">
+                    Pour confirmer, tapez "<span className="font-mono">SUPPRIMER</span>" ci-dessous :
+                  </p>
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="SUPPRIMER"
+                    className="w-full px-4 py-3 border-2 border-red-300 rounded-xl focus:border-red-500 outline-none font-mono"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeleteConfirm(false);
+                        setDeleteConfirmText('');
+                      }}
+                      className="flex-1 px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-300 transition-all"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (deleteConfirmText === 'SUPPRIMER' && onDeleteAccount) {
+                          onDeleteAccount();
+                        }
+                      }}
+                      disabled={deleteConfirmText !== 'SUPPRIMER'}
+                      className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Confirmer la suppression
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {status === 'error' && (

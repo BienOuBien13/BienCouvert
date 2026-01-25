@@ -20,6 +20,7 @@ export interface User {
   lastName: string;
   profile?: UserProfileData;
   isAdmin?: boolean;
+  geminiAiConsent?: boolean;  // Consentement pour traitement par Google Gemini AI
 }
 
 export interface CentralCgEntry {

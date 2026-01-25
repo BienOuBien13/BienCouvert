@@ -21,7 +21,8 @@ exports.storage = {
             lastName: row.last_name,
             password: row.password,
             profile: row.profile ? JSON.parse(row.profile) : null,
-            isAdmin: row.is_admin
+            isAdmin: row.is_admin,
+            geminiAiConsent: row.gemini_ai_consent || false
         }));
     },
     /**
@@ -29,14 +30,21 @@ exports.storage = {
      * @param data - Objet utilisateur à sauvegarder
      */
     writeUser: async (data) => {
-        const { id, email, firstName, lastName, password, profile, isAdmin } = data;
+        const { id, email, firstName, lastName, password, profile, isAdmin, geminiAiConsent } = data;
+        // Validation des champs requis
+        if (!email || !password) {
+            throw new Error('Missing required fields: email and password are required');
+        }
+        if (!firstName || !lastName) {
+            throw new Error('Missing required fields: firstName and lastName are required');
+        }
         const profileStr = profile ? JSON.stringify(profile) : null;
         if (id) {
             // Mise à jour
             const result = await (0, db_1.query)(`UPDATE users 
-         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $7
-         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, id]);
+         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, gemini_ai_consent = $7, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $8
+         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, id]);
             if (result.rows.length === 0) {
                 throw new Error(`User with id ${id} not found for update`);
             }
@@ -44,11 +52,22 @@ exports.storage = {
         }
         else {
             // Insertion
-            const result = await (0, db_1.query)(`INSERT INTO users (email, first_name, last_name, password, profile, is_admin)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false]);
+            const result = await (0, db_1.query)(`INSERT INTO users (email, first_name, last_name, password, profile, is_admin, gemini_ai_consent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false]);
             return result.rows[0].id;
         }
+    },
+    /**
+     * Supprime un utilisateur de la table users
+     * @param userId - ID de l'utilisateur à supprimer
+     */
+    deleteUser: async (userId) => {
+        const result = await (0, db_1.query)('DELETE FROM users WHERE id = $1 RETURNING id', [userId]);
+        if (result.rows.length === 0) {
+            throw new Error(`User with id ${userId} not found for deletion`);
+        }
+        return result.rows[0].id;
     },
     /**
      * Écrit la liste complète des utilisateurs (pour migration)

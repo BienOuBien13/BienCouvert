@@ -1,0 +1,24 @@
+# BienCouvert - robots.txt
+# https://biencouvert.fr/robots.txt
+
+User-agent: *
+Allow: /
+
+# Pages principales
+Allow: /
+Allow: /politique-confidentialite
+Allow: /conditions-utilisation
+
+# Empêcher l'indexation des pages d'authentification
+Disallow: /auth/
+Disallow: /login/
+Disallow: /register/
+
+# Empêcher l'indexation des zones privées
+Disallow: /api/
+Disallow: /admin/
+Disallow: /profile/
+Disallow: /dashboard/
+
+# Sitemap
+Sitemap: https://biencouvert.fr/sitemap.xml

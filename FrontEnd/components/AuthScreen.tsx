@@ -19,6 +19,8 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedAiDisclaimer, setAcceptedAiDisclaimer] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +35,8 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
         const user = await authService.login(email, password);
         onLogin(user);
       } else if (mode === 'register') {
+        if (!acceptedTerms) throw new Error("Veuillez accepter les CGU et la politique de confidentialité.");
+        if (!acceptedAiDisclaimer) throw new Error("Veuillez accepter le disclaimer IA.");
         const user = await authService.register(email, password);
         onLogin(user);
       } else if (mode === 'forgot') {
@@ -138,7 +142,38 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
               <div className="mt-1 relative shadow-sm"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-slate-400" /></div>
               <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="focus:ring-primary-500 block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border outline-none" placeholder="••••••••" /></div>
             </div>
-            <button type="submit" disabled={isLoading} className="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-lg text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 font-bold transition-all shadow-lg shadow-primary-900/10">
+            
+            {mode === 'register' && (
+              <div className="space-y-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div className="flex items-start gap-3">
+                  <input 
+                    type="checkbox" 
+                    id="terms"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                  />
+                  <label htmlFor="terms" className="text-xs text-slate-700 leading-relaxed">
+                    J'accepte les <a href="/conditions-utilisation" target="_blank" className="text-primary-600 underline">Conditions Générales d'Utilisation</a> et la <a href="/politique-confidentialite" target="_blank" className="text-primary-600 underline">Politique de confidentialité</a>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
+                  </label>
+                </div>
+                
+                <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 p-3 rounded-lg">
+                  <input 
+                    type="checkbox" 
+                    id="ai-disclaimer"
+                    checked={acceptedAiDisclaimer}
+                    onChange={(e) => setAcceptedAiDisclaimer(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 text-primary-600 border-orange-300 rounded focus:ring-primary-500"
+                  />
+                  <label htmlFor="ai-disclaimer" className="text-xs text-orange-900 leading-relaxed">
+                    <strong>⚠️ Important :</strong> Je comprends que les analyses et recommandations générées par l'intelligence artificielle sont fournies à titre informatif uniquement et ne constituent pas des conseils professionnels en assurance. Ces résultats ne sont pas vérifiés par un expert et peuvent contenir des erreurs. Je consulterai un professionnel agréé pour toute décision importante.
+                  </label>
+                </div>
+              </div>
+            )}
+            
+            <button type="submit" disabled={isLoading || (mode === 'register' && (!acceptedTerms || !acceptedAiDisclaimer))} className="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-lg text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-lg shadow-primary-900/10">
               {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : <>{mode === 'login' ? 'Se connecter' : "S'inscrire"} <ArrowRight className="h-4 w-4" /></>}
             </button>
           </div>
@@ -170,8 +205,15 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
             {success && <div className="mb-4 p-3 bg-emerald-50 text-emerald-700 text-sm rounded-lg border border-emerald-100">{success}</div>}
             {renderForm()}
           </form>
-          <div className="mt-6 border-t border-slate-200 pt-4 text-center text-xs text-slate-400">
-            Vos données sont stockées localement dans votre navigateur.
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <p className="text-center text-xs text-slate-400 mb-3">
+              Vos données sont hébergées sur Azure Europe (conforme RGPD)
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-xs text-amber-900 leading-relaxed">
+                <strong>⚠️ Disclaimer :</strong> BienCouvert est un outil d'aide à la décision. Les analyses et recommandations générées par l'IA sont fournies à titre informatif uniquement et ne sont pas vérifiées par un professionnel. Elles ne constituent pas des conseils en assurance au sens légal. Consultez un courtier ou assureur agréé pour toute décision importante.
+              </p>
+            </div>
           </div>
         </div>
       </div>

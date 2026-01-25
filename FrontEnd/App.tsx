@@ -14,6 +14,7 @@ import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
 import { PolicyStats } from './components/PolicyStats';
+import Footer from './components/Footer';
 import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
@@ -68,6 +69,21 @@ function App() {
     setPolicies([]);
     setMessages([]);
     setShowAuth(false);
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      await authService.deleteAccount();
+      // Redirection automatique après suppression (localStorage vidé par authService)
+      setUser(null);
+      setPolicies([]);
+      setMessages([]);
+      setShowAuth(false);
+      alert('Votre compte a été supprimé définitivement. Toutes vos données ont été effacées.');
+    } catch (error) {
+      console.error('Failed to delete account:', error);
+      alert('Erreur lors de la suppression du compte. Veuillez réessayer.');
+    }
   };
 
   const handleClearAllData = async () => {
@@ -342,7 +358,7 @@ function App() {
       case 'experts':
         return <div className="animate-fadeIn"><ExpertContact policies={policies} /></div>;
       case 'profile':
-        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} /></div>;
+        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} /></div>;
       case 'admin':
         return <AdminView />;
       default: return null;
@@ -356,7 +372,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 md:bg-slate-50 pb-32">
+    <div className="min-h-screen bg-slate-50 md:bg-slate-50 pb-32 flex flex-col">
       {/* Modal d'édition (mode classique) */}
       {editingPolicy && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -395,9 +411,11 @@ function App() {
         </div>
       </header>
 
-      <main className="p-4 md:p-8">
+      <main className="p-4 md:p-8 flex-1">
         <div className="max-w-xl mx-auto">{renderContent()}</div>
       </main>
+
+      <Footer />
 
       <BottomNav activeView={activeView} setActiveView={setActiveView} />
 
