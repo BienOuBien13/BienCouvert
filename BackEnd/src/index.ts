@@ -25,6 +25,9 @@ dotenv.config();
 
 const app = express();
 
+// Correction proxy pour express-rate-limit derrière nginx/docker
+app.set('trust proxy', 1);
+
 // -----------------------------------------------------------------------------
 // Configuration CORS (Cross-Origin Resource Sharing)
 // Contrôle quelles origines (domaines) sont autorisées à accéder à l'API.
@@ -55,6 +58,8 @@ if (frontendOrigin && frontendOrigin !== '*') {
       // Cas 1 : Requête sans origin (curl, Postman, etc.) -> autorisé en dev
       if (!origin) return callback(null, true);
       
+      // Debug log pour voir l'origin et la whitelist
+      console.log('CORS origin:', origin, 'allowed:', allowed);
       // Cas 2 : Origin dans la liste blanche -> autorisé
       if (allowed.includes(origin)) return callback(null, true);
       
