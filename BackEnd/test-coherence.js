@@ -1,13 +1,7 @@
 const { Pool } = require('pg');
+const config = require('./test-config');
 
-const pool = new Pool({
-  host: '52.143.159.51',
-  port: 5432,
-  database: 'assurclair',
-  user: 'remijolivalt',
-  password: 'Remi1982',
-  ssl: false
-});
+const pool = new Pool(config.dbConfig);
 
 async function testCoherence() {
   try {

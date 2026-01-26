@@ -12,14 +12,14 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4000
-      - POSTGRES_HOST=52.143.159.51
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=assurclair
-      - POSTGRES_USER=remijolivalt
-      - POSTGRES_PASSWORD=Remi1982
+      - POSTGRES_HOST=${POSTGRES_HOST:-52.143.159.51}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-assurclair}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - JWT_SECRET=${JWT_SECRET:-change_this_in_production}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - FRONTEND_ORIGIN=http://52.143.159.51:8080,http://localhost:3000,http://localhost:80
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://52.143.159.51:8080,http://localhost:3000,http://localhost:80}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/"]
