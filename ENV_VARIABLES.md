@@ -198,7 +198,7 @@ Utilisé par Vite lors du build de l'application React. Les variables doivent co
     ```
   - **Docker/VM** :
     ```
-    VITE_API_URL=http://52.143.159.51:4000
+    VITE_API_URL=http://<your_server_ip>:4000
     ```
 - **⚠️ IMPORTANT** : 
   - Ne pas mettre de `/` à la fin
@@ -284,19 +284,19 @@ VITE_API_URL=http://localhost:4000
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### Production (Azure VM)
+### Production
 
 **Backend** :
 ```env
 PORT=4000
 JWT_SECRET=<clé forte générée aléatoirement>
-FRONTEND_ORIGIN=http://52.143.159.51:8080,https://assurclair.fr
+FRONTEND_ORIGIN=https://app.assurclair.fr,https://www.assurclair.fr
 API_KEY=<votre clé Gemini>
 ```
 
 **Frontend** :
 ```env
-VITE_API_URL=http://52.143.159.51:4000
+VITE_API_URL=https://api.assurclair.fr
 VITE_GEMINI_API_KEY=<votre clé Gemini>
 ```
 
@@ -307,14 +307,14 @@ Le `docker-compose.yml` définit également :
 ```yaml
 environment:
   - NODE_ENV=production
-  - POSTGRES_HOST=52.143.159.51
+  - POSTGRES_HOST=<your_database_host>
   - POSTGRES_PORT=5432
-  - POSTGRES_DB=assurclair
-  - POSTGRES_USER=remijolivalt
-  - POSTGRES_PASSWORD=Remi1982
+  - POSTGRES_DB=<your_database_name>
+  - POSTGRES_USER=<your_postgres_user>
+  - POSTGRES_PASSWORD=<your_secure_password>
 ```
 
-Ces variables sont spécifiques à la configuration PostgreSQL et ne nécessitent généralement pas de modification.
+Ces variables sont spécifiques à la configuration PostgreSQL et doivent être adaptées à votre environnement de production.
 
 ---
 
@@ -427,4 +427,4 @@ console.log(import.meta.env.VITE_API_URL)
 
 ---
 
-*Dernière mise à jour : Janvier 2026*
+*Dernière mise à jour : Janvier 2025*
