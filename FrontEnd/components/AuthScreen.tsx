@@ -1,8 +1,5 @@
 
 import React, { useState } from 'react';
-import React, { useEffect } from 'react';
-import TermsOfService from './TermsOfService';
-import PrivacyPolicy from './PrivacyPolicy';
 import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLeft, Send, MailCheck, ExternalLink, ChevronLeft } from 'lucide-react';
 import { authService } from '../services/authService';
 import { User } from '../types';
@@ -15,13 +12,6 @@ interface Props {
 type AuthMode = 'login' | 'register' | 'forgot' | 'email-sent' | 'reset';
 
 export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
-  const [showTerms, setShowTerms] = useState(false);
-  const [showPrivacy, setShowPrivacy] = useState(false);
-
-  // Scroll to top on mode change
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [mode]);
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -56,9 +46,9 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       } else if (mode === 'register') {
         if (!acceptedTerms) throw new Error("Veuillez accepter les CGU et la politique de confidentialité.");
         if (!acceptedAiDisclaimer) throw new Error("Veuillez accepter le disclaimer IA.");
-                  <label htmlFor="terms" className="text-xs text-slate-700 leading-relaxed">
-                    J'accepte les <button type="button" className="text-primary-600 underline" onClick={() => setShowTerms(true)}>Conditions Générales d'Utilisation</button> et la <button type="button" className="text-primary-600 underline" onClick={() => setShowPrivacy(true)}>Politique de confidentialité</button>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
-                  </label>
+        const pwdWarn = validatePassword(password);
+        if (pwdWarn) throw new Error("Mot de passe invalide : " + pwdWarn);
+        const user = await authService.register(email, password);
         onLogin(user);
       } else if (mode === 'forgot') {
         try {
@@ -187,7 +177,7 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
                     className="mt-0.5 h-4 w-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
                   />
                   <label htmlFor="terms" className="text-xs text-slate-700 leading-relaxed">
-                    J'accepte les <button type="button" className="text-primary-600 underline" onClick={() => setShowTerms(true)}>Conditions Générales d'Utilisation</button> et la <a href="/politique-confidentialite" target="_blank" className="text-primary-600 underline">Politique de confidentialité</a>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
+                    J'accepte les <a href="/conditions-utilisation" target="_blank" className="text-primary-600 underline">Conditions Générales d'Utilisation</a> et la <a href="/politique-confidentialite" target="_blank" className="text-primary-600 underline">Politique de confidentialité</a>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
                   </label>
                 </div>
                 
@@ -216,22 +206,6 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative">
-      {showTerms && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto relative animate-fadeIn">
-            <button onClick={() => setShowTerms(false)} className="absolute top-4 right-4 text-slate-500 hover:text-primary-600 text-lg font-bold">&times;</button>
-            <TermsOfService onBack={() => setShowTerms(false)} />
-          </div>
-        </div>
-      )}
-      {showPrivacy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto relative animate-fadeIn">
-            <button onClick={() => setShowPrivacy(false)} className="absolute top-4 right-4 text-slate-500 hover:text-primary-600 text-lg font-bold">&times;</button>
-            <PrivacyPolicy onBack={() => setShowPrivacy(false)} />
-          </div>
-        </div>
-      )}
       <button 
         onClick={onBack}
         className="absolute top-8 left-8 flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium"

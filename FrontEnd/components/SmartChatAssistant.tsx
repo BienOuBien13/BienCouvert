@@ -454,7 +454,10 @@ Exemples pour Habitation:
                           alt={insurer.name}
                           className="w-full h-full object-contain"
                           onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).src = '/default-insurer-logo.png';
+                            // Fallback vers couleur de fond si l'image ne charge pas
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.parentElement!.className = `w-16 h-16 flex items-center justify-center ${insurer.color} rounded-lg`;
+                            e.currentTarget.parentElement!.innerHTML = `<span class="text-white font-black text-xs">${insurer.name}</span>`;
                           }}
                         />
                       </div>
