@@ -454,9 +454,7 @@ Exemples pour Habitation:
                           alt={insurer.name}
                           className="w-full h-full object-contain"
                           onError={(e) => {
-                            const img = e.currentTarget as HTMLImageElement;
-                            img.onerror = null;
-                            img.src = '/default-insurer-logo.png';
+                            (e.currentTarget as HTMLImageElement).src = '/default-insurer-logo.png';
                           }}
                         />
                       </div>

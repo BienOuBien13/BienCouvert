@@ -1,5 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
 import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLeft, Send, MailCheck, ExternalLink, ChevronLeft } from 'lucide-react';
@@ -16,12 +17,12 @@ type AuthMode = 'login' | 'register' | 'forgot' | 'email-sent' | 'reset';
 export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
   const [showTerms, setShowTerms] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
-  const [mode, setMode] = useState<AuthMode>('login');
 
   // Scroll to top on mode change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [mode]);
+  const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,7 +56,9 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       } else if (mode === 'register') {
         if (!acceptedTerms) throw new Error("Veuillez accepter les CGU et la politique de confidentialité.");
         if (!acceptedAiDisclaimer) throw new Error("Veuillez accepter le disclaimer IA.");
-        const user = await authService.register(email, password);
+                  <label htmlFor="terms" className="text-xs text-slate-700 leading-relaxed">
+                    J'accepte les <button type="button" className="text-primary-600 underline" onClick={() => setShowTerms(true)}>Conditions Générales d'Utilisation</button> et la <button type="button" className="text-primary-600 underline" onClick={() => setShowPrivacy(true)}>Politique de confidentialité</button>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
+                  </label>
         onLogin(user);
       } else if (mode === 'forgot') {
         try {
