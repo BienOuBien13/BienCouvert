@@ -56,9 +56,7 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       } else if (mode === 'register') {
         if (!acceptedTerms) throw new Error("Veuillez accepter les CGU et la politique de confidentialité.");
         if (!acceptedAiDisclaimer) throw new Error("Veuillez accepter le disclaimer IA.");
-                  <label htmlFor="terms" className="text-xs text-slate-700 leading-relaxed">
-                    J'accepte les <button type="button" className="text-primary-600 underline" onClick={() => setShowTerms(true)}>Conditions Générales d'Utilisation</button> et la <button type="button" className="text-primary-600 underline" onClick={() => setShowPrivacy(true)}>Politique de confidentialité</button>. Je reconnais que mes données seront traitées conformément au RGPD (stockage sécurisé sur Azure Europe).
-                  </label>
+        const user = await authService.register(email, password);
         onLogin(user);
       } else if (mode === 'forgot') {
         try {
