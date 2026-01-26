@@ -7,8 +7,7 @@ yarn-error.log
 .env
 .env.local
 .env.*.local
-# Exception: .env.production peut être commité (pas de secrets, juste config)
-!.env.production
+.env.production
 
 # Build outputs
 dist/

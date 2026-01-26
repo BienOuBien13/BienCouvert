@@ -5,16 +5,23 @@
 ## Critical Security Issues Fixed ✅
 
 ### 1. **Removed .env Files from Git Tracking** 🔴 CRITICAL
-**Issue**: Both `BackEnd/.env` and `FrontEnd/.env` files were tracked in git and pushed to the repository.
+**Issue**: `.env` and `.env.production` files were tracked in git and pushed to the repository.
 - **Risk**: High - Exposed Gemini API key, database credentials, and JWT secrets
-- **API Key Exposed**: `AIzaSyCPV3dky8oIny2ZYClo6lOi4V-BIlYvaqY` (Gemini API)
-- **Database Password**: PostgreSQL password was exposed
+- **Files Removed**: 
+  - `BackEnd/.env`
+  - `FrontEnd/.env`
+  - `BackEnd/.env.production`
+- **API Keys Exposed**: 
+  - Gemini API: `AIzaSyCPV3dky8oIny2ZYClo6lOi4V-BIlYvaqY`
+  - Another Gemini key in check-api-key.js: `AIzaSyAXg17dXuPMN4RfDWBRNDyQ-lrcKoKOjso`
+- **Database Password**: `Remi1982` (PostgreSQL)
 - **Fix**: Removed from git tracking using `git rm --cached`
 - **Action Required**: 
-  - ✅ Rotate the Gemini API key immediately
+  - ✅ Rotate ALL Gemini API keys immediately
   - ✅ Change database password
   - ✅ Generate new JWT secrets
   - ✅ Create new .env files locally (not committed)
+  - ✅ Created .env.production.example template
 
 ### 2. **Removed node_modules from Git Tracking** 🟡 MODERATE
 **Issue**: 1,888 node_modules files were tracked in git
@@ -38,12 +45,18 @@
 - **Action Required**: Set credentials in .env file (not committed)
 
 ### 4. **Hardcoded Credentials in Test Scripts** 🔴 CRITICAL
-**Issue**: 10+ test scripts had hardcoded database credentials
-- Files affected: test-coherence.js, test-central-cg.js, check-schema.js, etc.
+**Issue**: 10+ test scripts had hardcoded database credentials and API keys
+- Files affected: 
+  - test-coherence.js ✅ FIXED
+  - add-gemini-consent.js ✅ FIXED
+  - check-api-key.js ✅ FIXED
+  - test-central-cg.js (pending)
+  - check-schema.js (pending)
+  - And 6 more scripts
 - **Fix**: 
   - Created `test-config.js` to centralize configuration
-  - Updated test-coherence.js to use environment-based config
-  - **Action Required**: Update remaining test scripts to use test-config.js
+  - Updated 3 scripts to use environment-based config
+  - **Action Required**: Update remaining 7 test scripts to use test-config.js
 
 ### 5. **Package Vulnerabilities** 🟡 MODERATE
 **Backend**:

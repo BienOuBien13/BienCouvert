@@ -1,6 +1,13 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+require('dotenv').config();
 
-const apiKey = 'AIzaSyAXg17dXuPMN4RfDWBRNDyQ-lrcKoKOjso';
+const apiKey = process.env.GEMINI_API_KEY;
+
+if (!apiKey) {
+  console.error('❌ Error: GEMINI_API_KEY must be set in environment or .env file');
+  process.exit(1);
+}
+
 const ai = new GoogleGenerativeAI(apiKey);
 
 async function checkApiKey() {

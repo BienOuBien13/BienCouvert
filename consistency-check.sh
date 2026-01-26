@@ -105,17 +105,17 @@ echo "5. Checking Security"
 echo "-----------------------------------"
 
 # Check for .env files in git
-if git ls-files | grep -q "\.env$"; then
+if git ls-files | grep -E "\\.env(\.|$)" | grep -v "\.env\.example" | grep -v "\.env\.production" > /dev/null; then
     print_status 1 ".env file is tracked in git (security risk!)"
 else
     print_status 0 "No .env files tracked in git"
 fi
 
-# Check for common secret patterns
-if git ls-files | xargs grep -l "password.*=.*['\"]" 2>/dev/null | grep -v ".example" | grep -v "test-" | head -1 > /dev/null; then
-    print_warning "Found potential hardcoded passwords (review needed)"
+# Check for common secret patterns (more comprehensive)
+if git ls-files | xargs grep -iE "(password|passwd|pwd|pass|secret|token|key).*[=:].*['\"]?[A-Za-z0-9+/=]{8,}" 2>/dev/null | grep -v ".example" | grep -v "test-" | grep -v "\.md:" | grep -v "// " | head -1 > /dev/null; then
+    print_warning "Found potential hardcoded secrets (review needed)"
 else
-    print_status 0 "No obvious hardcoded passwords found"
+    print_status 0 "No obvious hardcoded secrets found"
 fi
 
 echo ""
