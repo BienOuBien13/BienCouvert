@@ -10,20 +10,44 @@ const API_URL = import.meta.env.VITE_API_URL ?? '';
 const TOKEN_KEY = 'assurclair_token';
 const USER_KEY = 'assurclair_current_user';
 
+// CSRF token (in-memory, not persisted)
+let csrfToken: string | null = null;
+
+// Fetch CSRF token from backend and store in memory
+export const fetchCsrfToken = async () => {
+  try {
+    const res = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
+    const data = await res.json();
+    csrfToken = data.csrfToken;
+    return csrfToken;
+  } catch (e) {
+    console.error('Erreur lors de la récupération du CSRF token:', e);
+    csrfToken = null;
+    return null;
+  }
+};
+
 /**
  * Effectue une requête authentifiée vers le backend
  */
 const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
   const token = localStorage.getItem(TOKEN_KEY);
+  const isMutating = options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase());
+  // If mutating and no CSRF token, fetch it
+  if (isMutating && !csrfToken) {
+    await fetchCsrfToken();
+  }
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(token && { Authorization: `Bearer ${token}` }),
+    ...(isMutating && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     ...options.headers,
   };
 
   const response = await fetch(`${API_URL}/api${endpoint}`, {
     ...options,
     headers,
+    credentials: 'include', // Always send cookies (for CSRF)
   });
 
   if (!response.ok) {
