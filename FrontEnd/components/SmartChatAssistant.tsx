@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
-import { InsurerLogo } from './InsurerLogo';
 import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare, Edit3, FileText, CreditCard, Smartphone, Scale } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 
@@ -104,7 +103,7 @@ const INSURERS = [
   { 
     id: 'mma', 
     name: 'MMA', 
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/MMA_Logo.svg/200px-MMA_Logo.svg.png',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/26/Logo_MMA.jpg/1280px-Logo_MMA.jpg',
     color: 'bg-slate-700' 
   },
   { 
@@ -395,7 +394,17 @@ Exemples pour Habitation:
           <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center">
             <MessageSquare className="w-7 h-7 text-white" />
           </div>
-                        <InsurerLogo logo={insurer.logo} name={insurer.name} color={insurer.color} />
+          <div>
+            <h2 className="text-2xl font-black text-white">Assistant Intelligent</h2>
+            <p className="text-sm text-white/90 font-medium">✨ Ajout rapide & en masse avec suggestions IA</p>
+          </div>
+        </div>
+        <button onClick={onCancel} className="text-white/80 hover:text-white p-2 hover:bg-white/20 rounded-xl transition-all">
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-br from-slate-50 to-slate-100">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
