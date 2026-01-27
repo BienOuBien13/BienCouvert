@@ -103,7 +103,7 @@ const INSURERS = [
   { 
     id: 'mma', 
     name: 'MMA', 
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/26/Logo_MMA.jpg/1280px-Logo_MMA.jpg',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/2/26/Logo_MMA.jpg',
     color: 'bg-slate-700' 
   },
   { 
