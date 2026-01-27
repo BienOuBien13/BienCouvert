@@ -2,14 +2,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
 import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, Zap, MessageSquare, Edit3, FileText, CreditCard, Smartphone, Scale } from 'lucide-react';
 import { uuid } from '../utils/uuid';
+import { fetchCsrfToken } from '../services/authService';
 
 // Simple AI API call helper
 const getAIResponse = async (prompt: string): Promise<string> => {
   try {
     const API_URL = (import.meta as any).env?.VITE_API_URL ?? '';
+    // Récupère le token CSRF si besoin
+    const csrfToken = await fetchCsrfToken();
     const response = await fetch(`${API_URL}/api/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
+      credentials: 'include',
       body: JSON.stringify({ message: prompt, policies: [], history: [] })
     });
     if (!response.ok) throw new Error('AI API error');
@@ -226,32 +233,41 @@ Exemples pour Habitation:
       }
     } catch (error) {
       console.error('Erreur IA:', error);
-    } finally {
-      setIsLoadingAI(false);
+    try {
+      const csrfToken = await fetchCsrfToken();
+      const response = await fetch(`/api/policies/central-cg?insurer=${encodeURIComponent(insurerName)}&type=${encodeURIComponent(policyType)}`,
+        {
+          method: 'GET',
+          headers: {
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+          },
+          credentials: 'include'
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          // Extraire les formules uniques avec leurs options
+          const formulasMap = new Map<string, string[]>();
+          data.forEach((doc: any) => {
+            if (doc.indexedFormulas && Array.isArray(doc.indexedFormulas)) {
+              doc.indexedFormulas.forEach((formula: string) => {
+                if (!formulasMap.has(formula)) {
+                  formulasMap.set(formula, doc.indexedOptions || []);
+                }
+              });
+            }
+          });
+          setCurrentFormulas(Array.from(formulasMap, ([name, options]) => ({ name, options })));
+        } else {
+          setCurrentFormulas([]);
+        }
+      } else {
+        setCurrentFormulas([]);
+      }
+    } catch (e) {
+      setCurrentFormulas([]);
     }
-    
-    // Fallback si l'IA échoue
-    if (policyType === 'Auto') {
-      return [
-        { name: 'Tiers', options: ['Responsabilité civile', 'Assistance 0km'] },
-        { name: 'Tiers +', options: ['Responsabilité civile', 'Assistance 0km', 'Bris de glace', 'Vol incendie'] },
-        { name: 'Tous Risques', options: ['Tous dommages', 'Assistance 0km', 'Bris de glace', 'Vol', 'Protection juridique', 'Prêt de véhicule'] },
-      ];
-    } else if (policyType === 'Habitation') {
-      return [
-        { name: 'Essentielle', options: ['Incendie', 'Dégâts des eaux', 'Vol'] },
-        { name: 'Confort', options: ['Incendie', 'Dégâts des eaux', 'Vol', 'Bris de glace', 'RC'] },
-        { name: 'Premium', options: ['Multirisque habitation', 'Catastrophes naturelles', 'Assistance', 'Objets de valeur'] },
-      ];
-    }
-    return [
-      { name: 'Formule de base', options: ['Garantie essentielle'] },
-      { name: 'Formule intermédiaire', options: ['Garanties étendues'] },
-      { name: 'Formule premium', options: ['Garanties complètes', 'Services premium'] },
-    ];
-  };
-
-  const handleTypeSelect = (typeEmoji: string, typeName: string) => {
     addMessage(`${typeEmoji} ${typeName}`, 'user');
     setSelectedType(typeName);
     setTimeout(() => {

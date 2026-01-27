@@ -4,6 +4,7 @@
 // =============================================================================
 
 import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData, PolicyType, CentralCgEntry } from "../types";
+import { fetchCsrfToken } from './authService';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -11,12 +12,19 @@ const API_URL = import.meta.env.VITE_API_URL ?? '';
  * Effectue une requête vers le backend
  */
 const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+  // Ajout du token CSRF si la méthode n'est pas GET
+  let headers: any = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+  const method = options.method ? options.method.toUpperCase() : 'POST';
+  if (method !== 'GET') {
+    const csrfToken = await fetchCsrfToken();
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+  }
   const response = await fetch(`${API_URL}/api${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    method,
+    headers,
     ...options,
   });
 
