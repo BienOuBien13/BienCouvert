@@ -25,10 +25,19 @@ import {
 } from 'lucide-react';
 
 function App() {
-    // Remonte en haut de la page à chaque changement de vue principale
-    useEffect(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, [activeView]);
+  const [user, setUser] = useState<User | null>(null);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeView, setActiveView] = useState<AppView>('home');
+  const [isLoading, setIsLoading] = useState(true);
+  const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+
+  // Remonte en haut de la page à chaque changement de vue principale
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activeView]);
   const [user, setUser] = useState<User | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
