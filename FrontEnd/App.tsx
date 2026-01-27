@@ -25,6 +25,10 @@ import {
 } from 'lucide-react';
 
 function App() {
+    // Remonte en haut de la page à chaque changement de vue principale
+    useEffect(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [activeView]);
   const [user, setUser] = useState<User | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
