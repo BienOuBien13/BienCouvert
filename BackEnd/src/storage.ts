@@ -30,15 +30,14 @@ export const storage = {
    * @param data - Objet utilisateur à sauvegarder
    */
   writeUser: async (data: any) => {
-    const { id, email, firstName, lastName, password, profile, isAdmin, geminiAiConsent } = data;
+    let { id, email, firstName, lastName, password, profile, isAdmin, geminiAiConsent } = data;
+    // Ajout de valeurs par défaut pour firstName et lastName
+    if (!firstName) firstName = 'Utilisateur';
+    if (!lastName) lastName = 'Inconnu';
     
     // Validation des champs requis
     if (!email || !password) {
       throw new Error('Missing required fields: email and password are required');
-    }
-    
-    if (!firstName || !lastName) {
-      throw new Error('Missing required fields: firstName and lastName are required');
     }
     
     const profileStr = profile ? JSON.stringify(profile) : null;
