@@ -81,7 +81,7 @@ router.post('/register', [
     .isEmail().withMessage('Email invalide')
     .normalizeEmail(),
   body('password')
-    .isLength({ min: 6 }).withMessage('Le mot de passe doit contenir au moins 6 caractères'),
+    .isLength({ min: 12 }).withMessage('Le mot de passe doit contenir au moins 12 caractères'),
   body('firstName')
     .optional()
     .trim()
@@ -106,11 +106,13 @@ router.post('/register', [
   // Validation des champs requis
   if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
 
-  // Validation simplifiée du mot de passe : min 6 caractères
-  if (password.length < 6) {
-    return res.status(400).json({
-      message: 'Le mot de passe doit contenir au moins 6 caractères',
-      errors: ['Le mot de passe doit contenir au moins 6 caractères']
+  // 🔒 Validation de la politique de mot de passe (ANSSI)
+  const passwordCheck = validatePassword(password);
+  if (!passwordCheck.valid) {
+    return res.status(400).json({ 
+      message: 'Le mot de passe ne respecte pas les critères de sécurité',
+      errors: passwordCheck.errors,
+      requirements: getPasswordRequirements()
     });
   }
 
