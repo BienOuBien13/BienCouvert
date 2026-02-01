@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { Policy, CentralCgEntry, PolicyType } from '../types';
+import { fetchCsrfToken } from './authService';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 const TOKEN_KEY = 'assurclair_token';
@@ -14,15 +15,25 @@ const TOKEN_KEY = 'assurclair_token';
  */
 const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
   const token = localStorage.getItem(TOKEN_KEY);
+  const isMutating = options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase());
+  
+  // Récupérer le token CSRF pour les requêtes mutantes
+  let csrfToken = null;
+  if (isMutating) {
+    csrfToken = await fetchCsrfToken();
+  }
+  
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(token && { Authorization: `Bearer ${token}` }),
+    ...(isMutating && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     ...options.headers,
   };
 
   const response = await fetch(`${API_URL}/api${endpoint}`, {
     ...options,
     headers,
+    credentials: 'include', // Toujours envoyer les cookies (pour CSRF)
   });
 
   if (!response.ok) {

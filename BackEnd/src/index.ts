@@ -108,6 +108,8 @@ app.use(cookieParser());
 // Protection CSRF (Cross-Site Request Forgery)
 // Génère et valide des tokens CSRF pour protéger contre les attaques CSRF
 // -----------------------------------------------------------------------------
+const isProduction = process.env.NODE_ENV === 'production';
+
 const {
   invalidCsrfTokenError, // Erreur si token invalide
   generateCsrfToken, // Fonction pour générer token
@@ -117,8 +119,8 @@ const {
   cookieName: 'x-csrf-token',
   cookieOptions: {
     httpOnly: true,
-    sameSite: 'strict',
-    secure: process.env.NODE_ENV === 'production', // HTTPS uniquement en prod
+    sameSite: isProduction ? 'none' : 'lax', // 'none' pour cross-origin avec HTTPS
+    secure: isProduction, // HTTPS uniquement en production
     path: '/'
   },
   size: 64,
