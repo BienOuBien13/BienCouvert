@@ -48,6 +48,11 @@ function App() {
     setIsLoading(false);
   }, []);
 
+  // Scroll to top when view changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activeView]);
+
   const handleLogin = async (loggedInUser: User) => {
     setUser(loggedInUser);
     try {
