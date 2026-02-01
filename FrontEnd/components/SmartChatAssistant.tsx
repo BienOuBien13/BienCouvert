@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
-import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, MessageSquare, Edit3, Plus } from 'lucide-react';
+import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, MessageSquare, Edit3, Plus, CreditCard, Smartphone, Scale } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 import { fetchCsrfToken } from '../services/authService';
 import { storageService } from '../services/storageService';
@@ -52,6 +52,13 @@ const TYPES = [
   { id: 'sante', name: 'Santé', icon: Heart, color: 'from-pink-500 to-rose-500' },
   { id: 'prevoyance', name: 'Prévoyance', icon: Shield, color: 'from-green-500 to-emerald-500' },
   { id: 'pro', name: 'Professionnelle', icon: Briefcase, color: 'from-purple-500 to-indigo-500' },
+  { id: 'emprunteur', name: 'Emprunteur/Crédit', icon: CreditCard, color: 'from-amber-500 to-yellow-500' },
+  { id: 'bancaire', name: 'Carte Bancaire', icon: CreditCard, color: 'from-indigo-500 to-purple-500' },
+  { id: 'appareils', name: 'Appareils Électroniques', icon: Smartphone, color: 'from-slate-500 to-slate-600' },
+  { id: 'juridique', name: 'Juridique', icon: Scale, color: 'from-slate-600 to-slate-700' },
+  { id: 'voyage', name: 'Voyage', icon: Package, color: 'from-cyan-500 to-blue-500' },
+  { id: 'animaux', name: 'Animaux', icon: Heart, color: 'from-orange-500 to-red-500' },
+  { id: 'autre', name: 'Autre', icon: Shield, color: 'from-slate-500 to-slate-600' },
 ];
 
 const INSURERS = [
@@ -85,15 +92,6 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
   const [showSummary, setShowSummary] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const isFirstRender = useRef(true);
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   const addMessage = (text: string, sender: 'user' | 'bot', options?: any) => {
     setMessages(prev => [...prev, { id: uuid(), text, sender, timestamp: Date.now(), ...options }]);
@@ -194,6 +192,12 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       formulas = await getAIFormulasAndOptions(insurerName, selectedType);
     } else {
       addMessage(`✅ Trouvé dans la base !`, 'bot');
+    }
+    
+    // Vérifier qu'on a bien des formules
+    if (!formulas || formulas.length === 0) {
+      addMessage(`❌ Aucune formule trouvée. Essayez avec un autre assureur ou contactez le support.`, 'bot');
+      return;
     }
     
     setCurrentFormulas(formulas);
@@ -347,7 +351,7 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
               )}
 
               {/* Formules SANS détails des options */}
-              {message.showFormulas && message.formulas && (
+              {message.showFormulas && message.formulas && message.formulas.length > 0 && (
                 <div className="space-y-2 mt-3">
                   {message.formulas.map((formula, idx) => (
                     <button
@@ -359,11 +363,18 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
                         <Package className="w-4 h-4 flex-shrink-0" />
                         <div>
                           <p className="font-bold text-sm">{formula.name}</p>
-                          <p className="text-xs opacity-80">{formula.options.length} options incluses</p>
+                          <p className="text-xs opacity-80">{formula.options?.length || 0} options incluses</p>
                         </div>
                       </div>
                     </button>
                   ))}
+                </div>
+              )}
+              
+              {/* Message si pas de formules */}
+              {message.showFormulas && (!message.formulas || message.formulas.length === 0) && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-xs text-yellow-800">Aucune formule disponible pour le moment.</p>
                 </div>
               )}
 
