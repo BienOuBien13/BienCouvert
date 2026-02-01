@@ -304,17 +304,25 @@ router.get('/central-cg', async (req, res) => {
  */
 router.post('/central-cg', async (req, res) => {
   try {
-    const { provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary } = req.body;
+    // Support des deux formats de noms de champs pour compatibilité
+    const { 
+      provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary,
+      insurer, productName  // Nouveaux noms de champs
+    } = req.body;
+    
+    // Utiliser les nouveaux noms en priorité, puis fallback sur les anciens
+    const insurerName = insurer || provider;
+    const productNameValue = productName || policyName;
     
     // Validation des champs obligatoires
-    if (!provider || !policyName || !type || !pdfUrl) {
-      return res.status(400).json({ message: 'Missing required fields' });
+    if (!insurerName || !productNameValue || !type || !pdfUrl) {
+      return res.status(400).json({ message: 'Missing required fields: insurer, productName, type, pdfUrl' });
     }
 
     // Création de la nouvelle entrée
     const newEntry: any = {
-      insurer: provider,
-      productName: policyName,
+      insurer: insurerName,
+      productName: productNameValue,
       version: null,
       documentUrl: pdfUrl,
       documentHash: null,
