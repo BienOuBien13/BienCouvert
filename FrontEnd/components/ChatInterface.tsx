@@ -21,6 +21,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
   const [liveModelText, setLiveModelText] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isFirstRender = useRef(true);
   
   // Refs to track latest transcription values for the closure in connectLiveSession
   const liveUserTextRef = useRef('');
@@ -33,6 +34,11 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
   };
 
   useEffect(() => {
+    // Ne pas scroller automatiquement au premier rendu
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     scrollToBottom();
   }, [messages, isLoading, isLive, liveUserText, liveModelText]);
 

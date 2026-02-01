@@ -21,6 +21,9 @@ export const AdminView: React.FC = () => {
     pdfUrl: ''
   });
 
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<'url' | 'file'>('url');
+
   const [indexingResult, setIndexingResult] = useState<{
     indexedFormulas: string[];
     indexedOptions: string[];
@@ -43,8 +46,8 @@ export const AdminView: React.FC = () => {
   }, []);
 
   const handleStartIndexing = async () => {
-    if (!newEntry.insurer || !newEntry.pdfUrl) {
-      alert('Veuillez remplir l\'assureur et l\'URL du PDF');
+    if (!newEntry.insurer || (uploadMode === 'url' && !newEntry.pdfUrl) || (uploadMode === 'file' && !pdfFile)) {
+      alert('Veuillez remplir l\'assureur et fournir un PDF (URL ou fichier)');
       return;
     }
     
@@ -53,7 +56,19 @@ export const AdminView: React.FC = () => {
     setIsIndexing(true);
     
     try {
-      const result = await indexCgDocument(newEntry.insurer, newEntry.type, newEntry.pdfUrl);
+      let pdfData = newEntry.pdfUrl;
+      
+      // Si mode fichier, convertir en base64
+      if (uploadMode === 'file' && pdfFile) {
+        const reader = new FileReader();
+        pdfData = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(pdfFile);
+        });
+      }
+      
+      const result = await indexCgDocument(newEntry.insurer, newEntry.type, pdfData);
       
       // Vérifier que le résultat contient des données valides
       if (!result) {
@@ -144,7 +159,7 @@ export const AdminView: React.FC = () => {
 
       {showAddForm && (
         <div className="bg-white p-8 rounded-[2.5rem] border-2 border-primary-100 shadow-2xl animate-scaleIn space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assureur</label>
               <input 
@@ -170,21 +185,71 @@ export const AdminView: React.FC = () => {
                 {Object.values(PolicyType).map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">URL du PDF Officiel</label>
-              <input 
-                type="url" required placeholder="https://..." 
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.pdfUrl} onChange={e => setNewEntry({...newEntry, pdfUrl: e.target.value})}
-              />
+          </div>
+
+          {/* Mode selection: URL ou Fichier */}
+          <div className="space-y-4">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Source du PDF</label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setUploadMode('url'); setPdfFile(null); }}
+                className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
+                  uploadMode === 'url'
+                    ? 'bg-primary-600 text-white shadow-lg'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <Globe className="w-4 h-4 inline mr-2" />
+                URL en ligne
+              </button>
+              <button
+                type="button"
+                onClick={() => { setUploadMode('file'); setNewEntry({...newEntry, pdfUrl: ''}); }}
+                className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
+                  uploadMode === 'file'
+                    ? 'bg-primary-600 text-white shadow-lg'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <FileText className="w-4 h-4 inline mr-2" />
+                Charger un fichier
+              </button>
             </div>
+
+            {uploadMode === 'url' ? (
+              <div className="space-y-1">
+                <input 
+                  type="url" required placeholder="https://exemple.com/document.pdf" 
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                  value={newEntry.pdfUrl} onChange={e => setNewEntry({...newEntry, pdfUrl: e.target.value})}
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="relative">
+                  <input 
+                    type="file"
+                    accept="application/pdf"
+                    onChange={e => setPdfFile(e.target.files?.[0] || null)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 cursor-pointer"
+                  />
+                </div>
+                {pdfFile && (
+                  <p className="text-xs text-emerald-600 font-medium ml-1 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {!indexingResult ? (
             <button 
               onClick={handleStartIndexing}
-              disabled={isIndexing || !newEntry.pdfUrl}
-              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-slate-800 disabled:opacity-50"
+              disabled={isIndexing || (uploadMode === 'url' ? !newEntry.pdfUrl : !pdfFile)}
+              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isIndexing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
               {isIndexing ? 'Vectorisation en cours...' : 'Lancer l\'indexation sémantique'}
