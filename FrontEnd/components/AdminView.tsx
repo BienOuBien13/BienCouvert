@@ -66,6 +66,8 @@ export const AdminView: React.FC = () => {
           reader.onerror = reject;
           reader.readAsDataURL(pdfFile);
         });
+        // Mettre à jour newEntry.pdfUrl avec le base64
+        setNewEntry(prev => ({ ...prev, pdfUrl: pdfData }));
       }
       
       const result = await indexCgDocument(newEntry.insurer, newEntry.type, pdfData);
