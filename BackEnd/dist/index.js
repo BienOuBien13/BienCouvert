@@ -26,6 +26,8 @@ const auditService_1 = require("./services/auditService");
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
 const app = (0, express_1.default)();
+// Correction proxy pour express-rate-limit derrière nginx/docker
+app.set('trust proxy', 1);
 // -----------------------------------------------------------------------------
 // Configuration CORS (Cross-Origin Resource Sharing)
 // Contrôle quelles origines (domaines) sont autorisées à accéder à l'API.
@@ -38,6 +40,9 @@ const app = (0, express_1.default)();
 // Note : Les requêtes sans header Origin (ex: curl, Postman) sont autorisées
 // en développement pour faciliter les tests en ligne de commande.
 // -----------------------------------------------------------------------------
+// ===============================================================================
+// CONFIGURATION CORS - Phase 2 Security (httpOnly cookies + HTTPS)
+// ===============================================================================
 // Récupération de la configuration CORS depuis les variables d'environnement
 const frontendOrigin = process.env.FRONTEND_ORIGIN || '*';
 let corsOptions = { origin: '*' }; // Par défaut : toutes origines autorisées
@@ -50,6 +55,8 @@ if (frontendOrigin && frontendOrigin !== '*') {
             // Cas 1 : Requête sans origin (curl, Postman, etc.) -> autorisé en dev
             if (!origin)
                 return callback(null, true);
+            // Debug log pour voir l'origin et la whitelist
+            console.log('CORS origin:', origin, 'allowed:', allowed);
             // Cas 2 : Origin dans la liste blanche -> autorisé
             if (allowed.includes(origin))
                 return callback(null, true);

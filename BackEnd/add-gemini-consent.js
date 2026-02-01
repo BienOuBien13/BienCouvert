@@ -1,12 +1,7 @@
 const { Client } = require('pg');
+const config = require('./test-config');
 
-const client = new Client({
-  host: '52.143.159.51',
-  port: 5432,
-  user: 'remijolivalt',
-  password: 'Remi1982',
-  database: 'assurclair'
-});
+const client = new Client(config.dbConfig);
 
 async function addGeminiConsentColumn() {
   try {
