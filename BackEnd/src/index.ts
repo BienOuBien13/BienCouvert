@@ -158,8 +158,8 @@ const authLimiter = rateLimit({
 
 // Application des middlewares
 app.use(cors(corsOptions));                               // Gestion CORS
-app.use(bodyParser.json({ limit: '10mb' }));            // Parse JSON (max 10MB pour documents base64)
-app.use(bodyParser.urlencoded({ extended: true }));     // Parse form data
+app.use(bodyParser.json({ limit: '50mb' }));            // Parse JSON (max 50MB pour documents base64)
+app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));     // Parse form data
 app.use('/api/', apiLimiter);                            // 🔒 Rate limiting général sur toutes les routes API
 
 // -----------------------------------------------------------------------------
