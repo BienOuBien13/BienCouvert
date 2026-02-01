@@ -233,41 +233,16 @@ Exemples pour Habitation:
       }
     } catch (error) {
       console.error('Erreur IA:', error);
-    try {
-      const csrfToken = await fetchCsrfToken();
-      const response = await fetch(`/api/policies/central-cg?insurer=${encodeURIComponent(insurerName)}&type=${encodeURIComponent(policyType)}`,
-        {
-          method: 'GET',
-          headers: {
-            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
-          },
-          credentials: 'include'
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.length > 0) {
-          // Extraire les formules uniques avec leurs options
-          const formulasMap = new Map<string, string[]>();
-          data.forEach((doc: any) => {
-            if (doc.indexedFormulas && Array.isArray(doc.indexedFormulas)) {
-              doc.indexedFormulas.forEach((formula: string) => {
-                if (!formulasMap.has(formula)) {
-                  formulasMap.set(formula, doc.indexedOptions || []);
-                }
-              });
-            }
-          });
-          setCurrentFormulas(Array.from(formulasMap, ([name, options]) => ({ name, options })));
-        } else {
-          setCurrentFormulas([]);
-        }
-      } else {
-        setCurrentFormulas([]);
-      }
-    } catch (e) {
-      setCurrentFormulas([]);
+    } finally {
+      setIsLoadingAI(false);
     }
+    return [];
+  };
+
+  const handleTypeSelect = async (typeId: string, typeName: string) => {
+    const selectedTypeObj = TYPES.find(t => t.id === typeId || t.name === typeName);
+    const typeEmoji = selectedTypeObj?.icon ? '🏠' : '📋';
+    
     addMessage(`${typeEmoji} ${typeName}`, 'user');
     setSelectedType(typeName);
     setTimeout(() => {
