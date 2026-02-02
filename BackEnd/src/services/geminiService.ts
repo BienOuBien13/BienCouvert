@@ -430,7 +430,61 @@ export const parsePoliciesFromText = async (text: string): Promise<SmartExtracti
     return { policies: [], clarificationQuestions: null };
   }
 
+  try {
+    const storage = require('../storage').storage;
+    
+    // 🔍 Étape 1 : Récupérer toutes les formules et options disponibles depuis central_cg
+    let availableFormulasAndOptions = '';
+    try {
+      const allCg = await storage.readCentralCg();
+      if (allCg && allCg.length > 0) {
+        const formulasByInsurer: { [key: string]: string[] } = {};
+        const optionsByInsurer: { [key: string]: string[] } = {};
+        
+        allCg.forEach((cg: any) => {
+          const insurer = cg.insurer || 'Inconnu';
+          const formulas = cg.metadata?.indexedFormulas || [];
+          const options = cg.metadata?.indexedOptions || [];
+          
+          if (formulas.length > 0) {
+            if (!formulasByInsurer[insurer]) formulasByInsurer[insurer] = [];
+            formulasByInsurer[insurer].push(...formulas);
+          }
+          
+          if (options.length > 0) {
+            if (!optionsByInsurer[insurer]) optionsByInsurer[insurer] = [];
+            optionsByInsurer[insurer].push(...options);
+          }
+        });
+        
+        // Construire la liste des formules et options disponibles
+        if (Object.keys(formulasByInsurer).length > 0) {
+          availableFormulasAndOptions += '\n📋 FORMULES DISPONIBLES PAR ASSUREUR (utilise-les en priorité):\n';
+          for (const [insurer, formulas] of Object.entries(formulasByInsurer)) {
+            availableFormulasAndOptions += `- ${insurer}: ${[...new Set(formulas)].join(', ')}\n`;
+          }
+        }
+        
+        if (Object.keys(optionsByInsurer).length > 0) {
+          availableFormulasAndOptions += '\n🔧 OPTIONS DISPONIBLES PAR ASSUREUR (suggère-les si pertinent):\n';
+          for (const [insurer, options] of Object.entries(optionsByInsurer)) {
+            availableFormulasAndOptions += `- ${insurer}: ${[...new Set(options)].join(', ')}\n`;
+          }
+        }
+        
+        console.log('✅ Formules et options chargées depuis central_cg');
+      }
+    } catch (cgErr) {
+      console.warn('⚠️ Impossible de charger les formules/options depuis central_cg:', cgErr);
+    }
+
   const prompt = `Tu es un expert en analyse de documents d'assurance. Extrais les polices d'assurance du texte suivant et retourne un JSON.
+${availableFormulasAndOptions}
+
+IMPORTANT : 
+- Si l'assureur est dans la liste ci-dessus, utilise EXACTEMENT les noms de formules listées (ne les invente pas).
+- Suggère les options pertinentes si elles sont mentionnées ou implicites dans le texte.
+- Si l'assureur n'est pas dans la liste, tu peux utiliser des noms génériques (Essentiel/Confort/Premium/etc.).
 
 Format attendu :
 {
@@ -439,7 +493,9 @@ Format attendu :
       "type": "Auto" | "Habitation" | "Santé" | "Vie" | "Autre",
       "provider": "Nom de l'assureur",
       "name": "Nom du contrat",
-      "coverageDetail": "Formule (Essentiel/Confort/Premium/etc.)",
+      "coverageDetail": "Formule exacte (utilise celles de la liste ci-dessus si disponible)",
+      "suggestedFormulas": ["Formule 1", "Formule 2"] ou [],
+      "suggestedOptions": ["Option 1", "Option 2"] ou [],
       "premium": nombre ou null,
       "startDate": "YYYY-MM-DD" ou null
     }
@@ -452,7 +508,6 @@ Si des informations sont manquantes ou ambiguës, génère des questions de clar
 Texte à analyser :
 ${text}`;
 
-  try {
     const model = ai.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
       generationConfig: {

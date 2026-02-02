@@ -113,7 +113,7 @@ router.post('/', upload.single('file'), async (req: any, res) => {
     
     // 🔄 Vectorisation automatique si PDF présent - en arrière-plan (non-bloquant)
     if (newPolicy.documentData && newPolicy.metadata.mimeType === 'application/pdf') {
-      setImmediate(async () => {
+      (async () => {
         try {
           console.log(`🚀 Démarrage vectorisation en arrière-plan pour policy ${policyId}`);
           // Extraire le texte du PDF avec Gemini
@@ -132,12 +132,14 @@ router.post('/', upload.single('file'), async (req: any, res) => {
           ]);
           
           const pdfText = result.response.text();
+          console.log(`✅ Texte extrait (${pdfText.length} caractères) pour policy ${policyId}`);
+          
           await storage.vectorizePolicyPdf(policyId, pdfText);
           console.log(`✅ PDF vectorisé avec succès pour policy ${policyId}`);
         } catch (e) {
           console.error(`❌ Vectorisation PDF ${policyId} échouée:`, e);
         }
-      });
+      })().catch(err => console.error('❌ Erreur async vectorisation policy:', err));
     }
   } catch (err) {
     console.error(err);
@@ -359,7 +361,7 @@ router.post('/central-cg', async (req, res) => {
     
     // 🔄 Vectorisation automatique du PDF en arrière-plan (non-bloquant)
     // Cette opération peut prendre plusieurs minutes pour de gros PDFs
-    setImmediate(async () => {
+    (async () => {
       try {
         console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
         const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -396,6 +398,7 @@ router.post('/central-cg', async (req, res) => {
         ]);
         
         const pdfText = result.response.text();
+        console.log(`✅ Texte extrait (${pdfText.length} caractères)`);
         
         // Stocker le texte et vectoriser
         const { query } = require('../db');
@@ -403,13 +406,14 @@ router.post('/central-cg', async (req, res) => {
           'UPDATE central_cg SET content_text = $1 WHERE id = $2',
           [pdfText, entryId]
         );
+        console.log(`✅ Texte sauvegardé en DB pour CG ${entryId}`);
         
         await storage.vectorizeCentralCg(entryId, pdfText);
         console.log(`✅ CG ${entryId} vectorisée avec succès`);
       } catch (e) {
         console.error(`❌ Vectorisation CG ${entryId} échouée:`, e);
       }
-    });
+    })().catch(err => console.error('❌ Erreur async vectorisation:', err));
   } catch (err) {
     console.error('❌ Erreur POST /central-cg:', err);
     const errorMessage = err instanceof Error ? err.message : 'Server error';
