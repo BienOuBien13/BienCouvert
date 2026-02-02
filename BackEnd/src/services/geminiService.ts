@@ -345,10 +345,17 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     // Étape 3: Rechercher dans les CG centralisées
     let cgChunks: any[] = [];
     try {
-      const insurers = policies.map(p => p.provider);
+      // Compatibilité: accepter 'provider' (backend) ou 'insurer' (frontend)
+      const insurers = policies.map(p => p.provider || (p as any).insurer).filter(Boolean);
       if (insurers.length > 0) {
+        console.log(`🔍 Recherche CG pour assureurs: ${insurers.join(', ')}`);
         cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
         console.log(`✅ RAG CG: ${cgChunks.length} documents trouvés`);
+        if (cgChunks.length > 0) {
+          cgChunks.forEach((cg, idx) => {
+            console.log(`   ${idx + 1}. ${cg.insurer_label || cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity.toFixed(3)})`);
+          });
+        }
       }
     } catch (cgErr) {
       console.warn('⚠️ Échec recherche central_cg:', cgErr);
@@ -367,16 +374,18 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     if (cgChunks.length > 0) {
       enrichedContext += '📚 Conditions générales:\n\n';
       cgChunks.forEach((cg: any, idx: number) => {
-        enrichedContext += `[${cg.insurer} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
+        const insurerName = cg.insurer_label || cg.insurer || 'Assureur inconnu';
+        enrichedContext += `[${insurerName} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
       });
     }
     
     // Si aucun contexte RAG, fallback sur metadata
     if (!enrichedContext) {
       console.log('⚠️ Aucun contexte RAG - utilisation metadata');
-      enrichedContext = 'Vos contrats:\n' + policies.map(p => 
-        `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`
-      ).join('\n');
+      enrichedContext = 'Vos contrats:\n' + policies.map(p => {
+        const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
+        return `- ${p.name} (${p.type}) chez ${insurer}: ${p.summary || 'Pas de résumé'}`;
+      }).join('\n');
     }
     
     const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.
