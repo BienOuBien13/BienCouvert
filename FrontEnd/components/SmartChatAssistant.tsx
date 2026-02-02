@@ -286,6 +286,7 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       name: contractNameInput,
       insurer: selectedInsurer,
       type: selectedType,
+      coverage: selectedFormula,
       coverageDetail: `${selectedInsurer}\n\n📦 Formule: ${selectedFormula}\n\n🎯 Options:\n${selectedOptions.map(opt => `• ${opt}`).join('\n')}`,
       options: selectedOptions,
       summary: `${selectedType} - ${selectedFormula}`,
@@ -294,7 +295,13 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       addedAt: Date.now(),
       fileData: null,
       fileName: null,
-      mimeType: 'text/plain'
+      mimeType: 'text/plain',
+      metadata: {
+        formula: selectedFormula,
+        options: selectedOptions,
+        insurer: selectedInsurer,
+        type: selectedType
+      }
     };
     
     onAddPolicy(newPolicy);

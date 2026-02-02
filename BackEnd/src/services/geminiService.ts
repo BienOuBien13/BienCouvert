@@ -411,8 +411,19 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       console.log('⚠️ Aucun contexte RAG - utilisation metadata');
       enrichedContext = 'Vos contrats:\n' + policies.map(p => {
         const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
-        return `- ${p.name} (${p.type}) chez ${insurer}: ${p.summary || 'Pas de résumé'}`;
+        const coverage = (p as any).coverage || (p as any).metadata?.formula;
+        const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
+        return `- ${p.name} (${p.type}) chez ${insurer}${coverageInfo}: ${p.summary || 'Pas de résumé'}`;
       }).join('\n');
+    } else {
+      // Ajouter les infos des contrats utilisateur en début de contexte
+      const policiesInfo = policies.map(p => {
+        const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
+        const coverage = (p as any).coverage || (p as any).metadata?.formula;
+        const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
+        return `${p.name}: ${insurer} / ${p.type}${coverageInfo}`;
+      }).join('\n');
+      enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
     }
     
     const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.

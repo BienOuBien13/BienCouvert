@@ -33,6 +33,7 @@ export interface CentralCgEntry {
   indexedFormulas: string[];
   indexedOptions: string[];
   semanticSummary: string;
+  metadata?: any; // JSON avec type, formule, etc.
 }
 
 export interface UserProfileData {
@@ -81,6 +82,7 @@ export interface Policy {
   name: string;
   insurer: string;
   type: PolicyType;
+  coverage?: string; // Formule d'assurance (ex: "Plénitude", "Tous Risques")
   coverageDetail?: string;
   options?: string[];
   fileData: string | null;
@@ -92,6 +94,7 @@ export interface Policy {
   annualPremium?: number;
   isInternalSource?: boolean;
   centralCgId?: number;
+  metadata?: any; // JSON pour stocker formule, options, etc.
 }
 
 export interface WebSearchResult {

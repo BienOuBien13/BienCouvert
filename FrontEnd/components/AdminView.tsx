@@ -8,11 +8,13 @@ import {
 import { CentralCgEntry, PolicyType } from '../types';
 import { storageService } from '../services/storageService';
 import { indexCgDocument } from '../services/geminiService';
+import { useMasterData } from '../hooks/useMasterData';
 
 export const AdminView: React.FC = () => {
   const [repo, setRepo] = useState<CentralCgEntry[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
+  const { types: insuranceTypes, insurers } = useMasterData();
   
   const [newEntry, setNewEntry] = useState({
     insurer: '',
@@ -183,11 +185,19 @@ export const AdminView: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assureur</label>
-              <input 
-                type="text" required placeholder="AXA, Maif..." 
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.insurer} onChange={e => setNewEntry({...newEntry, insurer: e.target.value})}
-              />
+              <select 
+                required
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
+                value={newEntry.insurer} 
+                onChange={e => setNewEntry({...newEntry, insurer: e.target.value})}
+              >
+                <option value="">Sélectionner un assureur</option>
+                {insurers.map(ins => (
+                  <option key={ins.code} value={ins.code}>
+                    {ins.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nom Contrat</label>
@@ -201,9 +211,15 @@ export const AdminView: React.FC = () => {
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type</label>
               <select 
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
-                value={newEntry.type} onChange={e => setNewEntry({...newEntry, type: e.target.value as PolicyType})}
+                value={newEntry.type} 
+                onChange={e => setNewEntry({...newEntry, type: e.target.value as PolicyType})}
               >
-                {Object.values(PolicyType).map(t => <option key={t} value={t}>{t}</option>)}
+                <option value="">Sélectionner un type</option>
+                {insuranceTypes.map(type => (
+                  <option key={type.code} value={type.code}>
+                    {type.icon} {type.labelFr}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
