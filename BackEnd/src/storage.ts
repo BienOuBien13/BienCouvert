@@ -411,7 +411,7 @@ export const storage = {
         cg.insurer,
         cg.product_name, 
         cg.content_text,
-        COALESCE(i.name, cg.insurer) as insurer_label,
+        COALESCE(i.label, cg.insurer) as insurer_label,
         COALESCE(it.label_fr, cg.metadata->>'type') as type,
         1 - (cg.embedding <=> $1::vector) as similarity
       FROM central_cg cg
