@@ -222,6 +222,10 @@ export const storage = {
       documentHash, contentText, embedding, metadata
     } = data;
     
+    // S'assurer que metadata est un objet JSON valide
+    const metadataJson = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
+    const embeddingJson = embedding ? (typeof embedding === 'string' ? embedding : JSON.stringify(embedding)) : null;
+    
     if (id) {
       // Mise à jour
       await query(
@@ -231,7 +235,7 @@ export const storage = {
              metadata = $8, updated_at = CURRENT_TIMESTAMP
          WHERE id = $9`,
         [insurer, productName, version, documentUrl, documentHash, 
-         contentText, embedding, metadata, id]
+         contentText, embeddingJson, metadataJson, id]
       );
     } else {
       // Insertion
@@ -242,7 +246,7 @@ export const storage = {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [insurer, productName, version, documentUrl, documentHash, 
-         contentText, embedding, metadata]
+         contentText, embeddingJson, metadataJson]
       );
       return result.rows[0].id;
     }

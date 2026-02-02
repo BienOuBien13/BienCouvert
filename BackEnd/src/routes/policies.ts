@@ -346,10 +346,24 @@ router.post('/central-cg', async (req, res) => {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
       
-      // Télécharger et extraire le texte du PDF
-      const response = await fetch(pdfUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+      // Gérer à la fois les URLs et les data URLs base64
+      let pdfBase64: string;
+      if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+        // Si déjà en base64, extraire la partie data
+        pdfBase64 = pdfUrl.split(',')[1];
+        console.log('📄 PDF déjà en base64');
+      } else {
+        // Télécharger depuis l'URL
+        console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl}`);
+        const response = await fetch(pdfUrl);
+        if (!response.ok) {
+          throw new Error(`Échec téléchargement PDF: ${response.status} ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+      }
+      
+      console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
       
       const result = await model.generateContent([
         {
@@ -374,12 +388,14 @@ router.post('/central-cg', async (req, res) => {
       console.log(`✅ CG ${entryId} vectorisée`);
     } catch (e) {
       console.warn('⚠️ Vectorisation CG échouée:', e);
+      console.error('Détails erreur:', e);
     }
     
     res.json(newEntry);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    console.error('❌ Erreur POST /central-cg:', err);
+    const errorMessage = err instanceof Error ? err.message : 'Server error';
+    res.status(500).json({ message: 'Erreur lors de la sauvegarde de la CG', error: errorMessage });
   }
 });
 
