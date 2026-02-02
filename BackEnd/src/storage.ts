@@ -224,7 +224,7 @@ export const storage = {
     `);
     return result.rows.map(row => ({
       id: row.id,
-      insurer: row.insurer_label || row.insurer_name || 'Non spécifié',
+      insurer: row.insurer_label || row.insurer || 'Non spécifié',
       insurerCode: row.insurer_code,
       insurerLogo: row.insurer_logo,
       productName: row.product_name,
@@ -273,7 +273,7 @@ export const storage = {
       // Mise à jour
       await query(
         `UPDATE central_cg 
-         SET insurer_name = $1, insurer_code = $2, product_name = $3, version = $4, document_url = $5,
+         SET insurer = $1, insurer_code = $2, product_name = $3, version = $4, document_url = $5,
              document_hash = $6, content_text = $7, embedding = $8, 
              metadata = $9, type_code = $10, updated_at = CURRENT_TIMESTAMP
          WHERE id = $11`,
@@ -284,7 +284,7 @@ export const storage = {
       // Insertion
       const result = await query(
         `INSERT INTO central_cg 
-         (insurer_name, insurer_code, product_name, version, document_url, document_hash, 
+         (insurer, insurer_code, product_name, version, document_url, document_hash, 
           content_text, embedding, metadata, type_code)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
@@ -408,10 +408,10 @@ export const storage = {
   searchCentralCg: async (questionEmbedding: number[], insurers?: string[], limit: number = 3) => {
     let queryText = `
       SELECT 
-        cg.insurer_name,
+        cg.insurer,
         cg.product_name, 
         cg.content_text,
-        COALESCE(i.label, cg.insurer_name) as insurer,
+        COALESCE(i.name, cg.insurer) as insurer_label,
         COALESCE(it.label_fr, cg.metadata->>'type') as type,
         1 - (cg.embedding <=> $1::vector) as similarity
       FROM central_cg cg
@@ -424,7 +424,7 @@ export const storage = {
     
     if (insurers && insurers.length > 0) {
       params.push(insurers);
-      queryText += ` AND (cg.insurer_name = ANY($${params.length}) OR cg.insurer_code = ANY($${params.length}))`;
+      queryText += ` AND (cg.insurer = ANY($${params.length}) OR cg.insurer_code = ANY($${params.length}))`;
     }
     
     queryText += ` ORDER BY cg.embedding <=> $1::vector LIMIT $${params.length + 1}`;
