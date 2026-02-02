@@ -349,12 +349,39 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       const insurers = policies.map(p => p.provider || (p as any).insurer).filter(Boolean);
       if (insurers.length > 0) {
         console.log(`🔍 Recherche CG pour assureurs: ${insurers.join(', ')}`);
+        
+        // Tenter la recherche vectorielle
         cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
+        
+        // Filtrer les résultats invalides (NaN)
+        cgChunks = cgChunks.filter(cg => !isNaN(cg.similarity));
+        
         console.log(`✅ RAG CG: ${cgChunks.length} documents trouvés`);
         if (cgChunks.length > 0) {
           cgChunks.forEach((cg, idx) => {
             console.log(`   ${idx + 1}. ${cg.insurer_label || cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity.toFixed(3)})`);
           });
+        } else if (insurers.length > 0) {
+          // Fallback: recherche textuelle simple si l'embedding a échoué
+          console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle');
+          const textResults = await storage.query(
+            `SELECT 
+              cg.insurer,
+              cg.product_name, 
+              cg.content_text,
+              i.label as insurer_label,
+              it.label_fr as type,
+              0.5 as similarity
+            FROM central_cg cg
+            LEFT JOIN insurers i ON cg.insurer_code = i.code
+            LEFT JOIN insurance_types it ON cg.type_code = it.code
+            WHERE (cg.insurer = ANY($1) OR cg.insurer_code = ANY($1))
+              AND cg.content_text IS NOT NULL
+            LIMIT 3`,
+            [insurers]
+          );
+          cgChunks = textResults.rows;
+          console.log(`✅ Fallback textuel: ${cgChunks.length} CG trouvées`);
         }
       }
     } catch (cgErr) {
