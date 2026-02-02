@@ -476,8 +476,8 @@ ${text}`;
 };
 
 /**
- * Indexe un document de Conditions Générales via URL PDF
- * Retourne les formules, options et un résumé sémantique
+ * Indexe un document de Conditions Générales via URL PDF ou base64
+ * Télécharge le PDF et l'analyse directement pour extraire uniquement le contenu réel
  */
 export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<any> => {
   const ai = getAiClient();
@@ -485,12 +485,36 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
     return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Service IA non disponible" };
   }
 
-  const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} disponible à l'URL : ${pdfUrl}
+  try {
+    console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl.substring(0, 100)}...`);
+    
+    // Télécharger le PDF
+    let pdfBase64: string;
+    if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+      // Si déjà en base64, extraire la partie data
+      pdfBase64 = pdfUrl.split(',')[1];
+    } else {
+      // Sinon, télécharger depuis l'URL
+      const response = await fetch(pdfUrl);
+      if (!response.ok) {
+        throw new Error(`Impossible de télécharger le PDF: ${response.status} ${response.statusText}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+    }
+    
+    console.log(`✅ PDF téléchargé (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
 
-Extrais : 
-1. Les formules commerciales (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
-2. Les options complémentaires (ex: Assistance 0km, Protection du conducteur, Bris de glace).
+    const prompt = `Analyse en profondeur ce document PDF des Conditions Générales ${type} de chez ${provider}.
+
+IMPORTANT: Base-toi UNIQUEMENT sur le contenu réel du document PDF fourni. N'invente AUCUNE information.
+
+Extrais du document : 
+1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
+
+Si une information n'est pas présente dans le document, laisse le tableau vide ou indique "Non spécifié" dans le résumé.
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
@@ -499,7 +523,6 @@ Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentai
   "semanticSummary": "Résumé des garanties principales..."
 }`;
 
-  try {
     const model = ai.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
@@ -507,8 +530,16 @@ Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentai
       }
     });
     
-    console.log(`📤 Demande d'indexation à Gemini pour: ${pdfUrl}`);
-    const result = await model.generateContent([prompt]);
+    console.log(`📤 Demande d'indexation à Gemini avec le contenu du PDF`);
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType: 'application/pdf',
+          data: pdfBase64
+        }
+      },
+      prompt
+    ]);
     const response = await result.response;
     let jsonText = response.text();
     
