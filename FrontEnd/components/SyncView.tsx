@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Shield, Lock, Search, ChevronRight, Loader2, CheckCircle, AlertCircle, RefreshCw, Link as LinkIcon } from 'lucide-react';
+import { useMasterData } from '../hooks/useMasterData';
 
 interface Insurer {
   id: string;
@@ -9,16 +10,18 @@ interface Insurer {
   color: string;
 }
 
-const INSURERS: Insurer[] = [
-  { id: 'axa', name: 'AXA France', logo: 'AXA', color: 'bg-blue-700' },
-  { id: 'allianz', name: 'Allianz', logo: 'ALZ', color: 'bg-blue-900' },
-  { id: 'maif', name: 'MAIF', logo: 'MAIF', color: 'bg-red-600' },
-  { id: 'macif', name: 'MACIF', logo: 'MAC', color: 'bg-blue-600' },
-  { id: 'generali', name: 'Generali', logo: 'GEN', color: 'bg-red-700' },
-  { id: 'boursorama', name: 'Boursorama', logo: 'BRS', color: 'bg-pink-600' },
-];
-
 export const SyncView: React.FC = () => {
+  const { insurers: masterInsurers, loading: masterDataLoading } = useMasterData();
+  
+  // Conversion des master data
+  const INSURERS: Insurer[] = masterInsurers
+    .filter(i => i.websiteUrl) // Ne garder que ceux avec une URL (possibilité de connexion)
+    .map(insurer => ({
+      id: insurer.code.toLowerCase(),
+      name: insurer.label,
+      logo: insurer.code.substring(0, 3).toUpperCase(),
+      color: insurer.color || 'bg-slate-700',
+    }));
   const [step, setStep] = useState<'list' | 'login' | 'syncing' | 'success'>('list');
   const [selectedInsurer, setSelectedInsurer] = useState<Insurer | null>(null);
   const [credentials, setCredentials] = useState({ user: '', pass: '' });

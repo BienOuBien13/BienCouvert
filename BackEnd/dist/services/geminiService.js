@@ -409,7 +409,56 @@ const parsePoliciesFromText = async (text) => {
     if (!ai) {
         return { policies: [], clarificationQuestions: null };
     }
-    const prompt = `Tu es un expert en analyse de documents d'assurance. Extrais les polices d'assurance du texte suivant et retourne un JSON.
+    try {
+        const storage = require('../storage').storage;
+        // 🔍 Étape 1 : Récupérer toutes les formules et options disponibles depuis central_cg
+        let availableFormulasAndOptions = '';
+        try {
+            const allCg = await storage.readCentralCg();
+            if (allCg && allCg.length > 0) {
+                const formulasByInsurer = {};
+                const optionsByInsurer = {};
+                allCg.forEach((cg) => {
+                    const insurer = cg.insurer || 'Inconnu';
+                    const formulas = cg.metadata?.indexedFormulas || [];
+                    const options = cg.metadata?.indexedOptions || [];
+                    if (formulas.length > 0) {
+                        if (!formulasByInsurer[insurer])
+                            formulasByInsurer[insurer] = [];
+                        formulasByInsurer[insurer].push(...formulas);
+                    }
+                    if (options.length > 0) {
+                        if (!optionsByInsurer[insurer])
+                            optionsByInsurer[insurer] = [];
+                        optionsByInsurer[insurer].push(...options);
+                    }
+                });
+                // Construire la liste des formules et options disponibles
+                if (Object.keys(formulasByInsurer).length > 0) {
+                    availableFormulasAndOptions += '\n📋 FORMULES DISPONIBLES PAR ASSUREUR (utilise-les en priorité):\n';
+                    for (const [insurer, formulas] of Object.entries(formulasByInsurer)) {
+                        availableFormulasAndOptions += `- ${insurer}: ${[...new Set(formulas)].join(', ')}\n`;
+                    }
+                }
+                if (Object.keys(optionsByInsurer).length > 0) {
+                    availableFormulasAndOptions += '\n🔧 OPTIONS DISPONIBLES PAR ASSUREUR (suggère-les si pertinent):\n';
+                    for (const [insurer, options] of Object.entries(optionsByInsurer)) {
+                        availableFormulasAndOptions += `- ${insurer}: ${[...new Set(options)].join(', ')}\n`;
+                    }
+                }
+                console.log('✅ Formules et options chargées depuis central_cg');
+            }
+        }
+        catch (cgErr) {
+            console.warn('⚠️ Impossible de charger les formules/options depuis central_cg:', cgErr);
+        }
+        const prompt = `Tu es un expert en analyse de documents d'assurance. Extrais les polices d'assurance du texte suivant et retourne un JSON.
+${availableFormulasAndOptions}
+
+IMPORTANT : 
+- Si l'assureur est dans la liste ci-dessus, utilise EXACTEMENT les noms de formules listées (ne les invente pas).
+- Suggère les options pertinentes si elles sont mentionnées ou implicites dans le texte.
+- Si l'assureur n'est pas dans la liste, tu peux utiliser des noms génériques (Essentiel/Confort/Premium/etc.).
 
 Format attendu :
 {
@@ -418,7 +467,9 @@ Format attendu :
       "type": "Auto" | "Habitation" | "Santé" | "Vie" | "Autre",
       "provider": "Nom de l'assureur",
       "name": "Nom du contrat",
-      "coverageDetail": "Formule (Essentiel/Confort/Premium/etc.)",
+      "coverageDetail": "Formule exacte (utilise celles de la liste ci-dessus si disponible)",
+      "suggestedFormulas": ["Formule 1", "Formule 2"] ou [],
+      "suggestedOptions": ["Option 1", "Option 2"] ou [],
       "premium": nombre ou null,
       "startDate": "YYYY-MM-DD" ou null
     }
@@ -430,7 +481,6 @@ Si des informations sont manquantes ou ambiguës, génère des questions de clar
 
 Texte à analyser :
 ${text}`;
-    try {
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
@@ -453,20 +503,42 @@ ${text}`;
 };
 exports.parsePoliciesFromText = parsePoliciesFromText;
 /**
- * Indexe un document de Conditions Générales via URL PDF
- * Retourne les formules, options et un résumé sémantique
+ * Indexe un document de Conditions Générales via URL PDF ou base64
+ * Télécharge le PDF et l'analyse directement pour extraire uniquement le contenu réel
  */
 const indexCgDocument = async (provider, type, pdfUrl) => {
     const ai = getAiClient();
     if (!ai) {
         return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Service IA non disponible" };
     }
-    const prompt = `Analyse en profondeur le document PDF des Conditions Générales ${type} de chez ${provider} disponible à l'URL : ${pdfUrl}
+    try {
+        console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl.substring(0, 100)}...`);
+        // Télécharger le PDF
+        let pdfBase64;
+        if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+            // Si déjà en base64, extraire la partie data
+            pdfBase64 = pdfUrl.split(',')[1];
+        }
+        else {
+            // Sinon, télécharger depuis l'URL
+            const response = await fetch(pdfUrl);
+            if (!response.ok) {
+                throw new Error(`Impossible de télécharger le PDF: ${response.status} ${response.statusText}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+        }
+        console.log(`✅ PDF téléchargé (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
+        const prompt = `Analyse en profondeur ce document PDF des Conditions Générales ${type} de chez ${provider}.
 
-Extrais : 
-1. Les formules commerciales (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
-2. Les options complémentaires (ex: Assistance 0km, Protection du conducteur, Bris de glace).
+IMPORTANT: Base-toi UNIQUEMENT sur le contenu réel du document PDF fourni. N'invente AUCUNE information.
+
+Extrais du document : 
+1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
+
+Si une information n'est pas présente dans le document, laisse le tableau vide ou indique "Non spécifié" dans le résumé.
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
@@ -474,15 +546,22 @@ Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentai
   "indexedOptions": ["Option 1", "Option 2"],
   "semanticSummary": "Résumé des garanties principales..."
 }`;
-    try {
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
                 responseMimeType: 'application/json'
             }
         });
-        console.log(`📤 Demande d'indexation à Gemini pour: ${pdfUrl}`);
-        const result = await model.generateContent([prompt]);
+        console.log(`📤 Demande d'indexation à Gemini avec le contenu du PDF`);
+        const result = await model.generateContent([
+            {
+                inlineData: {
+                    mimeType: 'application/pdf',
+                    data: pdfBase64
+                }
+            },
+            prompt
+        ]);
         const response = await result.response;
         let jsonText = response.text();
         console.log(`✅ Réponse Gemini reçue (${jsonText.length} chars)`);

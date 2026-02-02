@@ -9,6 +9,7 @@ import { doubleCsrf } from 'csrf-csrf';
 import authRoutes from './routes/auth';
 import policyRoutes from './routes/policies';
 import aiRoutes from './routes/ai';
+import masterDataRoutes from './routes/masterdata';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initAuditTable } from './services/auditService';
@@ -192,6 +193,7 @@ app.get('/api/csrf-token', (req, res) => {
 app.use('/api/auth', authLimiter, doubleCsrfProtection, authRoutes);        // 🔒 Auth avec rate limiting + CSRF
 app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // 🔒 Policies avec CSRF
 app.use('/api/ai', doubleCsrfProtection, aiRoutes);                         // 🔒 AI avec CSRF
+app.use('/api/masterdata', masterDataRoutes);                               // 📊 Master Data (lecture seule, pas de CSRF)
 
 // -----------------------------------------------------------------------------
 // Démarrage du serveur

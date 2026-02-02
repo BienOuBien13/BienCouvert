@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Policy, User } from '../types';
-import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, MessageSquare, Edit3, Plus, CreditCard, Smartphone, Scale } from 'lucide-react';
+import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, MessageSquare, Edit3, Plus, CreditCard, Smartphone, Scale, Loader } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 import { fetchCsrfToken } from '../services/authService';
 import { storageService } from '../services/storageService';
+import { useMasterData } from '../hooks/useMasterData';
 
 // Simple AI API call helper
 const getAIResponse = async (prompt: string): Promise<string> => {
@@ -46,34 +47,57 @@ interface Message {
   formulas?: Array<{ name: string; options: string[] }>;
 }
 
-const TYPES = [
-  { id: 'auto', name: 'Auto', icon: Car, color: 'from-red-500 to-orange-500' },
-  { id: 'habitation', name: 'Habitation', icon: Home, color: 'from-blue-500 to-cyan-500' },
-  { id: 'sante', name: 'Santé', icon: Heart, color: 'from-pink-500 to-rose-500' },
-  { id: 'prevoyance', name: 'Prévoyance', icon: Shield, color: 'from-green-500 to-emerald-500' },
-  { id: 'pro', name: 'Professionnelle', icon: Briefcase, color: 'from-purple-500 to-indigo-500' },
-  { id: 'emprunteur', name: 'Emprunteur/Crédit', icon: CreditCard, color: 'from-amber-500 to-yellow-500' },
-  { id: 'bancaire', name: 'Carte Bancaire', icon: CreditCard, color: 'from-indigo-500 to-purple-500' },
-  { id: 'appareils', name: 'Appareils Électroniques', icon: Smartphone, color: 'from-slate-500 to-slate-600' },
-  { id: 'juridique', name: 'Juridique', icon: Scale, color: 'from-slate-600 to-slate-700' },
-  { id: 'voyage', name: 'Voyage', icon: Package, color: 'from-cyan-500 to-blue-500' },
-  { id: 'animaux', name: 'Animaux', icon: Heart, color: 'from-orange-500 to-red-500' },
-  { id: 'autre', name: 'Autre', icon: Shield, color: 'from-slate-500 to-slate-600' },
-];
+// Mapping des icônes pour les types d'assurance
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  AUTO: Car,
+  HABITATION: Home,
+  SANTE: Heart,
+  PREVOYANCE: Shield,
+  PRO: Briefcase,
+  EMPRUNTEUR: CreditCard,
+  BANCAIRE: CreditCard,
+  APPAREILS: Smartphone,
+  JURIDIQUE: Scale,
+  VOYAGE: Package,
+  ANIMAUX: Heart,
+  VIE: Shield,
+  AUTRE: Shield,
+};
 
-const INSURERS = [
-  { id: 'maif', name: 'MAIF', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/Logo_MAIF.svg/200px-Logo_MAIF.svg.png', color: 'bg-green-600' },
-  { id: 'axa', name: 'AXA', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/AXA_Logo.svg/200px-AXA_Logo.svg.png', color: 'bg-blue-700' },
-  { id: 'allianz', name: 'Allianz', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Allianz_logo.svg/200px-Allianz_logo.svg.png', color: 'bg-blue-600' },
-  { id: 'macif', name: 'MACIF', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Logo_Macif.svg/200px-Logo_Macif.svg.png', color: 'bg-red-600' },
-  { id: 'groupama', name: 'Groupama', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/Logo_Groupama.svg/200px-Logo_Groupama.svg.png', color: 'bg-orange-600' },
-  { id: 'generali', name: 'Generali', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Generali_logo.svg/200px-Generali_logo.svg.png', color: 'bg-red-700' },
-  { id: 'mma', name: 'MMA', logo: 'https://upload.wikimedia.org/wikipedia/commons/2/26/Logo_MMA.jpg', color: 'bg-slate-700' },
-  { id: 'matmut', name: 'Matmut', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Logo_Matmut.svg/200px-Logo_Matmut.svg.png', color: 'bg-yellow-600' },
-  { id: 'autre', name: 'Autre', logo: '', color: 'bg-slate-500' },
-];
+// Mapping des couleurs pour les types
+const TYPE_COLORS: Record<string, string> = {
+  AUTO: 'from-red-500 to-orange-500',
+  HABITATION: 'from-blue-500 to-cyan-500',
+  SANTE: 'from-pink-500 to-rose-500',
+  PREVOYANCE: 'from-green-500 to-emerald-500',
+  PRO: 'from-purple-500 to-indigo-500',
+  EMPRUNTEUR: 'from-amber-500 to-yellow-500',
+  BANCAIRE: 'from-indigo-500 to-purple-500',
+  APPAREILS: 'from-slate-500 to-slate-600',
+  JURIDIQUE: 'from-slate-600 to-slate-700',
+  VOYAGE: 'from-cyan-500 to-blue-500',
+  ANIMAUX: 'from-orange-500 to-red-500',
+  VIE: 'from-purple-600 to-blue-600',
+  AUTRE: 'from-slate-500 to-slate-600',
+};
 
 export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCancel }) => {
+  const { types: masterTypes, insurers: masterInsurers, loading: masterDataLoading } = useMasterData();
+  
+  // Conversion des master data pour l'interface
+  const TYPES = masterTypes.map(type => ({
+    id: type.code.toLowerCase(),
+    name: type.labelFr,
+    icon: TYPE_ICONS[type.code] || Shield,
+    color: TYPE_COLORS[type.code] || 'from-slate-500 to-slate-600',
+  }));
+  
+  const INSURERS = masterInsurers.map(insurer => ({
+    id: insurer.code.toLowerCase(),
+    name: insurer.label,
+    logo: insurer.logoUrl || '',
+    color: insurer.color || 'bg-slate-500',
+  }));
   const [messages, setMessages] = useState<Message[]>([
     { id: '1', text: '👋 Bonjour ! Quel type d\'assurance voulez-vous ajouter ?', sender: 'bot', timestamp: Date.now() }
   ]);
@@ -101,25 +125,54 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
   const getFormulasFromCentralCg = async (insurerName: string, policyType: string) => {
     try {
       const data = await storageService.getCentralCgRepo();
-      const filtered = data.filter(doc => 
-        doc.insurer?.toLowerCase() === insurerName.toLowerCase() && 
-        doc.type?.toLowerCase() === policyType.toLowerCase()
-      );
+      
+      // Normalisation du type pour la recherche
+      const normalizedType = policyType.toLowerCase();
+      const typeMapping: { [key: string]: string[] } = {
+        'auto': ['auto', 'automobile'],
+        'habitation': ['habitation', 'logement', 'maison'],
+        'sante': ['santé', 'sante', 'mutuelle'],
+        'prevoyance': ['prévoyance', 'prevoyance'],
+        'pro': ['professionnelle', 'pro'],
+        'emprunteur': ['emprunteur', 'credit', 'crédit'],
+        'bancaire': ['bancaire', 'banque'],
+        'appareils': ['appareils', 'electronique', 'électronique'],
+        'juridique': ['juridique', 'protection juridique'],
+        'voyage': ['voyage'],
+        'animaux': ['animaux', 'animal'],
+      };
+      
+      const acceptedTypes = typeMapping[normalizedType] || [normalizedType];
+      
+      const filtered = data.filter(doc => {
+        const docInsurerMatch = doc.insurer?.toLowerCase() === insurerName.toLowerCase();
+        const docType = (doc.type || doc.metadata?.type || '').toLowerCase();
+        const docTypeMatch = acceptedTypes.some(type => docType.includes(type) || type.includes(docType));
+        
+        return docInsurerMatch && docTypeMatch;
+      });
+      
+      console.log(`🔍 Recherche formules: "${insurerName}" / "${policyType}" -> ${filtered.length} doc(s) trouvé(s)`);
       
       if (filtered.length > 0) {
         const formulasMap = new Map<string, string[]>();
         filtered.forEach((doc: any) => {
-          if (doc.indexedFormulas && Array.isArray(doc.indexedFormulas)) {
-            doc.indexedFormulas.forEach((formula: string) => {
+          const formulas = doc.indexedFormulas || doc.metadata?.indexedFormulas || [];
+          const options = doc.indexedOptions || doc.metadata?.indexedOptions || [];
+          
+          if (Array.isArray(formulas)) {
+            formulas.forEach((formula: string) => {
               if (!formulasMap.has(formula)) {
-                formulasMap.set(formula, doc.indexedOptions || []);
+                formulasMap.set(formula, options);
               }
             });
           }
         });
         
         if (formulasMap.size > 0) {
-          return Array.from(formulasMap.entries()).map(([name, options]) => ({ name, options }));
+          const result = Array.from(formulasMap.entries()).map(([name, options]) => ({ name, options }));
+          console.log(`✅ ${result.length} formule(s) extraite(s):`, result.map(f => f.name));
+          return result;
         }
       }
     } catch (error) {

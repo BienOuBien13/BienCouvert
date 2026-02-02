@@ -2,9 +2,10 @@ import React, { useState, useRef } from 'react';
 import { Policy, User } from '../types';
 import { 
   Home, Car, Heart, Briefcase, Shield, Upload, Check, ArrowRight, 
-  ArrowLeft, X, FileText, Calendar, DollarSign, Sparkles, Zap
+  ArrowLeft, X, FileText, Calendar, DollarSign, Sparkles, Zap, Loader
 } from 'lucide-react';
 import { uuid } from '../utils/uuid';
+import { useMasterData } from '../hooks/useMasterData';
 
 interface Props {
   user: User;
@@ -20,25 +21,40 @@ interface InsuranceType {
   description: string;
 }
 
-const TYPES: InsuranceType[] = [
-  { id: 'habitation', name: 'Habitation', icon: Home, gradient: 'from-blue-500 to-cyan-500', description: 'Assurance de votre logement' },
-  { id: 'auto', name: 'Auto', icon: Car, gradient: 'from-red-500 to-orange-500', description: 'Assurance véhicule' },
-  { id: 'sante', name: 'Santé', icon: Heart, gradient: 'from-pink-500 to-rose-500', description: 'Mutuelle et complémentaire' },
-  { id: 'pro', name: 'Professionnelle', icon: Briefcase, gradient: 'from-purple-500 to-indigo-500', description: 'RC Pro et locaux' },
-  { id: 'autre', name: 'Autre', icon: Shield, gradient: 'from-slate-500 to-slate-600', description: 'Autres assurances' },
-];
+// Mapping des icônes
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  AUTO: Car,
+  HABITATION: Home,
+  SANTE: Heart,
+  PRO: Briefcase,
+  AUTRE: Shield,
+};
 
-const INSURERS = [
-  { id: 'allianz', name: 'Allianz', color: 'bg-blue-600' },
-  { id: 'axa', name: 'AXA', color: 'bg-blue-700' },
-  { id: 'maif', name: 'MAIF', color: 'bg-green-600' },
-  { id: 'macif', name: 'MACIF', color: 'bg-red-600' },
-  { id: 'groupama', name: 'Groupama', color: 'bg-orange-600' },
-  { id: 'generali', name: 'Generali', color: 'bg-red-700' },
-  { id: 'autre', name: 'Autre', color: 'bg-slate-600' },
-];
+const TYPE_GRADIENTS: Record<string, string> = {
+  AUTO: 'from-red-500 to-orange-500',
+  HABITATION: 'from-blue-500 to-cyan-500',
+  SANTE: 'from-pink-500 to-rose-500',
+  PRO: 'from-purple-500 to-indigo-500',
+  AUTRE: 'from-slate-500 to-slate-600',
+};
 
 export const ModernPolicyWizard: React.FC<Props> = ({ user, onAddPolicy, onCancel }) => {
+  const { types: masterTypes, insurers: masterInsurers, loading: masterDataLoading } = useMasterData();
+  
+  // Conversion des master data
+  const TYPES: InsuranceType[] = masterTypes.map(type => ({
+    id: type.code.toLowerCase(),
+    name: type.labelFr,
+    icon: TYPE_ICONS[type.code] || Shield,
+    gradient: TYPE_GRADIENTS[type.code] || 'from-slate-500 to-slate-600',
+    description: type.description || `Assurance ${type.labelFr.toLowerCase()}`,
+  }));
+  
+  const INSURERS = masterInsurers.map(insurer => ({
+    id: insurer.code.toLowerCase(),
+    name: insurer.label,
+    color: insurer.color || 'bg-slate-600',
+  }));
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     type: '',

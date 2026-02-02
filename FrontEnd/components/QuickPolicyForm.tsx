@@ -5,6 +5,7 @@ import {
   Send, Sparkles, Check, Loader2, FileText, Upload, ExternalLink
 } from 'lucide-react';
 import { uuid } from '../utils/uuid';
+import { useMasterData } from '../hooks/useMasterData';
 
 interface Props {
   user: User;
@@ -33,29 +34,44 @@ interface AIMessage {
   options?: Array<{ label: string; value: string }>;
 }
 
-const INSURANCE_TYPES: InsuranceType[] = [
-  { id: 'habitation', name: 'Habitation', icon: Home, color: 'bg-blue-500' },
-  { id: 'auto', name: 'Auto', icon: Car, color: 'bg-red-500' },
-  { id: 'sante', name: 'Santé', icon: Heart, color: 'bg-pink-500' },
-  { id: 'vie', name: 'Vie', icon: Shield, color: 'bg-purple-500' },
-  { id: 'prevoyance', name: 'Prévoyance', icon: Umbrella, color: 'bg-indigo-500' },
-  { id: 'pro', name: 'Pro', icon: Briefcase, color: 'bg-orange-500' },
-  { id: 'famille', name: 'Famille', icon: Baby, color: 'bg-green-500' },
-  { id: 'voyage', name: 'Voyage', icon: Plane, color: 'bg-cyan-500' },
-];
+// Mapping des icônes
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  AUTO: Car,
+  HABITATION: Home,
+  SANTE: Heart,
+  VIE: Shield,
+  PREVOYANCE: Umbrella,
+  PRO: Briefcase,
+  VOYAGE: Plane,
+};
 
-const INSURERS: Insurer[] = [
-  { id: 'allianz', name: 'Allianz', logo: '🔵', color: 'border-blue-600' },
-  { id: 'axa', name: 'AXA', logo: '💙', color: 'border-blue-700' },
-  { id: 'maif', name: 'MAIF', logo: '🟢', color: 'border-green-600' },
-  { id: 'macif', name: 'MACIF', logo: '🔴', color: 'border-red-600' },
-  { id: 'groupama', name: 'Groupama', logo: '🟠', color: 'border-orange-600' },
-  { id: 'maaf', name: 'MAAF', logo: '🟡', color: 'border-yellow-600' },
-  { id: 'matmut', name: 'Matmut', logo: '🟣', color: 'border-purple-600' },
-  { id: 'generali', name: 'Generali', logo: '🦁', color: 'border-red-700' },
-];
+const TYPE_COLORS: Record<string, string> = {
+  AUTO: 'bg-red-500',
+  HABITATION: 'bg-blue-500',
+  SANTE: 'bg-pink-500',
+  VIE: 'bg-purple-500',
+  PREVOYANCE: 'bg-indigo-500',
+  PRO: 'bg-orange-500',
+  VOYAGE: 'bg-cyan-500',
+};
 
 export const QuickPolicyForm: React.FC<Props> = ({ user, onAddPolicy, onCancel }) => {
+  const { types: masterTypes, insurers: masterInsurers, loading: masterDataLoading } = useMasterData();
+  
+  // Conversion des master data
+  const INSURANCE_TYPES: InsuranceType[] = masterTypes.map(type => ({
+    id: type.code.toLowerCase(),
+    name: type.labelFr,
+    icon: TYPE_ICONS[type.code] || Shield,
+    color: TYPE_COLORS[type.code] || 'bg-slate-500',
+  }));
+  
+  const INSURERS: Insurer[] = masterInsurers.map(insurer => ({
+    id: insurer.code.toLowerCase(),
+    name: insurer.label,
+    logo: insurer.logoUrl || '🛡️',
+    color: `border-${insurer.color || 'slate'}-600`,
+  }));
   const [selectedType, setSelectedType] = useState<string>('');
   const [selectedInsurer, setSelectedInsurer] = useState<string>('');
   const [messages, setMessages] = useState<AIMessage[]>([]);

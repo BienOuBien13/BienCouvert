@@ -15,6 +15,7 @@ const csrf_csrf_1 = require("csrf-csrf");
 const auth_1 = __importDefault(require("./routes/auth"));
 const policies_1 = __importDefault(require("./routes/policies"));
 const ai_1 = __importDefault(require("./routes/ai"));
+const masterdata_1 = __importDefault(require("./routes/masterdata"));
 require("./db"); // Initialisation de la connexion PostgreSQL
 const auditService_1 = require("./services/auditService");
 // -----------------------------------------------------------------------------
@@ -174,6 +175,7 @@ app.get('/api/csrf-token', (req, res) => {
 app.use('/api/auth', authLimiter, doubleCsrfProtection, auth_1.default); // 🔒 Auth avec rate limiting + CSRF
 app.use('/api/policies', doubleCsrfProtection, policies_1.default); // 🔒 Policies avec CSRF
 app.use('/api/ai', doubleCsrfProtection, ai_1.default); // 🔒 AI avec CSRF
+app.use('/api/masterdata', masterdata_1.default); // 📊 Master Data (lecture seule, pas de CSRF)
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
 // -----------------------------------------------------------------------------
