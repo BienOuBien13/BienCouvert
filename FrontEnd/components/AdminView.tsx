@@ -102,18 +102,37 @@ export const AdminView: React.FC = () => {
 
   const handleFinalAdd = async () => {
     if (!indexingResult) return;
+    
+    // Validation côté client
+    if (!newEntry.insurer || !newEntry.productName || !newEntry.type || !newEntry.pdfUrl) {
+      alert('Veuillez remplir tous les champs obligatoires (Assureur, Nom Contrat, Type, PDF)');
+      return;
+    }
+    
     try {
-      await storageService.saveCgEntry({
-        ...newEntry,
+      const entryToSave = {
+        insurer: newEntry.insurer,
+        productName: newEntry.productName,
+        type: newEntry.type,
+        pdfUrl: newEntry.pdfUrl,
         indexedFormulas: indexingResult.indexedFormulas || [],
         indexedOptions: indexingResult.indexedOptions || [],
         semanticSummary: indexingResult.semanticSummary || ''
-      });
+      };
+      
+      console.log('📤 Envoi de l\'entrée CG:', entryToSave);
+      
+      await storageService.saveCgEntry(entryToSave);
+      
+      // Message de succès avec info sur la vectorisation
+      alert('✅ Document ajouté avec succès!\n\nℹ️ La vectorisation du PDF se fait en arrière-plan et peut prendre quelques minutes. Le document sera pleinement opérationnel une fois la vectorisation terminée.');
+      
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
       setNewEntry({ insurer: '', productName: '', type: PolicyType.AUTO, pdfUrl: '' });
       setIndexingResult(null);
       setShowAddForm(false);
+      setPdfFile(null);
     } catch (error: any) {
       console.error('Failed to save CG entry:', error);
       alert(`Erreur lors de la sauvegarde: ${error.message || 'Erreur inconnue'}`);

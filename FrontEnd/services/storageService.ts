@@ -92,10 +92,22 @@ export const storageService = {
    * Sauvegarde une entrée CG dans le référentiel
    */
   saveCgEntry: async (entry: Omit<CentralCgEntry, 'id' | 'lastVerified'>): Promise<void> => {
-    await apiFetch('/policies/central-cg', {
+    console.log('📤 saveCgEntry - Envoi vers backend:', {
+      insurer: entry.insurer,
+      productName: entry.productName,
+      type: entry.type,
+      pdfUrlLength: entry.pdfUrl?.length || 0,
+      hasFormulas: entry.indexedFormulas?.length || 0,
+      hasOptions: entry.indexedOptions?.length || 0
+    });
+    
+    const result = await apiFetch('/policies/central-cg', {
       method: 'POST',
       body: JSON.stringify(entry),
     });
+    
+    console.log('✅ saveCgEntry - Réponse reçue:', result);
+    return result;
   },
 
   /**

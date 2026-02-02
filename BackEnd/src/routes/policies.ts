@@ -108,33 +108,37 @@ router.post('/', upload.single('file'), async (req: any, res) => {
     const policyId = await storage.writePolicy(newPolicy);
     newPolicy.id = policyId;
     
-    // Vectorisation automatique si PDF présent
-    if (newPolicy.documentData && newPolicy.metadata.mimeType === 'application/pdf') {
-      try {
-        // Extraire le texte du PDF avec Gemini
-        const { GoogleGenerativeAI } = require('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        
-        const result = await model.generateContent([
-          {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: newPolicy.documentData
-            }
-          },
-          "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
-        ]);
-        
-        const pdfText = result.response.text();
-        await storage.vectorizePolicyPdf(policyId, pdfText);
-        console.log(`✅ PDF vectorisé pour policy ${policyId}`);
-      } catch (e) {
-        console.warn('⚠️ Vectorisation PDF échouée:', e);
-      }
-    }
-    
+    // ⚡ Réponse immédiate au client
     res.json(newPolicy);
+    
+    // 🔄 Vectorisation automatique si PDF présent - en arrière-plan (non-bloquant)
+    if (newPolicy.documentData && newPolicy.metadata.mimeType === 'application/pdf') {
+      setImmediate(async () => {
+        try {
+          console.log(`🚀 Démarrage vectorisation en arrière-plan pour policy ${policyId}`);
+          // Extraire le texte du PDF avec Gemini
+          const { GoogleGenerativeAI } = require('@google/generative-ai');
+          const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          
+          const result = await model.generateContent([
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: newPolicy.documentData
+              }
+            },
+            "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
+          ]);
+          
+          const pdfText = result.response.text();
+          await storage.vectorizePolicyPdf(policyId, pdfText);
+          console.log(`✅ PDF vectorisé avec succès pour policy ${policyId}`);
+        } catch (e) {
+          console.error(`❌ Vectorisation PDF ${policyId} échouée:`, e);
+        }
+      });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -304,6 +308,8 @@ router.get('/central-cg', async (req, res) => {
  */
 router.post('/central-cg', async (req, res) => {
   try {
+    console.log('📥 Réception POST /central-cg, body:', JSON.stringify(req.body, null, 2));
+    
     // Support des deux formats de noms de champs pour compatibilité
     const { 
       provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary,
@@ -314,8 +320,16 @@ router.post('/central-cg', async (req, res) => {
     const insurerName = insurer || provider;
     const productNameValue = productName || policyName;
     
+    console.log('📋 Champs extraits:', { 
+      insurerName, 
+      productNameValue, 
+      type, 
+      pdfUrl: pdfUrl ? `${pdfUrl.substring(0, 50)}...` : 'undefined'
+    });
+    
     // Validation des champs obligatoires
     if (!insurerName || !productNameValue || !type || !pdfUrl) {
+      console.error('❌ Champs manquants:', { insurerName, productNameValue, type, pdfUrl: !!pdfUrl });
       return res.status(400).json({ message: 'Missing required fields: insurer, productName, type, pdfUrl' });
     }
 
@@ -340,58 +354,62 @@ router.post('/central-cg', async (req, res) => {
     const entryId = await storage.writeCentralCgEntry(newEntry);
     newEntry.id = entryId;
     
-    // Vectorisation automatique du PDF
-    try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      
-      // Gérer à la fois les URLs et les data URLs base64
-      let pdfBase64: string;
-      if (pdfUrl.startsWith('data:application/pdf;base64,')) {
-        // Si déjà en base64, extraire la partie data
-        pdfBase64 = pdfUrl.split(',')[1];
-        console.log('📄 PDF déjà en base64');
-      } else {
-        // Télécharger depuis l'URL
-        console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl}`);
-        const response = await fetch(pdfUrl);
-        if (!response.ok) {
-          throw new Error(`Échec téléchargement PDF: ${response.status} ${response.statusText}`);
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
-      }
-      
-      console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
-      
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: pdfBase64
-          }
-        },
-        "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
-      ]);
-      
-      const pdfText = result.response.text();
-      
-      // Stocker le texte et vectoriser
-      const { query } = require('../db');
-      await query(
-        'UPDATE central_cg SET content_text = $1 WHERE id = $2',
-        [pdfText, entryId]
-      );
-      
-      await storage.vectorizeCentralCg(entryId, pdfText);
-      console.log(`✅ CG ${entryId} vectorisée`);
-    } catch (e) {
-      console.warn('⚠️ Vectorisation CG échouée:', e);
-      console.error('Détails erreur:', e);
-    }
+    // ⚡ Réponse immédiate au client (évite le timeout 504)
+    res.json({ ...newEntry, vectorizationStatus: 'pending' });
     
-    res.json(newEntry);
+    // 🔄 Vectorisation automatique du PDF en arrière-plan (non-bloquant)
+    // Cette opération peut prendre plusieurs minutes pour de gros PDFs
+    setImmediate(async () => {
+      try {
+        console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        
+        // Gérer à la fois les URLs et les data URLs base64
+        let pdfBase64: string;
+        if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+          // Si déjà en base64, extraire la partie data
+          pdfBase64 = pdfUrl.split(',')[1];
+          console.log('📄 PDF déjà en base64');
+        } else {
+          // Télécharger depuis l'URL
+          console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl}`);
+          const response = await fetch(pdfUrl);
+          if (!response.ok) {
+            throw new Error(`Échec téléchargement PDF: ${response.status} ${response.statusText}`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+        }
+        
+        console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
+        
+        const result = await model.generateContent([
+          {
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: pdfBase64
+            }
+          },
+          "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
+        ]);
+        
+        const pdfText = result.response.text();
+        
+        // Stocker le texte et vectoriser
+        const { query } = require('../db');
+        await query(
+          'UPDATE central_cg SET content_text = $1 WHERE id = $2',
+          [pdfText, entryId]
+        );
+        
+        await storage.vectorizeCentralCg(entryId, pdfText);
+        console.log(`✅ CG ${entryId} vectorisée avec succès`);
+      } catch (e) {
+        console.error(`❌ Vectorisation CG ${entryId} échouée:`, e);
+      }
+    });
   } catch (err) {
     console.error('❌ Erreur POST /central-cg:', err);
     const errorMessage = err instanceof Error ? err.message : 'Server error';
