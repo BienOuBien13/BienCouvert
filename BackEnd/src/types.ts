@@ -125,7 +125,10 @@ export interface Policy {
   userId: string;                      // ID de l'utilisateur propriÃ©taire de cette police
   name: string;                        // Nom commercial de la police (ex: "Assurance Auto Confort")
   provider: string;                    // Nom de la compagnie d'assurance
+  insurer?: string;                    // Alias pour provider (compatibilité frontend)
+  insurerCode?: string;                // Code de l'assureur dans la table insurers
   type: PolicyType | string;           // CatÃ©gorie d'assurance (Automobile, Habitation, etc.)
+  typeCode?: string;                   // Code du type dans la table insurance_types
   coverageDetail?: string;             // DÃ©tail de la formule souscrite (ex: "Tous Risques", "Tiers+")
   options?: string[];                  // Liste des options souscrites (ex: "Bris de glace", "Assistance 0km")
   fileData: string | null;             // Contenu du document en base64 (PDF, image, etc.)

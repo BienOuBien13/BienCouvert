@@ -81,7 +81,9 @@ export interface Policy {
   userId: string;
   name: string;
   insurer: string;
+  insurerCode?: string;
   type: PolicyType;
+  typeCode?: string;
   coverage?: string; // Formule d'assurance (ex: "Plénitude", "Tous Risques")
   coverageDetail?: string;
   options?: string[];

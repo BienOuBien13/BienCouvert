@@ -117,6 +117,11 @@ export const SmartChatAssistant: React.FC<Props> = ({ user, onAddPolicy, onCance
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll vers le bas à chaque nouveau message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const addMessage = (text: string, sender: 'user' | 'bot', options?: any) => {
     setMessages(prev => [...prev, { id: uuid(), text, sender, timestamp: Date.now(), ...options }]);
   };
