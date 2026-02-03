@@ -24,6 +24,17 @@ router.post('/chat', async (req, res) => {
         // Filtrer pour ne garder que celles demandées
         enrichedPolicies = allPolicies.filter((p: any) => policyIds.includes(String(p.id)));
         console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
+        
+        // Debug: afficher les metadata de la première policy
+        if (enrichedPolicies.length > 0) {
+          console.log('🔍 Exemple policy rechargée:', {
+            id: enrichedPolicies[0].id,
+            name: enrichedPolicies[0].name,
+            metadata: enrichedPolicies[0].metadata,
+            coverage: enrichedPolicies[0].coverage,
+            coverageDetail: enrichedPolicies[0].coverageDetail
+          });
+        }
       } else {
         console.warn('⚠️ Impossible de recharger policies : userId non trouvé');
       }
