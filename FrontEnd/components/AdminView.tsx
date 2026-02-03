@@ -192,11 +192,15 @@ export const AdminView: React.FC = () => {
                 onChange={e => setNewEntry({...newEntry, insurer: e.target.value})}
               >
                 <option value="">Sélectionner un assureur</option>
-                {insurers.map(ins => (
-                  <option key={ins.code} value={ins.code}>
-                    {ins.label}
-                  </option>
-                ))}
+                {insurers && insurers.length > 0 ? (
+                  insurers.map(ins => (
+                    <option key={ins.code} value={ins.code}>
+                      {ins.label}
+                    </option>
+                  ))
+                ) : (
+                  <option disabled>Chargement...</option>
+                )}
               </select>
             </div>
             <div className="space-y-1">
@@ -215,11 +219,15 @@ export const AdminView: React.FC = () => {
                 onChange={e => setNewEntry({...newEntry, type: e.target.value as PolicyType})}
               >
                 <option value="">Sélectionner un type</option>
-                {insuranceTypes.map(type => (
-                  <option key={type.code} value={type.code}>
-                    {type.icon} {type.labelFr}
-                  </option>
-                ))}
+                {insuranceTypes && insuranceTypes.length > 0 ? (
+                  insuranceTypes.map(type => (
+                    <option key={type.code} value={type.code}>
+                      {type.icon} {type.labelFr}
+                    </option>
+                  ))
+                ) : (
+                  <option disabled>Chargement...</option>
+                )}
               </select>
             </div>
           </div>

@@ -37,7 +37,10 @@ export interface Insurer {
  */
 export async function getInsuranceTypes(): Promise<InsuranceType[]> {
   try {
-    const response = await fetch(`${API_BASE}/api/masterdata/insurance-types`, {
+    const url = `${API_BASE}/api/masterdata/insurance-types`;
+    console.log('🔍 Chargement des types depuis:', url);
+    
+    const response = await fetch(url, {
       credentials: 'include',
     });
     
@@ -45,15 +48,18 @@ export async function getInsuranceTypes(): Promise<InsuranceType[]> {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    return await response.json();
+    const data = await response.json();
+    console.log(`✅ ${data.length} types d'assurance chargés`);
+    return data;
   } catch (error) {
     console.error('❌ Erreur lors de la récupération des types d\'assurance:', error);
+    console.warn('⚠️ Utilisation des types par défaut (fallback)');
     // Fallback sur des types par défaut en cas d'erreur
     return [
-      { code: 'AUTO', labelFr: 'Automobile', labelEn: 'Auto', description: null, icon: 'Car', color: 'text-blue-600', displayOrder: 1, isActive: true, createdAt: '', updatedAt: '' },
-      { code: 'HABITATION', labelFr: 'Habitation', labelEn: 'Home', description: null, icon: 'Home', color: 'text-green-600', displayOrder: 2, isActive: true, createdAt: '', updatedAt: '' },
-      { code: 'SANTE', labelFr: 'Santé', labelEn: 'Health', description: null, icon: 'Heart', color: 'text-red-600', displayOrder: 3, isActive: true, createdAt: '', updatedAt: '' },
-      { code: 'AUTRE', labelFr: 'Autre', labelEn: 'Other', description: null, icon: 'FileText', color: 'text-gray-600', displayOrder: 99, isActive: true, createdAt: '', updatedAt: '' },
+      { code: 'AUTO', labelFr: 'Automobile', labelEn: 'Auto', description: null, icon: '🚗', color: 'text-blue-600', displayOrder: 1, isActive: true, createdAt: '', updatedAt: '' },
+      { code: 'HABITATION', labelFr: 'Habitation', labelEn: 'Home', description: null, icon: '🏠', color: 'text-green-600', displayOrder: 2, isActive: true, createdAt: '', updatedAt: '' },
+      { code: 'SANTE', labelFr: 'Santé', labelEn: 'Health', description: null, icon: '❤️', color: 'text-red-600', displayOrder: 3, isActive: true, createdAt: '', updatedAt: '' },
+      { code: 'AUTRE', labelFr: 'Autre', labelEn: 'Other', description: null, icon: '📄', color: 'text-gray-600', displayOrder: 99, isActive: true, createdAt: '', updatedAt: '' },
     ];
   }
 }
