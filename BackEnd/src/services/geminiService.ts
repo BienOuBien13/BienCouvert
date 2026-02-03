@@ -363,7 +363,20 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
           });
         } else if (insurers.length > 0) {
           // Fallback: recherche textuelle simple si l'embedding a échoué
-          console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle');
+          console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle full-text');
+          
+          // Extraire les mots-clés de la question pour recherche full-text
+          const keywords = message.toLowerCase()
+            .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'moi'].includes(w))
+            .slice(0, 5);
+          
+          console.log(`   Mots-clés extraits: ${keywords.join(', ')}`);
+          
+          // Construire la requête full-text
+          const tsquery = keywords.join(' | '); // OR entre les mots
+          
           const textResults = await storage.query(
             `SELECT 
               cg.insurer,
@@ -371,17 +384,19 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
               cg.content_text,
               i.label as insurer_label,
               it.label_fr as type,
-              0.5 as similarity
+              ts_rank(to_tsvector('french', cg.content_text), to_tsquery('french', $2)) as similarity
             FROM central_cg cg
             LEFT JOIN insurers i ON cg.insurer_code = i.code
             LEFT JOIN insurance_types it ON cg.type_code = it.code
             WHERE (cg.insurer = ANY($1) OR cg.insurer_code = ANY($1))
               AND cg.content_text IS NOT NULL
+              AND to_tsvector('french', cg.content_text) @@ to_tsquery('french', $2)
+            ORDER BY similarity DESC
             LIMIT 3`,
-            [insurers]
+            [insurers, tsquery]
           );
           cgChunks = textResults.rows;
-          console.log(`✅ Fallback textuel: ${cgChunks.length} CG trouvées`);
+          console.log(`✅ Fallback full-text: ${cgChunks.length} CG trouvées (pertinence: ${cgChunks[0]?.similarity?.toFixed(4) || 'N/A'})`);
         }
       }
     } catch (cgErr) {
@@ -402,7 +417,41 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       enrichedContext += '📚 Conditions générales:\n\n';
       cgChunks.forEach((cg: any, idx: number) => {
         const insurerName = cg.insurer_label || cg.insurer || 'Assureur inconnu';
-        enrichedContext += `[${insurerName} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
+        
+        // Extraction intelligente : chercher les mots-clés de la question dans le document
+        const keywords = message.toLowerCase()
+          .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
+          .split(/\s+/)
+          .filter(w => w.length > 4 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment'].includes(w));
+        
+        let extractedText = '';
+        const fullText = cg.content_text || '';
+        
+        if (keywords.length > 0 && fullText.length > 10000) {
+          // Chercher les positions des mots-clés dans le texte
+          const positions: number[] = [];
+          keywords.forEach(kw => {
+            const pos = fullText.toLowerCase().indexOf(kw);
+            if (pos > -1) positions.push(pos);
+          });
+          
+          if (positions.length > 0) {
+            // Extraire autour du premier mot-clé trouvé (±8000 chars = 10k total)
+            const centerPos = Math.min(...positions);
+            const start = Math.max(0, centerPos - 2000);
+            const end = Math.min(fullText.length, centerPos + 8000);
+            extractedText = fullText.substring(start, end);
+            console.log(`   📌 Extraction ciblée autour de "${keywords[0]}" (pos ${centerPos}, extrait ${end - start} chars)`);
+          } else {
+            // Aucun mot-clé trouvé, prendre une partie plus large
+            extractedText = fullText.substring(0, 15000);
+          }
+        } else {
+          // Document court ou pas de mots-clés, prendre une partie plus large (15k chars au lieu de 5k)
+          extractedText = fullText.substring(0, 15000);
+        }
+        
+        enrichedContext += `[${insurerName} - ${cg.product_name}]\n${extractedText}...\n\n`;
       });
     }
     
