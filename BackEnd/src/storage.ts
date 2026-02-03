@@ -157,12 +157,18 @@ export const storage = {
   writePolicy: async (data: any) => {
     const { 
       id, userId, policyNumber, insurer, type, premium, coverage,
-      startDate, endDate, status, documentUrl, documentData, metadata, centralCgId
+      startDate, endDate, status, documentUrl, documentData, metadata, centralCgId,
+      insurerCode, typeCode
     } = data;
     
-    // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
-    const typeCode = type;
-    const insurerCode = insurer;
+    // DEBUG: Log ce qui est reçu
+    console.log('🔍 writePolicy reçoit:', { insurer, type, insurerCode, typeCode });
+    
+    // Utiliser les codes fournis, sinon fallback sur les valeurs type/insurer
+    const finalTypeCode = typeCode || type;
+    const finalInsurerCode = insurerCode || insurer;
+    
+    console.log('🔍 Codes finaux:', { finalInsurerCode, finalTypeCode });
     
     // Sérialiser metadata en JSON si c'est un objet
     const metadataJson = metadata ? JSON.stringify(metadata) : null;
@@ -177,7 +183,7 @@ export const storage = {
              status = $11, document_url = $12, document_data = $13, 
              metadata = $14, central_cg_id = $15, updated_at = CURRENT_TIMESTAMP
          WHERE id = $16`,
-        [userId, policyNumber, insurer, type, insurerCode, typeCode, premium, coverage, startDate, 
+        [userId, policyNumber, insurer, type, finalInsurerCode, finalTypeCode, premium, coverage, startDate, 
          endDate, status, documentUrl, documentData, metadataJson, centralCgId || null, id]
       );
     } else {
@@ -188,7 +194,7 @@ export const storage = {
           start_date, end_date, status, document_url, document_data, metadata, central_cg_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING id`,
-        [userId, policyNumber, insurer, type, insurerCode, typeCode, premium, coverage, startDate, 
+        [userId, policyNumber, insurer, type, finalInsurerCode, finalTypeCode, premium, coverage, startDate, 
          endDate, status || 'active', documentUrl, documentData, metadataJson, centralCgId || null]
       );
       return result.rows[0].id;

@@ -290,6 +290,15 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
     const typeData = masterTypes.find(t => t.labelFr === selectedType);
     const insurerData = masterInsurers.find(i => i.label === selectedInsurer);
     
+    console.log('🔍 SmartChat - Création policy:', {
+      selectedType,
+      selectedInsurer,
+      typeData,
+      insurerData,
+      masterTypesCount: masterTypes.length,
+      masterInsurersCount: masterInsurers.length
+    });
+    
     const newPolicy: Omit<Policy, 'userId'> = {
       id: uuid(),
       name: contractNameInput,

@@ -57,7 +57,9 @@ router.post('/', upload.single('file'), async (req: any, res) => {
       userId: userId,                                   // ID de l'utilisateur propriétaire (INTEGER requis)
       policyNumber: body.policyNumber || `POL-${Date.now()}`,  // Génère un numéro si absent
       insurer: body.insurer || 'Non spécifié',             // Assureur (requis)
+      insurerCode: body.insurerCode || body.insurer,      // Code assureur pour FK
       type: body.type || 'Autre',                       // Type d'assurance (requis)
+      typeCode: body.typeCode || body.type,              // Code type pour FK
       premium: body.annualPremium ? parseFloat(body.annualPremium) : null,  // Prime annuelle en €
       coverage: body.coverage ? parseFloat(body.coverage) : null,  // Montant couverture
       startDate: body.startDate || new Date().toISOString().split('T')[0],  // Date de début
