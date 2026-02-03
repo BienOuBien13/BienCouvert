@@ -318,7 +318,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
   }
   // DEBUG: Afficher les policies reçues
   console.log(`\n🔍 sendMessageToAssistant reçoit ${policies.length} policies:`);
-  policies.forEach((p, idx) => {
+  policies.forEach((p: any, idx: number) => {
     console.log(`   ${idx + 1}. ${p.name} - summary: "${p.summary}" - metadata:`, p.metadata ? JSON.stringify(p.metadata).substring(0, 100) : 'null');
   });
   try {
