@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.storage = void 0;
 const db_1 = require("./db");
-const masterData_1 = require("./types/masterData");
 // -----------------------------------------------------------------------------
 // Module de stockage PostgreSQL pour AssurClair
 // Ce module expose des fonctions pour interagir avec la base de données PostgreSQL
@@ -142,9 +141,9 @@ exports.storage = {
      */
     writePolicy: async (data) => {
         const { id, userId, policyNumber, insurer, type, premium, coverage, startDate, endDate, status, documentUrl, documentData, metadata, centralCgId } = data;
-        // Normalisation vers les codes
-        const typeCode = (0, masterData_1.normalizeInsuranceType)(type);
-        const insurerCode = (0, masterData_1.normalizeInsurer)(insurer);
+        // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
+        const typeCode = type;
+        const insurerCode = insurer;
         // Sérialiser metadata en JSON si c'est un objet
         const metadataJson = metadata ? JSON.stringify(metadata) : null;
         if (id) {
@@ -196,7 +195,7 @@ exports.storage = {
     `);
         return result.rows.map(row => ({
             id: row.id,
-            insurer: row.insurer_label || row.insurer_name || 'Non spécifié',
+            insurer: row.insurer_label || row.insurer || 'Non spécifié',
             insurerCode: row.insurer_code,
             insurerLogo: row.insurer_logo,
             productName: row.product_name,
@@ -220,15 +219,15 @@ exports.storage = {
      */
     writeCentralCgEntry: async (data) => {
         const { id, insurer, productName, version, documentUrl, documentHash, contentText, embedding, metadata } = data;
-        // Normalisation vers les codes
-        const insurerCode = (0, masterData_1.normalizeInsurer)(insurer);
+        // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
+        const insurerCode = insurer;
         const insurerName = typeof metadata === 'object' ? metadata.insurer_name : insurer;
         // Extraire le type depuis metadata si disponible
-        let type = 'Autre';
+        let type = 'AUTRE';
         let typeCode = 'AUTRE';
         if (typeof metadata === 'object' && metadata.type) {
             type = metadata.type;
-            typeCode = (0, masterData_1.normalizeInsuranceType)(metadata.type);
+            typeCode = metadata.type; // Le code est déjà normalisé
         }
         // S'assurer que metadata est un objet JSON valide
         const metadataJson = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
@@ -236,7 +235,7 @@ exports.storage = {
         if (id) {
             // Mise à jour
             await (0, db_1.query)(`UPDATE central_cg 
-         SET insurer_name = $1, insurer_code = $2, product_name = $3, version = $4, document_url = $5,
+         SET insurer = $1, insurer_code = $2, product_name = $3, version = $4, document_url = $5,
              document_hash = $6, content_text = $7, embedding = $8, 
              metadata = $9, type_code = $10, updated_at = CURRENT_TIMESTAMP
          WHERE id = $11`, [insurerName || insurer, insurerCode, productName, version, documentUrl, documentHash,
@@ -245,7 +244,7 @@ exports.storage = {
         else {
             // Insertion
             const result = await (0, db_1.query)(`INSERT INTO central_cg 
-         (insurer_name, insurer_code, product_name, version, document_url, document_hash, 
+         (insurer, insurer_code, product_name, version, document_url, document_hash, 
           content_text, embedding, metadata, type_code)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`, [insurerName || insurer, insurerCode, productName, version, documentUrl, documentHash,
@@ -342,10 +341,10 @@ exports.storage = {
     searchCentralCg: async (questionEmbedding, insurers, limit = 3) => {
         let queryText = `
       SELECT 
-        cg.insurer_name,
+        cg.insurer,
         cg.product_name, 
         cg.content_text,
-        COALESCE(i.label, cg.insurer_name) as insurer,
+        COALESCE(i.label, cg.insurer) as insurer_label,
         COALESCE(it.label_fr, cg.metadata->>'type') as type,
         1 - (cg.embedding <=> $1::vector) as similarity
       FROM central_cg cg
@@ -356,7 +355,7 @@ exports.storage = {
         const params = [JSON.stringify(questionEmbedding)];
         if (insurers && insurers.length > 0) {
             params.push(insurers);
-            queryText += ` AND (cg.insurer_name = ANY($${params.length}) OR cg.insurer_code = ANY($${params.length}))`;
+            queryText += ` AND (cg.insurer = ANY($${params.length}) OR cg.insurer_code = ANY($${params.length}))`;
         }
         queryText += ` ORDER BY cg.embedding <=> $1::vector LIMIT $${params.length + 1}`;
         params.push(limit);

@@ -33,7 +33,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-12 w-auto" />
-            <span className="text-2xl font-bold tracking-tight text-slate-900">BienCouvert</span>
+            {/* <span className="text-2xl font-bold tracking-tight text-slate-900">BienCouver</span> */}
           </div>
           <button 
             onClick={onStart}
@@ -44,18 +44,18 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </header>
 
-      <section className="pt-40 pb-24 px-6">
+      <section className="pt-20 pb-24 px-6">
         <div className="max-w-7xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-fadeIn">
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-3 h-3" />
             TOTALEMENT GRATUIT
           </div>
-          <h1 className="text-5xl lg:text-8xl font-black tracking-tighter text-slate-900 mb-8 max-w-5xl mx-auto leading-[0.95]">
-            Votre assitant pour comprendre et optimiser <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600"> TOUTES vos garanties d'assurances.</span>
+          <h1 className="text-4xl lg:text-6xl font-black tracking-tighter text-slate-900 mb-8 max-w-5xl mx-auto leading-[0.95]">
+            Le premier assitant qui vous aide à  <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600"> comprendre TOUTES vos garanties d'assurances.</span>
           </h1>
           <p className="text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed font-bold">
-            Centralisez, analysez et optimisez votre protection en un clic. <br className="hidden md:block" /> 
-            Ne payez plus <span className="text-slate-900 font-black"> les couvertures en doublon ou inutiles</span> et identifiez enfin les garanties qui vous manquent.
+            Votre assitant personnalisé qui <span className="text-slate-900 font-black">répond à vos questions </span> et qui vous explique comment <span className="text-slate-900 font-black">  optimiser votre protection en un clic. </span> <br className="hidden md:block" /> 
+            {/* Ne payez plus <span className="text-slate-900 font-black"> les couvertures en doublon ou inutiles</span> et identifiez enfin les garanties qui vous manquent. */}
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
@@ -96,35 +96,35 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      <section id="concept" className="py-32 px-6 scroll-mt-24">
+      <section id="concept" className="py-2 px-6 scroll-mt-4">
         <div className="max-w-7xl mx-auto">
        
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1">
             <FeatureCard 
               icon={<Search className="w-8 h-8" />}
               title="Personnalisation complète"
-              description="Vous composez en quelques cliques votre portefeuille d'assurances avec vos couvertures actuelles."
+              description="Composez en quelques clics votre portefeuille d'assurances sur la base de plus de 500 conditions générales déjà disponibles et avec vos conditions particulières."
             />
             <FeatureCard 
               icon={<MessageSquare className="w-8 h-8" />}
               title="Assitant Assurance"
-              description="Posez des questions en direct à votre assistant : 'Suis-je couvert pour le bris de glace ?'."
+              description="Posez des questions en direct à votre assistant : 'Suis-je couvert pour la perte des clés de ma voiture ?'."
             />
             <FeatureCard 
               icon={<Zap className="w-8 h-8" />}
               title="Optimisation"
-              description="Analyse croisée automatique pour détecter si vous payez plusieurs fois pour la même garantie et identification des couvertures manquantes"
+              description="Détectez facilement les garanties en double et les couvertures manquantes grâce à une analyse de votre profil."
             />
             <FeatureCard 
               icon={<Users className="w-8 h-8" />}
               title="Relais Expert"
-              description="Un doute ? Sollicitez un expert indépendant pour finaliser vos économies."
+              description="Sollicitez un expert indépendant pour finaliser vos économies."
             />
           </div>
         </div>
       </section>
 
-      <footer className="py-24 px-6 text-center border-t border-slate-100 bg-slate-50/30">
+      <footer className="py-0 px-6 text-center border-t border-slate-100 bg-slate-50/30">
         <h2 className="text-4xl font-black text-slate-900 mb-10 tracking-tighter">Prêt à y voir plus clair ?</h2>
         <button 
           onClick={onStart}
@@ -132,7 +132,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         >
           C'est parti !
         </button>
-        <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2025 BienCouvert - Protection Intelligente</p>
+        <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2026 BienCouvert - Protection Intelligente</p>
       </footer>
     </div>
   );

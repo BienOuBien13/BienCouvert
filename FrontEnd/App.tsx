@@ -15,6 +15,8 @@ import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
 import { PolicyStats } from './components/PolicyStats';
 import Footer from './components/Footer';
+import TermsOfService from './components/TermsOfService';
+import PrivacyPolicy from './components/PrivacyPolicy';
 import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
@@ -33,6 +35,8 @@ function App() {
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
@@ -50,7 +54,7 @@ function App() {
 
   // Scroll to top when view changes
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo(0, 0);
   }, [activeView]);
 
   const handleLogin = async (loggedInUser: User) => {
@@ -172,167 +176,131 @@ function App() {
       case 'home':
         return (
           <div className="space-y-10 animate-fadeIn pb-12">
-            {/* Catchy Hero Section avec Texte Impactant */}
-            <div className="space-y-6 px-2 py-4 text-center md:text-left">
-               <div className="space-y-2">
-                  <p className="text-primary-600 font-black text-[10px] uppercase tracking-[0.4em]">Propulsez votre protection</p>
-                  <h2 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tighter leading-[0.9] lg:max-w-xl">
-                    Reprenez le pouvoir sur <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600">vos assurances.</span>
+            {/* Hero Section */}
+            <div className="space-y-6 px-2 py-4 text-center">
+               <div className="space-y-3">
+                  <p className="text-primary-600 font-black text-xs uppercase tracking-widest">Simple • Rapide • Intelligent</p>
+                  <h2 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">
+                    Votre conseiller assurance <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600">personnel</span>
                   </h2>
                </div>
-               <p className="text-slate-500 font-bold text-sm max-w-sm mx-auto md:mx-0 leading-relaxed">
-                  Fini les contrats oubliés et les garanties en doublon. BienCouvert analyse tout pour vous en 2 minutes.
+               <p className="text-slate-600 text-base max-w-md mx-auto leading-relaxed">
+                  Comprenez vos garanties, optimisez vos contrats et économisez en quelques clics
                </p>
-               <div className="flex flex-wrap gap-3 justify-center md:justify-start">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
-                     <CheckCircle2 className="w-3.5 h-3.5" /> Économies détectées
-                  </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-primary-50 text-primary-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-primary-100">
-                     <Sparkles className="w-3.5 h-3.5" /> IA Gemini 3.0 Pro
-                  </div>
-               </div>
             </div>
 
-            {/* Barre de Progression de l'Onboarding */}
-            <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-100">
-               <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Niveau de Sérénité</h4>
-                  <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">{policies.length > 0 ? (policies.length >= 3 ? '100%' : '50%') : '10%'}</span>
-               </div>
-               <div className="flex gap-2 h-2.5">
-                  <div className={`flex-1 rounded-full transition-all duration-1000 ${policies.length > 0 ? 'bg-primary-500 shadow-[0_0_15px_rgba(2,132,199,0.3)]' : 'bg-primary-500 animate-pulse'}`} />
-                  <div className={`flex-1 rounded-full transition-all duration-1000 ${policies.length >= 3 ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-slate-100'}`} />
-                  <div className={`flex-1 rounded-full transition-all duration-1000 ${policies.length >= 5 ? 'bg-amber-500' : 'bg-slate-100'}`} />
-               </div>
-            </div>
-
-            {/* Mission Path (Fun UI) */}
-            <div className="space-y-4">
-               <div className="px-2 flex items-center justify-between">
-                 <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Votre Mission</h3>
-               </div>
-
-               <div className="space-y-4">
-                  {/* Step 1 */}
-                  <div 
-                    onClick={() => setActiveView('policies')}
-                    className={`relative p-6 rounded-[2.5rem] border transition-all cursor-pointer active:scale-95 group overflow-hidden ${
-                      policies.length === 0 
-                      ? 'bg-slate-900 text-white shadow-2xl border-slate-900' 
-                      : 'bg-white text-slate-900 border-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-5 relative z-10">
-                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-transform group-hover:rotate-6 ${
-                         policies.length === 0 ? 'bg-primary-600 text-white shadow-lg' : 'bg-primary-50 text-primary-600'
-                       }`}>
-                          <Search className="w-7 h-7" />
-                       </div>
-                       <div className="flex-grow">
-                          <h5 className="font-black text-lg tracking-tight">Le Scan de Départ</h5>
-                          <p className={`text-[11px] font-medium ${policies.length === 0 ? 'text-slate-400' : 'text-slate-500'}`}>
-                            {policies.length === 0 ? "Ajoutez vos 3 premiers contrats." : `${policies.length} contrat(s) sécurisé(s) !`}
-                          </p>
-                       </div>
-                       {policies.length > 0 ? (
-                         <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg"><CheckCircle2 className="w-5 h-5" /></div>
-                       ) : (
-                         <div className="w-8 h-8 rounded-full bg-primary-600/50 text-white flex items-center justify-center animate-pulse"><ArrowRight className="w-5 h-5" /></div>
-                       )}
-                    </div>
-                    {policies.length === 0 && (
-                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary-400 to-transparent -translate-x-full group-hover:animate-scan" />
-                    )}
-                  </div>
-
-                  {/* Step 2 */}
-                  <div 
-                    onClick={() => policies.length > 0 && setActiveView('analysis')}
-                    className={`p-6 rounded-[2.5rem] border transition-all active:scale-95 group overflow-hidden ${
-                      policies.length > 0 && policies.length < 3
-                      ? 'bg-emerald-600 text-white shadow-2xl border-emerald-600 cursor-pointer' 
-                      : (policies.length >= 3 ? 'bg-white text-slate-900 border-slate-100 cursor-pointer' : 'bg-slate-50 text-slate-300 border-transparent cursor-not-allowed opacity-60')
-                    }`}
-                  >
+            {/* Étape 1 : Le Scan (Toujours visible et mis en avant si pas de contrats) */}
+            {policies.length === 0 ? (
+              <div className="space-y-4">
+                <div className="text-center space-y-2">
+                  <h3 className="text-2xl font-bold text-slate-900">Étape 1 : Le Scan de Départ</h3>
+                  <p className="text-slate-600 text-sm">Ajoutez vos premiers contrats pour débloquer toutes les fonctionnalités</p>
+                </div>
+                
+                <div 
+                  onClick={() => setActiveView('policies')}
+                  className="relative p-8 rounded-3xl bg-gradient-to-br from-primary-600 to-indigo-600 text-white shadow-2xl cursor-pointer active:scale-95 transition-transform group overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjA1IiBzdHJva2Utd2lkdGg9IjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-50" />
+                  
+                  <div className="relative z-10 flex items-center justify-between">
                     <div className="flex items-center gap-5">
-                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                         policies.length > 0 && policies.length < 3 ? 'bg-white text-emerald-600 shadow-lg' : 'bg-emerald-50 text-emerald-600'
-                       }`}>
-                          <Zap className="w-7 h-7" />
-                       </div>
-                       <div className="flex-grow">
-                          <h5 className="font-black text-lg tracking-tight">L'Audit Doublons</h5>
-                          <p className={`text-[11px] font-medium ${policies.length > 0 && policies.length < 3 ? 'text-emerald-100' : 'text-slate-500'}`}>
-                            Traquez les garanties inutiles.
-                          </p>
-                       </div>
-                       {policies.length >= 3 ? (
-                          <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg"><CheckCircle2 className="w-5 h-5" /></div>
-                       ) : <ArrowRight className="w-5 h-5 opacity-40" />}
+                      <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center">
+                        <Search className="w-8 h-8" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-xl mb-1">Commencez le scan</h4>
+                        <p className="text-white/80 text-sm">Ajoutez 2-3 contrats pour démarrer</p>
+                      </div>
                     </div>
+                    <ArrowRight className="w-8 h-8 group-hover:translate-x-1 transition-transform" />
                   </div>
-
-                  {/* Step 3 */}
-                  <div 
-                    onClick={() => policies.length >= 3 && setActiveView('experts')}
-                    className={`p-6 rounded-[2.5rem] border transition-all active:scale-95 group overflow-hidden ${
-                      policies.length >= 3
-                      ? 'bg-amber-500 text-white shadow-2xl border-amber-500 cursor-pointer' 
-                      : 'bg-slate-50 text-slate-300 border-transparent cursor-not-allowed opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-5">
-                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                         policies.length >= 3 ? 'bg-white text-amber-600 shadow-lg' : 'bg-amber-50 text-amber-600'
-                       }`}>
-                          <Flag className="w-7 h-7" />
-                       </div>
-                       <div className="flex-grow">
-                          <h5 className="font-black text-lg tracking-tight">Le Pacte Économie</h5>
-                          <p className={`text-[11px] font-medium ${policies.length >= 3 ? 'text-amber-100' : 'text-slate-500'}`}>
-                            Encaissez vos gains avec un expert.
-                          </p>
-                       </div>
-                       <ArrowRight className="w-5 h-5 opacity-40" />
-                    </div>
-                  </div>
-               </div>
-            </div>
-
-            {/* Dashboard / Stats (Seulement si données) */}
-            {policies.length > 0 && (
-              <div className="space-y-6 animate-slideUp">
-                <PolicyStats policies={policies} />
+                </div>
               </div>
+            ) : (
+              <>
+                {/* Barre de progression */}
+                <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                      <h4 className="text-sm font-bold text-slate-900">Scan complété - {policies.length} contrat(s)</h4>
+                    </div>
+                    <button 
+                      onClick={() => setActiveView('policies')}
+                      className="text-xs font-bold text-primary-600 hover:text-primary-700"
+                    >
+                      + Ajouter
+                    </button>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-emerald-500 to-primary-500 rounded-full transition-all duration-1000" style={{width: `${Math.min(policies.length * 33, 100)}%`}} />
+                  </div>
+                </div>
+
+                {/* Les 3 bénéfices principaux */}
+                <div className="space-y-4">
+                  <h3 className="text-xl font-bold text-slate-900 text-center mb-6">Profitez de vos avantages</h3>
+                  
+                  {/* Bénéfice 1 : Assistant */}
+                  <div 
+                    onClick={() => setActiveView('chat')}
+                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                  >
+                    <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-indigo-500 text-white flex items-center justify-center shadow-lg">
+                        <MessageSquare className="w-7 h-7" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-lg text-slate-900 mb-1">Votre assistant dans la poche</h5>
+                        <p className="text-sm text-slate-600">Posez vos questions, obtenez des réponses instantanées</p>
+                      </div>
+                      <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+
+                  {/* Bénéfice 2 : Optimisation */}
+                  <div 
+                    onClick={() => setActiveView('analysis')}
+                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                  >
+                    <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-lg">
+                        <Zap className="w-7 h-7" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-lg text-slate-900 mb-1">Optimisez votre couverture</h5>
+                        <p className="text-sm text-slate-600">Détectez doublons, lacunes et économies potentielles</p>
+                      </div>
+                      <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+
+                  {/* Bénéfice 3 : Courtier */}
+                  <div 
+                    onClick={() => setActiveView('experts')}
+                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                  >
+                    <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-lg">
+                        <Target className="w-7 h-7" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-lg text-slate-900 mb-1">Contactez un courtier spécialisé</h5>
+                        <p className="text-sm text-slate-600">Faites-vous accompagner par un expert pour concrétiser</p>
+                      </div>
+                      <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
-
-            {/* Chat Float Style */}
-            <div className="p-6 bg-primary-600 rounded-[2.5rem] text-white flex items-center justify-between group cursor-pointer shadow-3xl shadow-primary-900/30 active:scale-95 transition-all" onClick={() => setActiveView('chat')}>
-              <div className="flex items-center gap-5">
-                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-primary-600 shadow-xl group-hover:scale-110 transition-transform"><MessageSquare className="w-6 h-6" /></div>
-                 <div>
-                    <h5 className="font-black text-lg tracking-tight">Assistant IA</h5>
-                    <p className="text-[10px] text-primary-100 font-bold uppercase tracking-widest">Une question sur vos contrats ?</p>
-                 </div>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></div>
-            </div>
-            
-            <div className="text-center pb-10">
-               <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em]">Propulsé par Gemini 3.0 Pro</p>
-            </div>
           </div>
         );
-      case 'add':
-        return (
-          <div className="space-y-6 animate-fadeIn max-w-5xl mx-auto">
-            <SmartChatAssistant user={user} onAddPolicy={handleAddPolicy} onCancel={() => setActiveView('home')} />
-          </div>
-        );
+      
       case 'policies':
         return (
-          <div className="space-y-6 animate-fadeIn">
-            {/* Header avec navigation */}
+          <div className="space-y-6 animate-fadeIn">{/* Header avec navigation */}
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-3xl font-black text-slate-900 mb-2">Mon Portefeuille</h2>
@@ -420,7 +388,10 @@ function App() {
         <div className="max-w-xl mx-auto">{renderContent()}</div>
       </main>
 
-      <Footer />
+      <Footer 
+        onNavigateToTerms={() => setShowTerms(true)}
+        onNavigateToPrivacy={() => setShowPrivacy(true)}
+      />
 
       <BottomNav activeView={activeView} setActiveView={setActiveView} />
 
@@ -431,6 +402,24 @@ function App() {
         onConfirmSave={() => { setIsClearModalOpen(false); setActiveView('home'); }} 
         onTransferToExpert={() => { setIsClearModalOpen(false); setActiveView('experts'); }}
       />
+
+      {/* Modal Conditions d'utilisation */}
+      {showTerms && (
+        <div className="fixed inset-0 bg-black/50 z-[70] overflow-y-auto">
+          <div className="min-h-screen">
+            <TermsOfService onBack={() => setShowTerms(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* Modal Politique de confidentialité */}
+      {showPrivacy && (
+        <div className="fixed inset-0 bg-black/50 z-[70] overflow-y-auto">
+          <div className="min-h-screen">
+            <PrivacyPolicy onBack={() => setShowPrivacy(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

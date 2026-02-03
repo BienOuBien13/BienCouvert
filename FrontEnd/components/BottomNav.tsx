@@ -14,7 +14,7 @@ export const BottomNav: React.FC<Props> = ({ activeView, setActiveView }) => {
     { id: 'policies' as AppView, label: 'Mes Contrats', icon: Files },
     { id: 'chat' as AppView, label: 'Assistant', icon: MessageSquare, isCentral: true },
     { id: 'analysis' as AppView, label: 'Analyse', icon: TrendingUp },
-    { id: 'profile' as AppView, label: 'Profil', icon: UserIcon },
+    { id: 'experts' as AppView, label: 'Experts', icon: UserIcon },
   ];
 
 

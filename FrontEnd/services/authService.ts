@@ -6,7 +6,7 @@
 
 import { User, UserProfileData } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL ?? '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 const TOKEN_KEY = 'assurclair_token';
 const USER_KEY = 'assurclair_current_user';
 

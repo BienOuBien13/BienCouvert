@@ -9,34 +9,22 @@ export interface PasswordValidationResult {
 }
 
 /**
- * Politique de mot de passe forte selon ANSSI :
- * - Minimum 12 caractères
+ * Politique de mot de passe simplifiée :
+ * - Minimum 6 caractères
  * - Au moins 1 majuscule
- * - Au moins 1 minuscule
- * - Au moins 1 chiffre
  * - Au moins 1 caractère spécial
  */
 export function validatePassword(password: string): PasswordValidationResult {
   const errors: string[] = [];
 
-  // Longueur minimale de 12 caractères (ANSSI)
-  if (password.length < 12) {
-    errors.push('Le mot de passe doit contenir au moins 12 caractères');
+  // Longueur minimale de 6 caractères
+  if (password.length < 6) {
+    errors.push('Le mot de passe doit contenir au moins 6 caractères');
   }
 
   // Au moins une majuscule
   if (!/[A-Z]/.test(password)) {
     errors.push('Le mot de passe doit contenir au moins une majuscule');
-  }
-
-  // Au moins une minuscule
-  if (!/[a-z]/.test(password)) {
-    errors.push('Le mot de passe doit contenir au moins une minuscule');
-  }
-
-  // Au moins un chiffre
-  if (!/[0-9]/.test(password)) {
-    errors.push('Le mot de passe doit contenir au moins un chiffre');
   }
 
   // Au moins un caractère spécial
@@ -70,14 +58,11 @@ export function validatePassword(password: string): PasswordValidationResult {
 }
 
 /**
- * Retourne un message d'aide pour la création d'un mot de passe fort
+ * Retourne un message d'aide pour la création d'un mot de passe
  */
 export function getPasswordRequirements(): string {
   return `Votre mot de passe doit respecter les critères suivants :
-• Au moins 12 caractères
+• Au moins 6 caractères
 • Au moins une lettre majuscule (A-Z)
-• Au moins une lettre minuscule (a-z)
-• Au moins un chiffre (0-9)
-• Au moins un caractère spécial (!@#$%^&*...)
-• Ne pas contenir de patterns simples (123, abc, password, etc.)`;
+• Au moins un caractère spécial (!@#$%^&*...)`;
 }

@@ -334,10 +334,39 @@ const sendMessageToAssistant = async (message, policies, history) => {
         // Étape 3: Rechercher dans les CG centralisées
         let cgChunks = [];
         try {
-            const insurers = policies.map(p => p.provider);
+            // Compatibilité: accepter 'provider' (backend) ou 'insurer' (frontend)
+            const insurers = policies.map(p => p.provider || p.insurer).filter(Boolean);
             if (insurers.length > 0) {
+                console.log(`🔍 Recherche CG pour assureurs: ${insurers.join(', ')}`);
+                // Tenter la recherche vectorielle
                 cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
+                // Filtrer les résultats invalides (NaN)
+                cgChunks = cgChunks.filter(cg => !isNaN(cg.similarity));
                 console.log(`✅ RAG CG: ${cgChunks.length} documents trouvés`);
+                if (cgChunks.length > 0) {
+                    cgChunks.forEach((cg, idx) => {
+                        console.log(`   ${idx + 1}. ${cg.insurer_label || cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity.toFixed(3)})`);
+                    });
+                }
+                else if (insurers.length > 0) {
+                    // Fallback: recherche textuelle simple si l'embedding a échoué
+                    console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle');
+                    const textResults = await storage.query(`SELECT 
+              cg.insurer,
+              cg.product_name, 
+              cg.content_text,
+              i.label as insurer_label,
+              it.label_fr as type,
+              0.5 as similarity
+            FROM central_cg cg
+            LEFT JOIN insurers i ON cg.insurer_code = i.code
+            LEFT JOIN insurance_types it ON cg.type_code = it.code
+            WHERE (cg.insurer = ANY($1) OR cg.insurer_code = ANY($1))
+              AND cg.content_text IS NOT NULL
+            LIMIT 3`, [insurers]);
+                    cgChunks = textResults.rows;
+                    console.log(`✅ Fallback textuel: ${cgChunks.length} CG trouvées`);
+                }
             }
         }
         catch (cgErr) {
@@ -354,13 +383,29 @@ const sendMessageToAssistant = async (message, policies, history) => {
         if (cgChunks.length > 0) {
             enrichedContext += '📚 Conditions générales:\n\n';
             cgChunks.forEach((cg, idx) => {
-                enrichedContext += `[${cg.insurer} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
+                const insurerName = cg.insurer_label || cg.insurer || 'Assureur inconnu';
+                enrichedContext += `[${insurerName} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
             });
         }
         // Si aucun contexte RAG, fallback sur metadata
         if (!enrichedContext) {
             console.log('⚠️ Aucun contexte RAG - utilisation metadata');
-            enrichedContext = 'Vos contrats:\n' + policies.map(p => `- ${p.name} (${p.type}) chez ${p.provider}: ${p.summary || 'Pas de résumé'}`).join('\n');
+            enrichedContext = 'Vos contrats:\n' + policies.map(p => {
+                const insurer = p.provider || p.insurer || 'Assureur inconnu';
+                const coverage = p.coverage || p.metadata?.formula;
+                const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
+                return `- ${p.name} (${p.type}) chez ${insurer}${coverageInfo}: ${p.summary || 'Pas de résumé'}`;
+            }).join('\n');
+        }
+        else {
+            // Ajouter les infos des contrats utilisateur en début de contexte
+            const policiesInfo = policies.map(p => {
+                const insurer = p.provider || p.insurer || 'Assureur inconnu';
+                const coverage = p.coverage || p.metadata?.formula;
+                const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
+                return `${p.name}: ${insurer} / ${p.type}${coverageInfo}`;
+            }).join('\n');
+            enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
         }
         const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.
     

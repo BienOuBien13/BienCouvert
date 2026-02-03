@@ -1,4 +1,4 @@
-import { Shield, Lock, Database, Clock, FileText, Mail, Scale, ArrowLeft } from 'lucide-react';
+import { Shield, Lock, Database, Clock, FileText, Mail, Scale, ArrowLeft, X } from 'lucide-react';
 
 interface PrivacyPolicyProps {
   onBack: () => void;
@@ -8,14 +8,21 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-4">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-[80] shadow-sm">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <button 
             onClick={onBack}
             className="flex items-center gap-2 text-slate-600 hover:text-primary-600 transition-colors"
           >
             <ArrowLeft size={20} />
             <span className="font-medium">Retour</span>
+          </button>
+          <button 
+            onClick={onBack}
+            className="p-2 text-slate-600 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
+            aria-label="Fermer"
+          >
+            <X size={24} />
           </button>
         </div>
       </header>
@@ -39,7 +46,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
           {/* Introduction */}
           <section className="mb-10">
             <p className="text-slate-700 leading-relaxed mb-4">
-              Chez <strong>BienCouvert</strong> (AssurClair), nous accordons une importance primordiale à la protection de vos données personnelles. 
+              Chez <strong>BienCouvert</strong>, nous accordons une importance primordiale à la protection de vos données personnelles. 
               Cette politique de confidentialité décrit comment nous collectons, utilisons, stockons et protégeons vos informations 
               conformément au Règlement Général sur la Protection des Données (RGPD).
             </p>
@@ -65,7 +72,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             </div>
 
             <div className="bg-slate-50 rounded-xl p-6 mb-4">
-              <h3 className="font-bold text-slate-900 mb-3">🏠 Données de profil</h3>
+              <h3 className="font-bold text-slate-900 mb-3">🏠 Données de profil (optionnel)</h3>
               <ul className="space-y-2 text-slate-700">
                 <li>• Composition du foyer (adultes, enfants, âges)</li>
                 <li>• Informations sur l'habitat (type, surface, code postal, statut propriétaire/locataire)</li>
@@ -78,9 +85,8 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             <div className="bg-slate-50 rounded-xl p-6">
               <h3 className="font-bold text-slate-900 mb-3">📄 Polices d'assurance</h3>
               <ul className="space-y-2 text-slate-700">
-                <li>• Numéros de contrats</li>
                 <li>• Assureurs et types d'assurance</li>
-                <li>• Primes annuelles et montants de couverture</li>
+                {/* <li>• Primes annuelles et montants de couverture</li> */}
                 <li>• Documents de police (stockés en base64)</li>
                 <li>• Formules, options et garanties</li>
                 <li>• Dates de début/fin de contrat</li>
@@ -145,7 +151,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-4">
               <h3 className="font-bold text-slate-900 mb-3">🗄️ Infrastructure</h3>
               <ul className="space-y-2 text-slate-700">
-                <li>• <strong>Base de données</strong> : PostgreSQL 16 hébergée sur Microsoft Azure (serveur: 52.143.159.51)</li>
+                <li>• <strong>Base de données</strong> : PostgreSQL 16 hébergée sur Microsoft Azure</li>
                 <li>• <strong>Localisation</strong> : Datacenter Azure Europe (conformité RGPD)</li>
                 <li>• <strong>Extension</strong> : pgvector pour stockage des embeddings (768 dimensions)</li>
                 <li>• <strong>Documents</strong> : Stockés en base64 dans la colonne `document_data` (table policies)</li>

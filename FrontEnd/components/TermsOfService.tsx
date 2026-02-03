@@ -1,4 +1,4 @@
-import { FileText, CheckCircle, AlertTriangle, Scale, Shield, Mail, ArrowLeft } from 'lucide-react';
+import { FileText, CheckCircle, AlertTriangle, Scale, Shield, Mail, ArrowLeft, X } from 'lucide-react';
 
 interface TermsOfServiceProps {
   onBack: () => void;
@@ -8,14 +8,21 @@ export default function TermsOfService({ onBack }: TermsOfServiceProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-4">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-[80] shadow-sm">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <button 
             onClick={onBack}
             className="flex items-center gap-2 text-slate-600 hover:text-primary-600 transition-colors"
           >
             <ArrowLeft size={20} />
             <span className="font-medium">Retour</span>
+          </button>
+          <button 
+            onClick={onBack}
+            className="p-2 text-slate-600 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
+            aria-label="Fermer"
+          >
+            <X size={24} />
           </button>
         </div>
       </header>
@@ -40,7 +47,7 @@ export default function TermsOfService({ onBack }: TermsOfServiceProps) {
           <section className="mb-10">
             <p className="text-slate-700 leading-relaxed mb-4">
               Les présentes Conditions Générales d'Utilisation (CGU) régissent l'utilisation de l'application 
-              <strong> BienCouvert</strong> (ci-après "le Service"), éditée par <strong>AssurClair</strong>.
+              <strong> BienCouvert</strong> (ci-après "le Service"), éditée par Rémi Jolivalt, qui agit en tant que particulier.
             </p>
             <p className="text-slate-700 leading-relaxed">
               En créant un compte et en utilisant le Service, vous acceptez sans réserve l'intégralité des présentes CGU.
@@ -58,7 +65,7 @@ export default function TermsOfService({ onBack }: TermsOfServiceProps) {
               <ul className="space-y-3 text-slate-700">
                 <li>• <strong>"Service"</strong> : L'application BienCouvert accessible via web ou application mobile</li>
                 <li>• <strong>"Utilisateur"</strong> : Toute personne physique majeure ayant créé un compte</li>
-                <li>• <strong>"Éditeur"</strong> : AssurClair, responsable du Service</li>
+                <li>• <strong>"Éditeur"</strong> : Rémi Jolivalt, responsable du Service</li>
                 <li>• <strong>"Contenu"</strong> : Données, documents, informations saisies par l'Utilisateur</li>
                 <li>• <strong>"Compte"</strong> : Espace personnel sécurisé accessible par email et mot de passe</li>
               </ul>
@@ -184,11 +191,12 @@ export default function TermsOfService({ onBack }: TermsOfServiceProps) {
                 <h3 className="font-bold text-slate-900 mb-2">🏢 Propriété de l'Éditeur</h3>
                 <p className="mb-2">
                   L'ensemble du Service (code source, design, logo, algorithmes, etc.) est la propriété exclusive 
-                  d'AssurClair et protégé par le droit d'auteur français et international.
+                  de Rémi JOLIVLAT et protégé par le droit d'auteur français et international. <p></p>
+                  <b>Toute reproduction, diffusion, modification ou exploitation sans autorisation préalable écrite de l’Éditeur est interdite et peut engager la responsabilité civile et pénale de l’auteur de l’infraction.</b>
                 </p>
-                <p className="text-sm text-slate-600">
+                {/* <p className="text-sm text-slate-600"> 
                   Toute reproduction, représentation, modification ou exploitation non autorisée est strictement interdite.
-                </p>
+                </p>*/}
               </div>
 
               <div className="bg-blue-50 rounded-xl p-5">
@@ -291,7 +299,7 @@ export default function TermsOfService({ onBack }: TermsOfServiceProps) {
                 <h3 className="font-bold text-slate-900 mb-2">Résiliation</h3>
                 <p className="text-slate-700 mb-3">
                   <strong>Par l'Utilisateur</strong> : Vous pouvez supprimer votre compte à tout moment depuis les paramètres 
-                  ou en contactant contact@biencouvert.fr. La suppression est définitive et irréversible.
+                  ou en contactant <i>contact@biencouvert.fr</i>. La suppression est définitive et irréversible.
                 </p>
                 <p className="text-slate-700">
                   <strong>Par l'Éditeur</strong> : En cas de violation des CGU, l'Éditeur peut suspendre ou supprimer 

@@ -1,5 +1,4 @@
 import { query } from './db';
-import { normalizeInsuranceType, normalizeInsurer } from './types/masterData';
 
 // -----------------------------------------------------------------------------
 // Module de stockage PostgreSQL pour AssurClair
@@ -161,9 +160,9 @@ export const storage = {
       startDate, endDate, status, documentUrl, documentData, metadata, centralCgId
     } = data;
     
-    // Normalisation vers les codes
-    const typeCode = normalizeInsuranceType(type);
-    const insurerCode = normalizeInsurer(insurer);
+    // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
+    const typeCode = type;
+    const insurerCode = insurer;
     
     // Sérialiser metadata en JSON si c'est un objet
     const metadataJson = metadata ? JSON.stringify(metadata) : null;
@@ -253,16 +252,16 @@ export const storage = {
       documentHash, contentText, embedding, metadata
     } = data;
     
-    // Normalisation vers les codes
-    const insurerCode = normalizeInsurer(insurer);
+    // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
+    const insurerCode = insurer;
     const insurerName = typeof metadata === 'object' ? metadata.insurer_name : insurer;
     
     // Extraire le type depuis metadata si disponible
-    let type = 'Autre';
+    let type = 'AUTRE';
     let typeCode = 'AUTRE';
     if (typeof metadata === 'object' && metadata.type) {
       type = metadata.type;
-      typeCode = normalizeInsuranceType(metadata.type);
+      typeCode = metadata.type; // Le code est déjà normalisé
     }
     
     // S'assurer que metadata est un objet JSON valide
