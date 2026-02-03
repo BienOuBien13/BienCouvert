@@ -63,5 +63,38 @@ export const masterDataService = {
         data.isActive !== undefined ? data.isActive : true
       ]
     );
+  },
+
+  /**
+   * Récupère tous les assureurs actifs
+   */
+  getInsurers: async (): Promise<any[]> => {
+    const result = await query(
+      `SELECT code, label, full_name as "fullName", description, 
+              logo_url as "logoUrl", website_url as "websiteUrl", 
+              phone, email, color, display_order as "displayOrder", 
+              is_active as "isActive"
+       FROM insurers 
+       WHERE is_active = true 
+       ORDER BY display_order`,
+      []
+    );
+    return result.rows;
+  },
+
+  /**
+   * Récupère un assureur par son code
+   */
+  getInsurerByCode: async (code: string): Promise<any | null> => {
+    const result = await query(
+      `SELECT code, label, full_name as "fullName", description, 
+              logo_url as "logoUrl", website_url as "websiteUrl", 
+              phone, email, color, display_order as "displayOrder", 
+              is_active as "isActive"
+       FROM insurers 
+       WHERE code = $1`,
+      [code]
+    );
+    return result.rows[0] || null;
   }
 };
