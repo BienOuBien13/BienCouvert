@@ -34,4 +34,35 @@ router.get('/insurance-types/:code', async (req, res) => {
   }
 });
 
+/**
+ * Route GET /api/masterdata/insurers
+ * Récupère la liste de tous les assureurs disponibles
+ */
+router.get('/insurers', async (req, res) => {
+  try {
+    const insurers = await masterDataService.getInsurers();
+    res.json(insurers);
+  } catch (err) {
+    console.error('Erreur GET /insurers:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route GET /api/masterdata/insurers/:code
+ * Récupère un assureur spécifique par son code
+ */
+router.get('/insurers/:code', async (req, res) => {
+  try {
+    const insurer = await masterDataService.getInsurerByCode(req.params.code);
+    if (!insurer) {
+      return res.status(404).json({ message: 'Insurer not found' });
+    }
+    res.json(insurer);
+  } catch (err) {
+    console.error('Erreur GET /insurers/:code:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

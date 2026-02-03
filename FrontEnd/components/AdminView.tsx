@@ -222,7 +222,7 @@ export const AdminView: React.FC = () => {
                 {insuranceTypes && insuranceTypes.length > 0 ? (
                   insuranceTypes.map(type => (
                     <option key={type.code} value={type.code}>
-                      {type.icon} {type.labelFr}
+                      {type.labelFr}
                     </option>
                   ))
                 ) : (
