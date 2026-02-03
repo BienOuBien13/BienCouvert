@@ -460,17 +460,47 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       console.log('⚠️ Aucun contexte RAG - utilisation metadata');
       enrichedContext = 'Vos contrats:\n' + policies.map(p => {
         const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
-        const coverage = (p as any).coverage || (p as any).metadata?.formula;
-        const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
-        return `- ${p.name} (${p.type}) chez ${insurer}${coverageInfo}: ${p.summary || 'Pas de résumé'}`;
+        
+        // Extraire la formule depuis différentes sources possibles
+        let formula = (p as any).coverage || (p as any).metadata?.formula;
+        if (!formula && (p as any).metadata?.summary) {
+          const summaryMatch = (p as any).metadata.summary.match(/[-–]\s*(.+)$/);
+          if (summaryMatch) formula = summaryMatch[1].trim();
+        }
+        if (!formula && (p as any).metadata?.coverageDetail) {
+          const detailMatch = (p as any).metadata.coverageDetail.match(/Formule:\s*(.+?)(?:\n|$)/);
+          if (detailMatch) formula = detailMatch[1].trim();
+        }
+        
+        const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+        return `- ${p.name} (${p.type}) chez ${insurer}${formulaInfo}: ${p.summary || 'Pas de résumé'}`;
       }).join('\n');
     } else {
       // Ajouter les infos des contrats utilisateur en début de contexte
       const policiesInfo = policies.map(p => {
         const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
-        const coverage = (p as any).coverage || (p as any).metadata?.formula;
-        const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
-        return `${p.name}: ${insurer} / ${p.type}${coverageInfo}`;
+        
+        // Extraire la formule depuis différentes sources possibles
+        let formula = (p as any).coverage || (p as any).metadata?.formula;
+        
+        // Si pas de formule directe, chercher dans summary (ex: "Automobile - Plénitude")
+        if (!formula && (p as any).metadata?.summary) {
+          const summaryMatch = (p as any).metadata.summary.match(/[-–]\s*(.+)$/);
+          if (summaryMatch) formula = summaryMatch[1].trim();
+        }
+        
+        // Si toujours pas de formule, chercher dans coverageDetail
+        if (!formula && (p as any).metadata?.coverageDetail) {
+          const detailMatch = (p as any).metadata.coverageDetail.match(/Formule:\s*(.+?)(?:\n|$)/);
+          if (detailMatch) formula = detailMatch[1].trim();
+        }
+        
+        // Construire la ligne avec toutes les infos importantes
+        const options = (p as any).metadata?.options;
+        const optionsInfo = options && options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+        
+        return `${p.name}: ${insurer} / ${p.type}${formulaInfo}${optionsInfo}`;
       }).join('\n');
       enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
     }
