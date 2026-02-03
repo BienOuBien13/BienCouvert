@@ -1,5 +1,6 @@
 ﻿import { Router } from 'express';
 import { sendMessageToAssistant, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport } from '../services/geminiService';
+import { storage } from '../storage';
 
 const router = Router();
 
@@ -9,7 +10,28 @@ router.post('/chat', async (req, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });
   try {
-    const response = await sendMessageToAssistant(message, policies || [], history || []);
+    // Recharger les policies depuis la DB pour avoir les metadata complets
+    const policyIds = (policies || []).map((p: any) => p.id).filter(Boolean);
+    let enrichedPolicies = policies || [];
+    
+    if (policyIds.length > 0) {
+      console.log(`🔄 Rechargement de ${policyIds.length} policies depuis DB pour avoir metadata...`);
+      const dbPolicies = await Promise.all(
+        policyIds.map(async (id: string) => {
+          try {
+            const policy = await storage.readPolicy(parseInt(id));
+            return policy;
+          } catch (e) {
+            console.warn(`⚠️ Impossible de charger policy ${id}:`, e);
+            return null;
+          }
+        })
+      );
+      enrichedPolicies = dbPolicies.filter(p => p !== null);
+      console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
+    }
+    
+    const response = await sendMessageToAssistant(message, enrichedPolicies, history || []);
     res.json({ response });
   } catch (e) {
     console.error(e);
