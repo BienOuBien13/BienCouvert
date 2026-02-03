@@ -16,19 +16,17 @@ router.post('/chat', async (req, res) => {
     
     if (policyIds.length > 0) {
       console.log(`🔄 Rechargement de ${policyIds.length} policies depuis DB pour avoir metadata...`);
-      const dbPolicies = await Promise.all(
-        policyIds.map(async (id: string) => {
-          try {
-            const policy = await storage.readPolicy(parseInt(id));
-            return policy;
-          } catch (e) {
-            console.warn(`⚠️ Impossible de charger policy ${id}:`, e);
-            return null;
-          }
-        })
-      );
-      enrichedPolicies = dbPolicies.filter(p => p !== null);
-      console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
+      
+      // Récupérer toutes les policies de l'utilisateur (on suppose que req contient userId ou on l'extrait des policies)
+      const userId = policies[0]?.userId;
+      if (userId) {
+        const allPolicies = await storage.readPolicies(userId);
+        // Filtrer pour ne garder que celles demandées
+        enrichedPolicies = allPolicies.filter((p: any) => policyIds.includes(String(p.id)));
+        console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
+      } else {
+        console.warn('⚠️ Impossible de recharger policies : userId non trouvé');
+      }
     }
     
     const response = await sendMessageToAssistant(message, enrichedPolicies, history || []);
