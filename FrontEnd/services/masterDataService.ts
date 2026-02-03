@@ -1,7 +1,7 @@
 // services/masterDataService.ts
 // Service pour charger les données de référence (master data) depuis l'API
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export interface InsuranceType {
   code: string;
