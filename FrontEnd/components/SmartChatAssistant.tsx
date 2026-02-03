@@ -281,11 +281,17 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       return;
     }
     
+    // Trouver les codes correspondants aux labels sélectionnés
+    const typeData = masterTypes.find(t => t.labelFr === selectedType);
+    const insurerData = masterInsurers.find(i => i.label === selectedInsurer);
+    
     const newPolicy: Omit<Policy, 'userId'> = {
       id: uuid(),
       name: contractNameInput,
       insurer: selectedInsurer,
+      insurerCode: insurerData?.code || selectedInsurer,
       type: selectedType,
+      typeCode: typeData?.code || selectedType,
       coverage: selectedFormula,
       coverageDetail: `${selectedInsurer}\n\n📦 Formule: ${selectedFormula}\n\n🎯 Options:\n${selectedOptions.map(opt => `• ${opt}`).join('\n')}`,
       options: selectedOptions,

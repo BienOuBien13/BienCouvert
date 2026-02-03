@@ -54,7 +54,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
             Le premier assitant qui vous aide à  <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600"> comprendre TOUTES vos garanties d'assurances.</span>
           </h1>
           <p className="text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed font-bold">
-            Votre assitant personnalisé qui <span className="text-slate-900 font-black">répond à vos questions </span> et qui vous explique comment <span className="text-slate-900 font-black">  optimiser votre protection en un clic. </span> <br className="hidden md:block" /> 
+            <span className="text-slate-900 font-black"> Votre assitant personnalisé qui répond à vos questions et optimise votre protection en un clic.  </span> <br className="hidden md:block" /> 
             {/* Ne payez plus <span className="text-slate-900 font-black"> les couvertures en doublon ou inutiles</span> et identifiez enfin les garanties qui vous manquent. */}
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">

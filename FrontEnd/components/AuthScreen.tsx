@@ -163,7 +163,32 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
                 {mode === 'login' && <button type="button" onClick={() => setMode('forgot')} className="text-xs text-primary-600 hover:underline">Mot de passe oublié ?</button>}
               </div>
               <div className="mt-1 relative shadow-sm"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-slate-400" /></div>
-              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="focus:ring-primary-500 block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border outline-none" placeholder="••••••••" /></div>
+              <input 
+                type="password" 
+                required 
+                value={password} 
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (mode === 'register') {
+                    setPasswordWarning(validatePassword(e.target.value));
+                  }
+                }} 
+                className="focus:ring-primary-500 block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border outline-none" 
+                placeholder="••••••••" 
+              /></div>
+              {mode === 'register' && (
+                <div className="mt-2 text-xs text-slate-600">
+                  <p className="font-medium mb-1">Votre mot de passe doit contenir :</p>
+                  <ul className="space-y-0.5 ml-4">
+                    <li className={password.length >= 6 ? 'text-green-600' : ''}>• Au moins 6 caractères</li>
+                    <li className={/[A-Z]/.test(password) ? 'text-green-600' : ''}>• Au moins 1 majuscule</li>
+                    <li className={/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password) ? 'text-green-600' : ''}>• Au moins 1 caractère spécial (!@#$%...)</li>
+                  </ul>
+                </div>
+              )}
+              {passwordWarning && mode === 'register' && (
+                <div className="text-xs text-orange-600 mt-1 font-medium">{passwordWarning}</div>
+              )}
             </div>
             
             {mode === 'register' && (

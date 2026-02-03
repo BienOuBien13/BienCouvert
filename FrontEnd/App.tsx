@@ -324,6 +324,16 @@ function App() {
             />
           </div>
         );
+      case 'add':
+        return (
+          <div className="animate-fadeIn">
+            <SmartChatAssistant 
+              user={user} 
+              onAddPolicy={handleAddPolicy}
+              onCancel={() => setActiveView('policies')}
+            />
+          </div>
+        );
       case 'chat':
         return <div className="h-[calc(100vh-140px)] animate-fadeIn"><ChatInterface policies={policies} messages={messages} setMessages={setMessages} /></div>;
       case 'analysis':

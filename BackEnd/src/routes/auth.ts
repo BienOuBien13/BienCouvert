@@ -81,7 +81,7 @@ router.post('/register', [
     .isEmail().withMessage('Email invalide')
     .normalizeEmail(),
   body('password')
-    .isLength({ min: 12 }).withMessage('Le mot de passe doit contenir au moins 12 caractères'),
+    .notEmpty().withMessage('Mot de passe requis'),
   body('firstName')
     .optional()
     .trim()

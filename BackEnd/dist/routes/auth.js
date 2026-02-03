@@ -78,7 +78,7 @@ router.post('/register', [
         .isEmail().withMessage('Email invalide')
         .normalizeEmail(),
     (0, express_validator_1.body)('password')
-        .isLength({ min: 12 }).withMessage('Le mot de passe doit contenir au moins 12 caractères'),
+        .notEmpty().withMessage('Mot de passe requis'),
     (0, express_validator_1.body)('firstName')
         .optional()
         .trim()

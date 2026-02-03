@@ -78,6 +78,8 @@ export const authService = {
    * Inscription utilisateur
    */
   register: async (email: string, password: string): Promise<User> => {
+    console.log('🔍 DEBUG API_URL:', API_URL);
+    console.log('🔍 DEBUG register URL:', `${API_URL}/api/auth/register`);
     const response = await apiFetch('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
