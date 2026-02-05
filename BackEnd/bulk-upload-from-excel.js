@@ -57,7 +57,7 @@ const PDF_FOLDER = process.platform === 'win32'
  */
 async function extractTextFromPdf(base64Pdf) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const result = await model.generateContent([
       {
