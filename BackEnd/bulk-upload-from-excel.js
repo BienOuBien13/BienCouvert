@@ -80,6 +80,57 @@ async function extractTextFromPdf(base64Pdf) {
 }
 
 /**
+ * Extrait les métadonnées enrichies (formules, options, résumé)
+ */
+async function extractEnrichedMetadata(text, insuranceTypeName) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    
+    const prompt = `Tu es un expert en assurance. Analyse ce document de conditions générales d'assurance ${insuranceTypeName}.
+
+DOCUMENT:
+${text.substring(0, 50000)}
+
+Extrais et structure les informations suivantes au format JSON strict (pas de markdown, juste le JSON) :
+
+{
+  "formules": ["liste des formules/niveaux de garantie proposés, ex: Tiers, Intermédiaire, Tous risques"],
+  "options": {
+    "formule1": ["options spécifiques à cette formule"],
+    "toutes_formules": ["options communes à toutes les formules"]
+  },
+  "resume_court": "résumé en 2-3 phrases des garanties principales"
+}
+
+Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text().trim();
+    
+    // Nettoyer la réponse (enlever les balises markdown si présentes)
+    const jsonText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    
+    try {
+      return JSON.parse(jsonText);
+    } catch (parseError) {
+      log(`  ⚠️  Impossible de parser le JSON des métadonnées: ${jsonText.substring(0, 200)}`);
+      return {
+        formules: [],
+        options: { toutes_formules: [] },
+        resume_court: "Métadonnées non disponibles"
+      };
+    }
+  } catch (error) {
+    log(`  ⚠️  Erreur extraction métadonnées: ${error.message}`);
+    return {
+      formules: [],
+      options: { toutes_formules: [] },
+      resume_court: "Métadonnées non disponibles"
+    };
+  }
+}
+
+/**
  * Génère un embedding à partir du texte
  */
 async function generateEmbedding(text) {
@@ -196,6 +247,11 @@ async function processDocument(row, index, total) {
     const text = await extractTextFromPdf(base64Pdf);
     log(`  ✅ ${text.length} caractères extraits`);
 
+    // Extraire les métadonnées enrichies (formules, options, résumé)
+    log(`  🔍 Extraction des métadonnées enrichies...`);
+    const enrichedMetadata = await extractEnrichedMetadata(text, row.Insurance_type_name);
+    log(`  ✅ Métadonnées extraites: ${enrichedMetadata.formules.length} formules`);
+
     // Générer l'embedding
     log(`  🔮 Génération de l'embedding...`);
     const embedding = await generateEmbedding(text);
@@ -222,7 +278,10 @@ async function processDocument(row, index, total) {
         insurer_name: row.Insurer_name,
         insurance_type_name: row.Insurance_type_name,
         source: 'excel_bulk_upload',
-        original_status: row.Status
+        original_status: row.Status,
+        formules: enrichedMetadata.formules,
+        options: enrichedMetadata.options,
+        resume_court: enrichedMetadata.resume_court
       }
     };
 

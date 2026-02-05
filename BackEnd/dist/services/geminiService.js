@@ -307,6 +307,11 @@ const sendMessageToAssistant = async (message, policies, history) => {
     if (!ai) {
         return "Le service d'assistant est temporairement indisponible. Veuillez configurer GEMINI_API_KEY.";
     }
+    // DEBUG: Afficher les policies reçues
+    console.log(`\n🔍 sendMessageToAssistant reçoit ${policies.length} policies:`);
+    policies.forEach((p, idx) => {
+        console.log(`   ${idx + 1}. ${p.name} - summary: "${p.summary}" - metadata:`, p.metadata ? JSON.stringify(p.metadata).substring(0, 100) : 'null');
+    });
     try {
         const storage = require('../storage').storage;
         // Étape 1: Générer l'embedding de la question (peut échouer si ZScaler)
@@ -350,22 +355,33 @@ const sendMessageToAssistant = async (message, policies, history) => {
                 }
                 else if (insurers.length > 0) {
                     // Fallback: recherche textuelle simple si l'embedding a échoué
-                    console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle');
+                    console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle full-text');
+                    // Extraire les mots-clés de la question pour recherche full-text
+                    const keywords = message.toLowerCase()
+                        .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
+                        .split(/\s+/)
+                        .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'moi'].includes(w))
+                        .slice(0, 5);
+                    console.log(`   Mots-clés extraits: ${keywords.join(', ')}`);
+                    // Construire la requête full-text
+                    const tsquery = keywords.join(' | '); // OR entre les mots
                     const textResults = await storage.query(`SELECT 
               cg.insurer,
               cg.product_name, 
               cg.content_text,
               i.label as insurer_label,
               it.label_fr as type,
-              0.5 as similarity
+              ts_rank(to_tsvector('french', cg.content_text), to_tsquery('french', $2)) as similarity
             FROM central_cg cg
             LEFT JOIN insurers i ON cg.insurer_code = i.code
             LEFT JOIN insurance_types it ON cg.type_code = it.code
             WHERE (cg.insurer = ANY($1) OR cg.insurer_code = ANY($1))
               AND cg.content_text IS NOT NULL
-            LIMIT 3`, [insurers]);
+              AND to_tsvector('french', cg.content_text) @@ to_tsquery('french', $2)
+            ORDER BY similarity DESC
+            LIMIT 3`, [insurers, tsquery]);
                     cgChunks = textResults.rows;
-                    console.log(`✅ Fallback textuel: ${cgChunks.length} CG trouvées`);
+                    console.log(`✅ Fallback full-text: ${cgChunks.length} CG trouvées (pertinence: ${cgChunks[0]?.similarity?.toFixed(4) || 'N/A'})`);
                 }
             }
         }
@@ -384,7 +400,39 @@ const sendMessageToAssistant = async (message, policies, history) => {
             enrichedContext += '📚 Conditions générales:\n\n';
             cgChunks.forEach((cg, idx) => {
                 const insurerName = cg.insurer_label || cg.insurer || 'Assureur inconnu';
-                enrichedContext += `[${insurerName} - ${cg.product_name}]\n${cg.content_text?.substring(0, 800) || 'Texte non disponible'}...\n\n`;
+                // Extraction intelligente : chercher les mots-clés de la question dans le document
+                const keywords = message.toLowerCase()
+                    .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
+                    .split(/\s+/)
+                    .filter(w => w.length > 4 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment'].includes(w));
+                let extractedText = '';
+                const fullText = cg.content_text || '';
+                if (keywords.length > 0 && fullText.length > 10000) {
+                    // Chercher les positions des mots-clés dans le texte
+                    const positions = [];
+                    keywords.forEach(kw => {
+                        const pos = fullText.toLowerCase().indexOf(kw);
+                        if (pos > -1)
+                            positions.push(pos);
+                    });
+                    if (positions.length > 0) {
+                        // Extraire autour du premier mot-clé trouvé (±8000 chars = 10k total)
+                        const centerPos = Math.min(...positions);
+                        const start = Math.max(0, centerPos - 2000);
+                        const end = Math.min(fullText.length, centerPos + 8000);
+                        extractedText = fullText.substring(start, end);
+                        console.log(`   📌 Extraction ciblée autour de "${keywords[0]}" (pos ${centerPos}, extrait ${end - start} chars)`);
+                    }
+                    else {
+                        // Aucun mot-clé trouvé, prendre une partie plus large
+                        extractedText = fullText.substring(0, 15000);
+                    }
+                }
+                else {
+                    // Document court ou pas de mots-clés, prendre une partie plus large (15k chars au lieu de 5k)
+                    extractedText = fullText.substring(0, 15000);
+                }
+                enrichedContext += `[${insurerName} - ${cg.product_name}]\n${extractedText}...\n\n`;
             });
         }
         // Si aucun contexte RAG, fallback sur metadata
@@ -392,31 +440,96 @@ const sendMessageToAssistant = async (message, policies, history) => {
             console.log('⚠️ Aucun contexte RAG - utilisation metadata');
             enrichedContext = 'Vos contrats:\n' + policies.map(p => {
                 const insurer = p.provider || p.insurer || 'Assureur inconnu';
-                const coverage = p.coverage || p.metadata?.formula;
-                const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
-                return `- ${p.name} (${p.type}) chez ${insurer}${coverageInfo}: ${p.summary || 'Pas de résumé'}`;
+                // Extraire la formule depuis différentes sources possibles
+                let formula = p.coverage || p.metadata?.formula;
+                if (!formula && p.metadata?.summary) {
+                    const summaryMatch = p.metadata.summary.match(/[-–]\s*(.+)$/);
+                    if (summaryMatch)
+                        formula = summaryMatch[1].trim();
+                }
+                if (!formula && p.metadata?.coverageDetail) {
+                    const detailMatch = p.metadata.coverageDetail.match(/Formule:\s*(.+?)(?:\n|$)/);
+                    if (detailMatch)
+                        formula = detailMatch[1].trim();
+                }
+                const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+                return `- ${p.name} (${p.type}) chez ${insurer}${formulaInfo}: ${p.summary || 'Pas de résumé'}`;
             }).join('\n');
         }
         else {
             // Ajouter les infos des contrats utilisateur en début de contexte
             const policiesInfo = policies.map(p => {
                 const insurer = p.provider || p.insurer || 'Assureur inconnu';
-                const coverage = p.coverage || p.metadata?.formula;
-                const coverageInfo = coverage ? ` - Formule: ${coverage}` : '';
-                return `${p.name}: ${insurer} / ${p.type}${coverageInfo}`;
+                // Extraire la formule depuis différentes sources possibles
+                let formula = p.coverage || p.metadata?.formula;
+                // Si pas de formule directe, chercher dans summary (ex: "Automobile - Plénitude")
+                if (!formula && p.summary) {
+                    const summaryMatch = p.summary.match(/[-–]\s*(.+)$/);
+                    if (summaryMatch)
+                        formula = summaryMatch[1].trim();
+                }
+                if (!formula && p.metadata?.summary) {
+                    const summaryMatch = p.metadata.summary.match(/[-–]\s*(.+)$/);
+                    if (summaryMatch)
+                        formula = summaryMatch[1].trim();
+                }
+                // Si toujours pas de formule, chercher dans coverageDetail
+                if (!formula && p.coverageDetail) {
+                    const detailMatch = p.coverageDetail.match(/Formule:\s*(.+?)(?:\n|$)/);
+                    if (detailMatch)
+                        formula = detailMatch[1].trim();
+                }
+                if (!formula && p.metadata?.coverageDetail) {
+                    const detailMatch = p.metadata.coverageDetail.match(/Formule:\s*(.+?)(?:\n|$)/);
+                    if (detailMatch)
+                        formula = detailMatch[1].trim();
+                }
+                // Construire la ligne avec toutes les infos importantes
+                const options = p.options || p.metadata?.options;
+                const optionsInfo = options && options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+                const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+                const policyLine = `${p.name}: ${insurer} / ${p.type}${formulaInfo}${optionsInfo}`;
+                console.log(`📝 Contexte policy: ${policyLine}`);
+                return policyLine;
             }).join('\n');
             enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
         }
-        const systemInstruction = `Tu es un assistant expert en assurance. Réponds en français de manière claire et concise.
-    
-Voici le contexte disponible pour répondre:
+        const systemInstruction = `Tu es un assistant expert en assurance pour l'application AssurClair. Tu as accès aux documents contractuels complets de l'utilisateur via un système de vectorisation RAG.
+
+CONTEXTE DISPONIBLE:
 
 ${enrichedContext}
 
-CONSIGNES:
-- Cite toujours les clauses exactes quand tu réponds
-- Si une information n'est pas dans le contexte, dis que tu ne la trouves pas dans les documents fournis
-- Sois précis sur quel contrat tu parles`;
+RÔLE ET COMPORTEMENT:
+- Tu ES l'expert qui a ACCÈS aux documents contractuels détaillés de l'utilisateur
+- CHERCHE la formule du contrat de l'utilisateur dans la section "📋 VOS CONTRATS" ci-dessus (ex: Initiale, Essentiel, Différence, Plénitude, Pertinence)
+- Quand on te demande le détail d'une garantie, réponds DIRECTEMENT en PERSONNALISANT selon la formule souscrite
+- Ne donne PAS une réponse générique listant toutes les formules - identifie SA formule et donne LES détails spécifiques
+- Ne dis JAMAIS "je n'ai pas accès aux documents" - tu y as accès via le contexte fourni
+- Ne dis JAMAIS "consultez vos Conditions Particulières" - tu DOIS répondre avec les infos du contexte
+- Si une info manque dans le contexte, cherche d'abord dans les extraits fournis avant de dire qu'elle est absente
+- Cite les passages pertinents des documents pour appuyer tes réponses
+- Sois précis sur les montants, plafonds, franchises quand ils apparaissent dans les extraits
+- Adopte un ton confiant et professionnel : tu connais les contrats de l'utilisateur
+
+STRUCTURE DE RÉPONSE:
+1. Identifie d'abord la formule du contrat dans "📋 VOS CONTRATS"
+2. Réponds DIRECTEMENT à la question avec les infos SPÉCIFIQUES à cette formule
+3. Cite les extraits pertinents entre guillemets
+4. Si vraiment aucune info dans le contexte fourni, dis-le clairement (mais ne renvoie pas vers d'autres documents)
+5. Ne renvoie JAMAIS l'utilisateur vers "son espace en ligne" ou "ses Conditions Particulières" - tu as les documents ici
+
+Exemple de BONNE réponse:
+"Avec votre formule Plénitude MAIF pour votre 5008, voici votre Assistance déplacement:
+- Assistance 0 km: intervention dès le domicile (inclus)
+- Remorquage: illimité vers le garage de votre choix
+- Véhicule de remplacement: pendant toute la durée des réparations en cas d'accident, 20 jours en cas de vol, 7 jours en cas de panne
+- Hébergement: frais d'hôtel pris en charge si immobilisation loin du domicile
+
+Source: [Extrait CG MAIF - Options d'assistance]"
+
+Exemple de MAUVAISE réponse (à éviter):
+"Il existe plusieurs formules... Pour connaître précisément votre couverture, consultez vos Conditions Particulières."`;
         const chatHistory = history.map(msg => ({
             role: msg.role === 'user' ? 'user' : 'model',
             parts: [{ text: msg.text }]

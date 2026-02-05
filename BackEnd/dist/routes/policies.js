@@ -57,7 +57,9 @@ router.post('/', upload.single('file'), async (req, res) => {
             userId: userId, // ID de l'utilisateur propriétaire (INTEGER requis)
             policyNumber: body.policyNumber || `POL-${Date.now()}`, // Génère un numéro si absent
             insurer: body.insurer || 'Non spécifié', // Assureur (requis)
+            insurerCode: body.insurerCode || body.insurer, // Code assureur pour FK
             type: body.type || 'Autre', // Type d'assurance (requis)
+            typeCode: body.typeCode || body.type, // Code type pour FK
             premium: body.annualPremium ? parseFloat(body.annualPremium) : null, // Prime annuelle en €
             coverage: body.coverage ? parseFloat(body.coverage) : null, // Montant couverture
             startDate: body.startDate || new Date().toISOString().split('T')[0], // Date de début
@@ -309,39 +311,44 @@ router.get('/central-cg', async (req, res) => {
  */
 router.post('/central-cg', async (req, res) => {
     try {
-        console.log('📥 Réception POST /central-cg, body:', JSON.stringify(req.body, null, 2));
-        // Support des deux formats de noms de champs pour compatibilité
-        const { provider, policyName, type, pdfUrl, indexedFormulas, indexedOptions, semanticSummary, insurer, productName // Nouveaux noms de champs
-         } = req.body;
-        // Utiliser les nouveaux noms en priorité, puis fallback sur les anciens
-        const insurerName = insurer || provider;
-        const productNameValue = productName || policyName;
+        console.log('📥 Réception POST /central-cg, body:', JSON.stringify({ ...req.body, pdfData: req.body.pdfData ? '[PDF DATA]' : undefined }, null, 2));
+        // Extraction des champs
+        const { insurerCode, productName, insuranceTypeCode, version, type, url, targetFilename, pdfData, metadata } = req.body;
         console.log('📋 Champs extraits:', {
-            insurerName,
-            productNameValue,
+            insurerCode,
+            productName,
+            insuranceTypeCode,
+            version,
             type,
-            pdfUrl: pdfUrl ? `${pdfUrl.substring(0, 50)}...` : 'undefined'
+            url,
+            targetFilename,
+            hasPdfData: !!pdfData
         });
         // Validation des champs obligatoires
-        if (!insurerName || !productNameValue || !type || !pdfUrl) {
-            console.error('❌ Champs manquants:', { insurerName, productNameValue, type, pdfUrl: !!pdfUrl });
-            return res.status(400).json({ message: 'Missing required fields: insurer, productName, type, pdfUrl' });
+        if (!insurerCode || !productName || !insuranceTypeCode || !pdfData) {
+            console.error('❌ Champs manquants:', { insurerCode, productName, insuranceTypeCode, pdfData: !!pdfData });
+            return res.status(400).json({ message: 'Missing required fields: insurerCode, productName, insuranceTypeCode, pdfData' });
         }
-        // Création de la nouvelle entrée
+        // Récupérer l'utilisateur actif depuis le token/session
+        const userId = req.user?.id || 'system';
+        // Création de la nouvelle entrée avec la nouvelle structure
         const newEntry = {
-            insurer: insurerName,
-            productName: productNameValue,
-            version: null,
-            documentUrl: pdfUrl,
-            documentHash: null,
+            insurerCode,
+            insuranceTypeCode,
+            version: version || null,
+            type: type || 'CG',
+            owner: `user_${userId}`,
+            detail: null,
+            url: url || null,
+            targetFilename: targetFilename || 'document.pdf',
+            status: 'active',
             contentText: null,
             embedding: null,
             metadata: {
-                lastVerified: Date.now(),
-                indexedFormulas: indexedFormulas || [],
-                indexedOptions: indexedOptions || [],
-                semanticSummary: semanticSummary || '',
-                type
+                indexedFormulas: metadata?.indexedFormulas || [],
+                indexedOptions: metadata?.indexedOptions || {},
+                description: metadata?.description || '',
+                productName // Conservé pour compatibilité
             }
         };
         const entryId = await storage_1.storage.writeCentralCgEntry(newEntry);
@@ -356,22 +363,14 @@ router.post('/central-cg', async (req, res) => {
                 const { GoogleGenerativeAI } = require('@google/generative-ai');
                 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
                 const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-                // Gérer à la fois les URLs et les data URLs base64
+                // Le PDF est déjà en base64 (data:application/pdf;base64,...)
                 let pdfBase64;
-                if (pdfUrl.startsWith('data:application/pdf;base64,')) {
-                    // Si déjà en base64, extraire la partie data
-                    pdfBase64 = pdfUrl.split(',')[1];
-                    console.log('📄 PDF déjà en base64');
+                if (pdfData.startsWith('data:application/pdf;base64,')) {
+                    pdfBase64 = pdfData.split(',')[1];
+                    console.log('📄 PDF en base64 extrait');
                 }
                 else {
-                    // Télécharger depuis l'URL
-                    console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl}`);
-                    const response = await fetch(pdfUrl);
-                    if (!response.ok) {
-                        throw new Error(`Échec téléchargement PDF: ${response.status} ${response.statusText}`);
-                    }
-                    const arrayBuffer = await response.arrayBuffer();
-                    pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+                    throw new Error('Format PDF invalide - doit être en base64');
                 }
                 console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
                 const result = await model.generateContent([
@@ -387,7 +386,7 @@ router.post('/central-cg', async (req, res) => {
                 console.log(`✅ Texte extrait (${pdfText.length} caractères)`);
                 // Stocker le texte et vectoriser
                 const { query } = require('../db');
-                await query('UPDATE central_cg SET content_text = $1 WHERE id = $2', [pdfText, entryId]);
+                await query('UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [pdfText, entryId]);
                 console.log(`✅ Texte sauvegardé en DB pour CG ${entryId}`);
                 await storage_1.storage.vectorizeCentralCg(entryId, pdfText);
                 console.log(`✅ CG ${entryId} vectorisée avec succès`);

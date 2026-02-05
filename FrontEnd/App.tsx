@@ -4,6 +4,7 @@ import { BottomNav } from './components/BottomNav';
 import { PolicyForm } from './components/PolicyForm';
 import { ModernPolicyWizard } from './components/ModernPolicyWizard';
 import { SmartChatAssistant } from './components/SmartChatAssistant';
+import AddPolicyPage from './components/AddPolicyPage';
 import { PolicyList } from './components/PolicyList';
 import { ChatInterface } from './components/ChatInterface';
 import { AnalysisView } from './components/AnalysisView';
@@ -325,6 +326,12 @@ function App() {
           </div>
         );
       case 'add':
+        return (
+          <div className="animate-fadeIn">
+            <AddPolicyPage />
+          </div>
+        );
+      case 'smart-add':
         return (
           <div className="animate-fadeIn">
             <SmartChatAssistant 

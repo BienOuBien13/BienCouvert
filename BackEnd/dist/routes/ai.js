@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const geminiService_1 = require("../services/geminiService");
+const storage_1 = require("../storage");
 const router = (0, express_1.Router)();
 // Endpoint chat utilisé par le frontend : envoie un message, le contexte des
 // polices et l'historique. Réponse : `{ response: string }`.
@@ -10,7 +11,34 @@ router.post('/chat', async (req, res) => {
     if (!message)
         return res.status(400).json({ message: 'Missing message' });
     try {
-        const response = await (0, geminiService_1.sendMessageToAssistant)(message, policies || [], history || []);
+        // Recharger les policies depuis la DB pour avoir les metadata complets
+        const policyIds = (policies || []).map((p) => p.id).filter(Boolean);
+        let enrichedPolicies = policies || [];
+        if (policyIds.length > 0) {
+            console.log(`🔄 Rechargement de ${policyIds.length} policies depuis DB pour avoir metadata...`);
+            // Récupérer toutes les policies de l'utilisateur (on suppose que req contient userId ou on l'extrait des policies)
+            const userId = policies[0]?.userId;
+            if (userId) {
+                const allPolicies = await storage_1.storage.readPolicies(userId);
+                // Filtrer pour ne garder que celles demandées
+                enrichedPolicies = allPolicies.filter((p) => policyIds.includes(String(p.id)));
+                console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
+                // Debug: afficher les metadata de la première policy
+                if (enrichedPolicies.length > 0) {
+                    console.log('🔍 Exemple policy rechargée:', {
+                        id: enrichedPolicies[0].id,
+                        name: enrichedPolicies[0].name,
+                        metadata: enrichedPolicies[0].metadata,
+                        coverage: enrichedPolicies[0].coverage,
+                        coverageDetail: enrichedPolicies[0].coverageDetail
+                    });
+                }
+            }
+            else {
+                console.warn('⚠️ Impossible de recharger policies : userId non trouvé');
+            }
+        }
+        const response = await (0, geminiService_1.sendMessageToAssistant)(message, enrichedPolicies, history || []);
         res.json({ response });
     }
     catch (e) {

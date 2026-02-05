@@ -16,6 +16,7 @@ const auth_1 = __importDefault(require("./routes/auth"));
 const policies_1 = __importDefault(require("./routes/policies"));
 const ai_1 = __importDefault(require("./routes/ai"));
 const masterdata_1 = __importDefault(require("./routes/masterdata"));
+const cg_1 = __importDefault(require("./routes/cg"));
 require("./db"); // Initialisation de la connexion PostgreSQL
 const auditService_1 = require("./services/auditService");
 // -----------------------------------------------------------------------------
@@ -176,6 +177,7 @@ app.use('/api/auth', authLimiter, doubleCsrfProtection, auth_1.default); // 🔒
 app.use('/api/policies', doubleCsrfProtection, policies_1.default); // 🔒 Policies avec CSRF
 app.use('/api/ai', doubleCsrfProtection, ai_1.default); // 🔒 AI avec CSRF
 app.use('/api/masterdata', masterdata_1.default); // 📊 Master Data (lecture seule, pas de CSRF)
+app.use('/api/cg', doubleCsrfProtection, cg_1.default); // 📄 Conditions Générales avec CSRF
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
 // -----------------------------------------------------------------------------
