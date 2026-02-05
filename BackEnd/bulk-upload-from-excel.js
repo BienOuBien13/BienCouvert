@@ -43,14 +43,14 @@ const pool = new Pool({
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Chemin vers le fichier Excel et le dossier des PDFs
-// Sur VM : '/home/azureuser/AssurClair/liste_pdf.xlsx' et '/home/azureuser/AssurClair/pdfs'
+// Sur VM : '/home/VMRemi19821982/AssurClair/liste_pdf.xlsx' et '/home/VMRemi19821982/AssurClair/pdfs'
 // Sur Windows : 'C:\\biencouvert\\liste_pdf.xlsx' et 'C:\\biencouvert\\cdg'
 const EXCEL_FILE = process.platform === 'win32' 
   ? 'C:\\biencouvert\\liste_pdf.xlsx' 
-  : '/home/azureuser/AssurClair/liste_pdf.xlsx';
+  : '/home/VMRemi19821982/AssurClair/liste_pdf.xlsx';
 const PDF_FOLDER = process.platform === 'win32' 
   ? 'C:\\biencouvert\\cdg' 
-  : '/home/azureuser/AssurClair/pdfs';
+  : '/home/VMRemi19821982/AssurClair/pdfs';
 
 /**
  * Extrait le texte d'un PDF en base64
