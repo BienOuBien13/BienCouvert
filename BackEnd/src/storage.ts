@@ -224,26 +224,33 @@ export const storage = {
         it.label_fr as type_label
       FROM central_cg cg
       LEFT JOIN insurers i ON cg.insurer_code = i.code
-      LEFT JOIN insurance_types it ON cg.type_code = it.code
+      LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
       ORDER BY cg.id
     `);
     return result.rows.map(row => ({
       id: row.id,
-      insurer: row.insurer_label || row.insurer || 'Non spécifié',
+      // Nouveaux champs
       insurerCode: row.insurer_code,
-      insurerLogo: row.insurer_logo,
-      productName: row.product_name,
-      type: row.type_label || row.metadata?.type || 'Autre',
-      typeCode: row.type_code,
+      insuranceTypeCode: row.insurance_type_code,
       version: row.version,
-      documentUrl: row.document_url,
-      documentHash: row.document_hash,
+      type: row.type,
+      owner: row.owner,
+      detail: row.detail,
+      url: row.url,
+      targetFilename: row.target_filename,
+      status: row.status,
       contentText: row.content_text,
       embedding: row.embedding,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      // Champs de compatibilité pour l'affichage
+      insurer: row.insurer_label || row.insurer_code || 'Non spécifié',
+      insurerLogo: row.insurer_logo,
+      productName: row.metadata?.productName || 'Document CG',
       indexedFormulas: row.metadata?.indexedFormulas || [],
       indexedOptions: row.metadata?.indexedOptions || [],
-      semanticSummary: row.metadata?.semanticSummary || '',
-      metadata: row.metadata,
+      documentUrl: row.url,
       lastVerified: row.updated_at || row.created_at
     })) as T[];
   },
@@ -254,21 +261,9 @@ export const storage = {
    */
   writeCentralCgEntry: async (data: any) => {
     const { 
-      id, insurer, productName, version, documentUrl, 
-      documentHash, contentText, embedding, metadata
+      id, insurerCode, insuranceTypeCode, version, type, owner, 
+      detail, url, targetFilename, status, contentText, embedding, metadata
     } = data;
-    
-    // Utiliser directement les codes (ils viennent déjà normalisés de l'API)
-    const insurerCode = insurer;
-    const insurerName = typeof metadata === 'object' ? metadata.insurer_name : insurer;
-    
-    // Extraire le type depuis metadata si disponible
-    let type = 'AUTRE';
-    let typeCode = 'AUTRE';
-    if (typeof metadata === 'object' && metadata.type) {
-      type = metadata.type;
-      typeCode = metadata.type; // Le code est déjà normalisé
-    }
     
     // S'assurer que metadata est un objet JSON valide
     const metadataJson = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
@@ -278,23 +273,23 @@ export const storage = {
       // Mise à jour
       await query(
         `UPDATE central_cg 
-         SET insurer = $1, insurer_code = $2, product_name = $3, version = $4, document_url = $5,
-             document_hash = $6, content_text = $7, embedding = $8, 
-             metadata = $9, type_code = $10, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $11`,
-        [insurerName || insurer, insurerCode, productName, version, documentUrl, documentHash, 
-         contentText, embeddingJson, metadataJson, typeCode, id]
+         SET insurer_code = $1, insurance_type_code = $2, version = $3, type = $4,
+             owner = $5, detail = $6, url = $7, target_filename = $8, status = $9,
+             content_text = $10, embedding = $11, metadata = $12, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $13`,
+        [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
+         targetFilename, status, contentText, embeddingJson, metadataJson, id]
       );
     } else {
       // Insertion
       const result = await query(
         `INSERT INTO central_cg 
-         (insurer, insurer_code, product_name, version, document_url, document_hash, 
-          content_text, embedding, metadata, type_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (insurer_code, insurance_type_code, version, type, owner, detail, url, 
+          target_filename, status, content_text, embedding, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
-        [insurerName || insurer, insurerCode, productName, version, documentUrl, documentHash, 
-         contentText, embeddingJson, metadataJson, typeCode]
+        [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
+         targetFilename, status, contentText, embeddingJson, metadataJson]
       );
       return result.rows[0].id;
     }

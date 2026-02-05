@@ -62,14 +62,18 @@ CREATE INDEX IF NOT EXISTS idx_policies_type ON policies(type);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS central_cg (
     id SERIAL PRIMARY KEY,
-    insurer VARCHAR(255) NOT NULL,
-    product_name VARCHAR(255) NOT NULL,
-    version VARCHAR(50),
-    document_url TEXT,
-    document_hash VARCHAR(64),            -- SHA-256 du document pour déduplication
-    content_text TEXT,                    -- Texte extrait du PDF pour recherche
-    embedding vector(768),                -- Vecteur d'embedding pour recherche sémantique
-    metadata JSONB,                       -- Métadonnées (date de validité, etc.)
+    insurer_code VARCHAR(50) NOT NULL,              -- Code de l'assureur
+    insurance_type_code VARCHAR(50) NOT NULL,       -- Code du type d'assurance
+    version VARCHAR(50),                            -- Version du document
+    type VARCHAR(100),                              -- Type de document
+    owner VARCHAR(255),                             -- Propriétaire du document
+    detail TEXT,                                    -- Détail (free text)
+    url TEXT,                                       -- URL du document
+    target_filename VARCHAR(255),                   -- Nom fichier cible
+    status VARCHAR(50) DEFAULT 'active',            -- Status du document
+    content_text TEXT,                              -- Texte extrait du document
+    embedding vector(768),                          -- Vecteur d'embedding pour recherche sémantique
+    metadata JSONB,                                 -- Métadonnées: formules indexées, options, description
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -79,8 +83,11 @@ CREATE INDEX IF NOT EXISTS idx_central_cg_embedding ON central_cg
     USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
 
--- Index pour recherche par assureur et produit
-CREATE INDEX IF NOT EXISTS idx_central_cg_insurer_product ON central_cg(insurer, product_name);
+-- Index pour recherche par code assureur et type d'assurance
+CREATE INDEX IF NOT EXISTS idx_central_cg_insurer_type ON central_cg(insurer_code, insurance_type_code);
+
+-- Index pour recherche par status
+CREATE INDEX IF NOT EXISTS idx_central_cg_status ON central_cg(status);
 
 -- ============================================================================
 -- TABLE: chat_history

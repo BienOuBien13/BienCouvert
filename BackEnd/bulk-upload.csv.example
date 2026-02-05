@@ -1,0 +1,4 @@
+filename,insurer_code,insurance_type_code,version,type,url,productName
+maif-auto.pdf,MAIF,AUTO,2024-01,CG,https://www.maif.fr/cg-auto.pdf,Auto Vam
+axa-habitation.pdf,AXA,HABITATION,2024-01,CG,https://www.axa.fr/cg-habitation.pdf,MRH Confort
+allianz-sante.pdf,ALLIANZ,SANTE,2024-02,CG,,Santé Plus

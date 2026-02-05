@@ -17,14 +17,15 @@ export const AdminView: React.FC = () => {
   const { types: insuranceTypes, insurers } = useMasterData();
   
   const [newEntry, setNewEntry] = useState({
-    insurer: '',
+    insurerCode: '',
     productName: '',
-    type: PolicyType.AUTO,
-    pdfUrl: ''
+    insuranceTypeCode: '',
+    version: '',
+    type: '',
+    url: ''
   });
 
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<'url' | 'file'>('url');
 
   const [indexingResult, setIndexingResult] = useState<{
     indexedFormulas: string[];
@@ -48,8 +49,8 @@ export const AdminView: React.FC = () => {
   }, []);
 
   const handleStartIndexing = async () => {
-    if (!newEntry.insurer || (uploadMode === 'url' && !newEntry.pdfUrl) || (uploadMode === 'file' && !pdfFile)) {
-      alert('Veuillez remplir l\'assureur et fournir un PDF (URL ou fichier)');
+    if (!newEntry.insurerCode || !pdfFile) {
+      alert('Veuillez sélectionner un assureur et charger un fichier PDF');
       return;
     }
     
@@ -58,21 +59,15 @@ export const AdminView: React.FC = () => {
     setIsIndexing(true);
     
     try {
-      let pdfData = newEntry.pdfUrl;
+      // Convertir le fichier PDF en base64
+      const reader = new FileReader();
+      const pdfData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(pdfFile);
+      });
       
-      // Si mode fichier, convertir en base64
-      if (uploadMode === 'file' && pdfFile) {
-        const reader = new FileReader();
-        pdfData = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(pdfFile);
-        });
-        // Mettre à jour newEntry.pdfUrl avec le base64
-        setNewEntry(prev => ({ ...prev, pdfUrl: pdfData }));
-      }
-      
-      const result = await indexCgDocument(newEntry.insurer, newEntry.type, pdfData);
+      const result = await indexCgDocument(newEntry.insurerCode, newEntry.insuranceTypeCode, pdfData);
       
       // Vérifier que le résultat contient des données valides
       if (!result) {
@@ -103,26 +98,43 @@ export const AdminView: React.FC = () => {
   };
 
   const handleFinalAdd = async () => {
-    if (!indexingResult) return;
+    if (!indexingResult || !pdfFile) return;
     
     // Validation côté client
-    if (!newEntry.insurer || !newEntry.productName || !newEntry.type || !newEntry.pdfUrl) {
-      alert('Veuillez remplir tous les champs obligatoires (Assureur, Nom Contrat, Type, PDF)');
+    if (!newEntry.insurerCode || !newEntry.productName || !newEntry.insuranceTypeCode) {
+      alert('Veuillez remplir tous les champs obligatoires (Assureur, Nom Contrat, Type d\'assurance)');
       return;
     }
     
     try {
+      // Convertir le PDF en base64 pour l'envoi
+      const reader = new FileReader();
+      const pdfBase64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(pdfFile);
+      });
+      
       const entryToSave = {
-        insurer: newEntry.insurer,
+        insurerCode: newEntry.insurerCode,
         productName: newEntry.productName,
-        type: newEntry.type,
-        pdfUrl: newEntry.pdfUrl,
-        indexedFormulas: indexingResult.indexedFormulas || [],
-        indexedOptions: indexingResult.indexedOptions || [],
-        semanticSummary: indexingResult.semanticSummary || ''
+        insuranceTypeCode: newEntry.insuranceTypeCode,
+        version: newEntry.version || '',
+        type: newEntry.type || 'CG',
+        url: newEntry.url || '',
+        targetFilename: pdfFile.name,
+        pdfData: pdfBase64,
+        metadata: {
+          indexedFormulas: indexingResult.indexedFormulas || [],
+          indexedOptions: {},  // À structurer par formule si besoin
+          description: indexingResult.semanticSummary || ''
+        }
       };
       
-      console.log('📤 Envoi de l\'entrée CG:', entryToSave);
+      console.log('📤 Envoi de l\'entrée CG:', {
+        ...entryToSave,
+        pdfData: `[${Math.round(pdfBase64.length / 1024)}KB base64]`
+      });
       
       await storageService.saveCgEntry(entryToSave);
       
@@ -131,7 +143,7 @@ export const AdminView: React.FC = () => {
       
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
-      setNewEntry({ insurer: '', productName: '', type: PolicyType.AUTO, pdfUrl: '' });
+      setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', version: '', type: '', url: '' });
       setIndexingResult(null);
       setShowAddForm(false);
       setPdfFile(null);
@@ -182,14 +194,14 @@ export const AdminView: React.FC = () => {
 
       {showAddForm && (
         <div className="bg-white p-8 rounded-[2.5rem] border-2 border-primary-100 shadow-2xl animate-scaleIn space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assureur</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assureur *</label>
               <select 
                 required
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
-                value={newEntry.insurer} 
-                onChange={e => setNewEntry({...newEntry, insurer: e.target.value})}
+                value={newEntry.insurerCode} 
+                onChange={e => setNewEntry({...newEntry, insurerCode: e.target.value})}
               >
                 <option value="">Sélectionner un assureur</option>
                 {insurers && insurers.length > 0 ? (
@@ -204,19 +216,12 @@ export const AdminView: React.FC = () => {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nom Contrat</label>
-              <input 
-                type="text" required placeholder="Auto Zen..." 
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.productName} onChange={e => setNewEntry({...newEntry, productName: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type d'assurance *</label>
               <select 
+                required
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
-                value={newEntry.type} 
-                onChange={e => setNewEntry({...newEntry, type: e.target.value as PolicyType})}
+                value={newEntry.insuranceTypeCode} 
+                onChange={e => setNewEntry({...newEntry, insuranceTypeCode: e.target.value})}
               >
                 <option value="">Sélectionner un type</option>
                 {insuranceTypes && insuranceTypes.length > 0 ? (
@@ -230,70 +235,63 @@ export const AdminView: React.FC = () => {
                 )}
               </select>
             </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nom Contrat *</label>
+              <input 
+                type="text" required placeholder="Auto Zen..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.productName} onChange={e => setNewEntry({...newEntry, productName: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Version</label>
+              <input 
+                type="text" placeholder="2024-01" 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.version} onChange={e => setNewEntry({...newEntry, version: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type de document</label>
+              <input 
+                type="text" placeholder="CG, Notice, Annexe..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.type} onChange={e => setNewEntry({...newEntry, type: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">URL (optionnelle)</label>
+              <input 
+                type="url" placeholder="https://..." 
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.url} onChange={e => setNewEntry({...newEntry, url: e.target.value})}
+              />
+            </div>
           </div>
 
-          {/* Mode selection: URL ou Fichier */}
-          <div className="space-y-4">
-            <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Source du PDF</label>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => { setUploadMode('url'); setPdfFile(null); }}
-                className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
-                  uploadMode === 'url'
-                    ? 'bg-primary-600 text-white shadow-lg'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <Globe className="w-4 h-4 inline mr-2" />
-                URL en ligne
-              </button>
-              <button
-                type="button"
-                onClick={() => { setUploadMode('file'); setNewEntry({...newEntry, pdfUrl: ''}); }}
-                className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
-                  uploadMode === 'file'
-                    ? 'bg-primary-600 text-white shadow-lg'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <FileText className="w-4 h-4 inline mr-2" />
-                Charger un fichier
-              </button>
+          {/* Fichier PDF uniquement */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fichier PDF *</label>
+            <div className="relative">
+              <input 
+                type="file"
+                accept="application/pdf"
+                onChange={e => setPdfFile(e.target.files?.[0] || null)}
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 cursor-pointer"
+              />
             </div>
-
-            {uploadMode === 'url' ? (
-              <div className="space-y-1">
-                <input 
-                  type="url" required placeholder="https://exemple.com/document.pdf" 
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                  value={newEntry.pdfUrl} onChange={e => setNewEntry({...newEntry, pdfUrl: e.target.value})}
-                />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <div className="relative">
-                  <input 
-                    type="file"
-                    accept="application/pdf"
-                    onChange={e => setPdfFile(e.target.files?.[0] || null)}
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 cursor-pointer"
-                  />
-                </div>
-                {pdfFile && (
-                  <p className="text-xs text-emerald-600 font-medium ml-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
-                  </p>
-                )}
-              </div>
+            {pdfFile && (
+              <p className="text-xs text-emerald-600 font-medium ml-1 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
+              </p>
             )}
           </div>
 
           {!indexingResult ? (
             <button 
               onClick={handleStartIndexing}
-              disabled={isIndexing || (uploadMode === 'url' ? !newEntry.pdfUrl : !pdfFile)}
+              disabled={isIndexing || !pdfFile}
               className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isIndexing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}

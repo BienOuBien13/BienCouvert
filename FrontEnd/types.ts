@@ -25,15 +25,29 @@ export interface User {
 
 export interface CentralCgEntry {
   id: string;
-  insurer: string;
-  productName: string;
-  type: PolicyType;
-  pdfUrl: string;
-  lastVerified: number;
-  indexedFormulas: string[];
-  indexedOptions: string[];
-  semanticSummary: string;
-  metadata?: any; // JSON avec type, formule, etc.
+  insurerCode: string;              // Code de l'assureur
+  insuranceTypeCode: string;        // Code du type d'assurance
+  version?: string;                 // Version du document
+  type?: string;                    // Type de document
+  owner?: string;                   // Propriétaire (user actif)
+  detail?: string;                  // Détail
+  url?: string;                     // URL additionnelle
+  targetFilename?: string;          // Nom du fichier PDF
+  status?: string;                  // Statut (active, inactive, etc.)
+  contentText?: string;             // Texte extrait
+  embedding?: any;                  // Vecteur d'embedding
+  metadata?: {                      // Métadonnées structurées
+    indexedFormulas?: string[];     // Formules indexées
+    indexedOptions?: Record<string, string[]>;  // Options par formule
+    description?: string;           // Description en quelques lignes
+  };
+  createdAt?: number;
+  updatedAt?: number;
+  // Compatibilité avec anciens champs (pour affichage)
+  insurer?: string;                 // Label assureur (pour affichage)
+  productName?: string;             // Nom du produit (pour affichage)
+  indexedFormulas?: string[];       // Pour compatibilité
+  indexedOptions?: string[];        // Pour compatibilité
 }
 
 export interface UserProfileData {
