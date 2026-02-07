@@ -107,21 +107,11 @@ exports.storage = {
         }
         queryText += ' ORDER BY p.created_at DESC';
         const result = await (0, db_1.query)(queryText, params);
-        // Mapping code → enum PolicyType pour le frontend
-        const codeToEnumMap = {
-            'AUTO': 'Automobile',
-            'HOME': 'Habitation',
-            'HEALTH': 'Santé/Mutuelle',
-            'LEGAL': 'Protection Juridique',
-            'LIFE': 'Prévoyance/Décès',
-            'BANK_CARD': 'Carte Bancaire',
-            'LOAN': 'Emprunteur/Crédit',
-            'MOBILE': 'Appareils Mobiles'
-        };
         return result.rows.map(row => {
             const metadata = row.metadata || {};
+            // Utilise directement label_fr depuis la table insurance_types (via type_label du JOIN)
+            const typeEnum = row.type_label || 'Autre';
             const typeCode = row.insurance_type_code;
-            const typeEnum = codeToEnumMap[typeCode] || row.type_label || 'Autre';
             return {
                 id: row.id.toString(),
                 userId: row.user_id.toString(),

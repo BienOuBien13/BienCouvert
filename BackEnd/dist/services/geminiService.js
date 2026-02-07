@@ -434,26 +434,44 @@ const sendMessageToAssistant = async (message, policies, history) => {
                         }
                     });
                     if (keywordPositions.size > 0) {
-                        // Trouver la zone avec le plus de mots-clés
+                        // Extraire plusieurs zones autour des occurrences de mots-clés
                         const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
                         console.log(`   📌 Trouvé ${allPositions.length} occurrences de mots-clés [${Array.from(keywordPositions.keys()).join(', ')}]`);
-                        // Prendre la première occurrence comme centre, puis extraire largement
-                        const centerPos = allPositions[0];
-                        const start = Math.max(0, centerPos - 5000);
-                        const end = Math.min(fullText.length, centerPos + 20000);
-                        extractedText = fullText.substring(start, end);
-                        console.log(`   📌 Extraction autour de pos ${centerPos} (${end - start} chars extraits)`);
+                        const extractedChunks = [];
+                        const maxChunks = 3; // Extraire jusqu'à 3 zones différentes
+                        const chunkSize = 15000; // 15k par chunk
+                        // Grouper les positions proches ensemble
+                        const zones = [];
+                        allPositions.forEach(pos => {
+                            const hasNearbyZone = zones.some(z => Math.abs(z - pos) < 10000);
+                            if (!hasNearbyZone) {
+                                zones.push(pos);
+                            }
+                        });
+                        // Prendre les premières zones jusqu'à maxChunks
+                        zones.slice(0, maxChunks).forEach(centerPos => {
+                            const start = Math.max(0, centerPos - 5000);
+                            const end = Math.min(fullText.length, centerPos + chunkSize);
+                            extractedChunks.push(fullText.substring(start, end));
+                        });
+                        extractedText = extractedChunks.join('\n[...]\n');
+                        console.log(`   📌 Extraction de ${zones.length} zones (${extractedText.length} chars total)`);
                     }
                     else {
-                        // Aucun mot-clé trouvé, prendre le début du document
-                        extractedText = fullText.substring(0, 20000);
-                        console.log(`   ⚠️ Aucun mot-clé trouvé, extraction début document (20k chars)`);
+                        // Aucun mot-clé trouvé, prendre début + milieu + fin pour couvrir large
+                        const third = Math.floor(fullText.length / 3);
+                        extractedText = fullText.substring(0, 15000) +
+                            '\n[...]\n' +
+                            fullText.substring(third, third + 15000) +
+                            '\n[...]\n' +
+                            fullText.substring(fullText.length - 15000);
+                        console.log(`   ⚠️ Aucun mot-clé trouvé, extraction 3 zones (début/milieu/fin)`);
                     }
                 }
                 else {
                     // Document court ou pas de mots-clés, prendre une grande partie
-                    extractedText = fullText.substring(0, 25000);
-                    console.log(`   📝 Document court ou peu de mots-clés, extraction 25k chars`);
+                    extractedText = fullText.substring(0, 40000);
+                    console.log(`   📝 Document court ou peu de mots-clés, extraction 40k chars`);
                 }
                 enrichedContext += `[${insurerName} - ${productName}]\n${extractedText}\n\n`;
             });
