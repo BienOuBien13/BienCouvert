@@ -32,14 +32,17 @@ const upload = multer({
 // -----------------------------------------------------------------------------
 router.get('/central/by-type-and-insurer', async (req: Request, res: Response) => {
   try {
+    console.log('[CG] GET request:', req.query);
     const { insurance_type_code, insurer_code } = req.query;
 
     if (!insurance_type_code || !insurer_code) {
+      console.log('[CG] Missing parameters');
       return res.status(400).json({ 
         error: 'Les paramètres insurance_type_code et insurer_code sont requis' 
       });
     }
 
+    console.log('[CG] Querying database for:', { insurance_type_code, insurer_code });
     const result = await pool.query(
       `SELECT 
         id,
@@ -62,15 +65,19 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       [insurance_type_code, insurer_code]
     );
 
+    console.log('[CG] Query result:', result.rows.length, 'rows');
+
     if (result.rows.length === 0) {
+      console.log('[CG] No CG found');
       return res.status(404).json({ 
         error: 'Aucune CG trouvée pour cet assureur et ce type d\'assurance' 
       });
     }
 
     const cg = result.rows[0];
+    console.log('[CG] CG found:', { id: cg.id, has_metadata: !!cg.metadata, metadata_type: typeof cg.metadata });
     
-    res.json({
+    const response = {
       id: cg.id,
       insurer_code: cg.insurer_code,
       insurance_type_code: cg.insurance_type_code,
@@ -82,11 +89,15 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       resume_court: cg.metadata?.resume_court || '',
       insurer_name: cg.metadata?.insurer_name || '',
       insurance_type_name: cg.metadata?.insurance_type_name || ''
-    });
+    };
+    
+    console.log('[CG] Sending response with', response.formules?.length, 'formules');
+    res.json(response);
 
-  } catch (error) {
-    console.error('Erreur lors de la récupération des CG:', error);
-    res.status(500).json({ error: 'Erreur serveur lors de la récupération des CG' });
+  } catch (error: any) {
+    console.error('[CG] ERROR:', error.message);
+    console.error('[CG] Stack:', error.stack);
+    res.status(500).json({ error: 'Erreur serveur lors de la récupération des CG', details: error.message });
   }
 });
 
