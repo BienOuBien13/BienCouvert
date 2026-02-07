@@ -103,8 +103,21 @@ exports.storage = {
         }
         queryText += ' ORDER BY p.created_at DESC';
         const result = await (0, db_1.query)(queryText, params);
+        // Mapping code → enum PolicyType pour le frontend
+        const codeToEnumMap = {
+            'AUTO': 'Automobile',
+            'HOME': 'Habitation',
+            'HEALTH': 'Santé/Mutuelle',
+            'LEGAL': 'Protection Juridique',
+            'LIFE': 'Prévoyance/Décès',
+            'BANK_CARD': 'Carte Bancaire',
+            'LOAN': 'Emprunteur/Crédit',
+            'MOBILE': 'Appareils Mobiles'
+        };
         return result.rows.map(row => {
             const metadata = row.metadata || {};
+            const typeCode = row.insurance_type_code;
+            const typeEnum = codeToEnumMap[typeCode] || row.type_label || 'Autre';
             return {
                 id: row.id.toString(),
                 userId: row.user_id.toString(),
@@ -112,8 +125,8 @@ exports.storage = {
                 insurer: row.insurer_label || 'Non spécifié',
                 insurerCode: row.insurer_code,
                 insurerLogo: row.insurer_logo,
-                type: row.type_label || 'Autre',
-                typeCode: row.insurance_type_code,
+                type: typeEnum, // Utilise la valeur de l'enum PolicyType (ex: 'Automobile')
+                typeCode: typeCode,
                 formula: metadata.formula || null,
                 options: metadata.options || [],
                 premium: metadata.premium ? parseFloat(metadata.premium) : null,

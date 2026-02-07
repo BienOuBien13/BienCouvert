@@ -346,65 +346,74 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       console.warn('⚠️ Échec recherche policy_embeddings:', ragErr);
     }
     
-    // Étape 3: Rechercher dans les CG centralisées
+    // Étape 3: Rechercher dans les CG liées aux policies (central_cg et user_cg)
     let cgChunks: any[] = [];
     try {
-      // Compatibilité: accepter 'provider' (backend) ou 'insurer' (frontend)
-      const insurers = policies.map(p => p.provider || (p as any).insurer).filter(Boolean);
-      if (insurers.length > 0) {
-        console.log(`🔍 Recherche CG pour assureurs: ${insurers.join(', ')}`);
+      // Récupérer les IDs des CG liés aux policies
+      const centralCgIds = policies.map(p => (p as any).centralCgId).filter(id => id != null);
+      const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
+      
+      console.log(`🔍 Recherche CG liés aux policies: ${centralCgIds.length} central_cg, ${userCgIds.length} user_cg`);
+      
+      // Recherche dans central_cg via embeddings
+      if (centralCgIds.length > 0) {
+        const centralResults = await storage.query(
+          `SELECT 
+            cg.id,
+            cg.content_text,
+            i.label as insurer_label,
+            it.label_fr as type_label,
+            cg.metadata->>'productName' as product_name,
+            1 - (cg.embedding <=> $1::vector) as similarity
+          FROM central_cg cg
+          LEFT JOIN insurers i ON cg.insurer_code = i.code
+          LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+          WHERE cg.id = ANY($2)
+            AND cg.embedding IS NOT NULL
+          ORDER BY similarity DESC
+          LIMIT 5`,
+          [JSON.stringify(questionEmbedding), centralCgIds]
+        );
         
-        // Tenter la recherche vectorielle
-        cgChunks = await storage.searchCentralCg(questionEmbedding, insurers, 3);
-        
-        // Filtrer les résultats invalides (NaN)
-        cgChunks = cgChunks.filter(cg => !isNaN(cg.similarity));
-        
-        console.log(`✅ RAG CG: ${cgChunks.length} documents trouvés`);
-        if (cgChunks.length > 0) {
-          cgChunks.forEach((cg, idx) => {
-            console.log(`   ${idx + 1}. ${cg.insurer_label || cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity.toFixed(3)})`);
-          });
-        } else if (insurers.length > 0) {
-          // Fallback: recherche textuelle simple si l'embedding a échoué
-          console.log('⚠️ Similarité invalide (NaN), basculement sur recherche textuelle full-text');
-          
-          // Extraire les mots-clés de la question pour recherche full-text
-          const keywords = message.toLowerCase()
-            .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
-            .split(/\s+/)
-            .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'moi'].includes(w))
-            .slice(0, 5);
-          
-          console.log(`   Mots-clés extraits: ${keywords.join(', ')}`);
-          
-          // Construire la requête full-text
-          const tsquery = keywords.join(' | '); // OR entre les mots
-          
-          const textResults = await storage.query(
-            `SELECT 
-              cg.insurer,
-              cg.product_name, 
-              cg.content_text,
-              i.label as insurer_label,
-              it.label_fr as type,
-              ts_rank(to_tsvector('french', cg.content_text), to_tsquery('french', $2)) as similarity
-            FROM central_cg cg
-            LEFT JOIN insurers i ON cg.insurer_code = i.code
-            LEFT JOIN insurance_types it ON cg.type_code = it.code
-            WHERE (cg.insurer = ANY($1) OR cg.insurer_code = ANY($1))
-              AND cg.content_text IS NOT NULL
-              AND to_tsvector('french', cg.content_text) @@ to_tsquery('french', $2)
-            ORDER BY similarity DESC
-            LIMIT 3`,
-            [insurers, tsquery]
-          );
-          cgChunks = textResults.rows;
-          console.log(`✅ Fallback full-text: ${cgChunks.length} CG trouvées (pertinence: ${cgChunks[0]?.similarity?.toFixed(4) || 'N/A'})`);
-        }
+        cgChunks = cgChunks.concat(centralResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
+        console.log(`✅ RAG central_cg: ${centralResults.rows.length} documents trouvés`);
       }
+      
+      // Recherche dans user_cg via embeddings
+      if (userCgIds.length > 0) {
+        const userResults = await storage.query(
+          `SELECT 
+            ucg.id,
+            ucg.content_text,
+            i.label as insurer_label,
+            it.label_fr as type_label,
+            ucg.metadata->>'productName' as product_name,
+            1 - (ucg.embedding <=> $1::vector) as similarity
+          FROM user_cg ucg
+          LEFT JOIN insurers i ON ucg.insurer_code = i.code
+          LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+          WHERE ucg.id = ANY($2)
+            AND ucg.embedding IS NOT NULL
+          ORDER BY similarity DESC
+          LIMIT 5`,
+          [JSON.stringify(questionEmbedding), userCgIds]
+        );
+        
+        cgChunks = cgChunks.concat(userResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
+        console.log(`✅ RAG user_cg: ${userResults.rows.length} documents trouvés`);
+      }
+      
+      // Trier par similarité
+      cgChunks.sort((a, b) => b.similarity - a.similarity);
+      cgChunks = cgChunks.slice(0, 5);
+      
+      console.log(`✅ Total CG: ${cgChunks.length} documents pertinents`);
+      cgChunks.forEach((cg, idx) => {
+        console.log(`   ${idx + 1}. ${cg.insurer_label} - ${cg.type_label} (similarité: ${cg.similarity.toFixed(3)})`);
+      });
+      
     } catch (cgErr) {
-      console.warn('⚠️ Échec recherche central_cg:', cgErr);
+      console.warn('⚠️ Échec recherche CG liées:', cgErr);
     }
     
     // Étape 4: Construire le contexte enrichi
