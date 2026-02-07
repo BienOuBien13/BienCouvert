@@ -65,4 +65,18 @@ router.get('/insurers/:code', async (req, res) => {
   }
 });
 
+/**
+ * Route GET /api/masterdata/insurers-by-type/:insuranceTypeCode
+ * Récupère les assureurs disponibles pour un type d'assurance donné
+ */
+router.get('/insurers-by-type/:insuranceTypeCode', async (req, res) => {
+  try {
+    const insurers = await masterDataService.getInsurersByType(req.params.insuranceTypeCode);
+    res.json(insurers);
+  } catch (err) {
+    console.error('Erreur GET /insurers-by-type/:insuranceTypeCode:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

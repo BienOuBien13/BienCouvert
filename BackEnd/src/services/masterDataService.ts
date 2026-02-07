@@ -96,5 +96,24 @@ export const masterDataService = {
       [code]
     );
     return result.rows[0] || null;
+  },
+
+  /**
+   * Récupère les assureurs disponibles pour un type d'assurance donné
+   */
+  getInsurersByType: async (insuranceTypeCode: string): Promise<any[]> => {
+    const result = await query(
+      `SELECT i.code, i.label, i.full_name as "fullName", i.description, 
+              i.logo_url as "logoUrl", i.website_url as "websiteUrl", 
+              i.phone, i.email, i.color, i.display_order as "displayOrder", 
+              i.is_active as "isActive"
+       FROM insurers i
+       INNER JOIN insurers_insurance_types iit ON i.code = iit.insurer_code
+       WHERE iit.insurance_type_code = $1 
+         AND i.is_active = true
+       ORDER BY i.display_order`,
+      [insuranceTypeCode]
+    );
+    return result.rows;
   }
 };
