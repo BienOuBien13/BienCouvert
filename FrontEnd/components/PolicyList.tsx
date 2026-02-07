@@ -109,26 +109,69 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
               {isExpanded && (
                 <div className="px-8 pb-8 animate-fadeIn">
                   <div className="pt-6 border-t border-slate-100 space-y-6">
+                    
+                    {/* Formule et options */}
+                    {(policy.formula || (policy.options && policy.options.length > 0)) && (
+                      <div className="bg-gradient-to-br from-primary-50 to-blue-50 p-6 rounded-[2rem] border border-primary-100 space-y-4">
+                        {policy.formula && (
+                          <div>
+                            <label className="text-[10px] font-black text-primary-700 uppercase tracking-widest flex items-center gap-2">
+                              <Zap className="w-3 h-3" /> Formule souscrite
+                            </label>
+                            <p className="text-lg font-black text-primary-900 mt-2">{policy.formula}</p>
+                          </div>
+                        )}
+                        
+                        {policy.options && policy.options.length > 0 && (
+                          <div>
+                            <label className="text-[10px] font-black text-primary-700 uppercase tracking-widest">Options choisies</label>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {policy.options.map(opt => (
+                                <span key={opt} className="px-3 py-1.5 bg-white text-primary-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-primary-200 shadow-sm">
+                                  <Check className="w-3 h-3 inline mr-1" />
+                                  {opt}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Document de référence */}
                     <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <Globe className="w-3 h-3" /> Document de référence
+                        <FileText className="w-3 h-3" /> Document de référence
                       </label>
 
-                      {policy.sourceUrl ? (
-                        <div className="space-y-3">
-                          <a 
-                            href={policy.sourceUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
-                          >
-                            <div className="flex items-center gap-3">
-                              <FileText className="w-5 h-5" />
-                              <span className="text-xs font-black uppercase tracking-widest">Conditions Générales (.PDF)</span>
-                            </div>
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        </div>
+                      {(policy as any).centralCgId || (policy as any).userCgId ? (
+                        <a 
+                          href={`${import.meta.env.VITE_API_URL || ''}/api/cg/${(policy as any).centralCgId ? 'central' : 'user'}/${(policy as any).centralCgId || (policy as any).userCgId}`}
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <FileText className="w-5 h-5" />
+                            <span className="text-xs font-black uppercase tracking-widest">
+                              Conditions Générales {(policy as any).centralCgId ? '(Standards)' : '(Personnalisées)'}
+                            </span>
+                          </div>
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      ) : policy.sourceUrl ? (
+                        <a 
+                          href={policy.sourceUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <FileText className="w-5 h-5" />
+                            <span className="text-xs font-black uppercase tracking-widest">Conditions Générales (.PDF)</span>
+                          </div>
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
                       ) : (
                         <button 
                           onClick={() => handleRepairLink(policy)}
@@ -141,25 +184,17 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                       )}
                     </div>
 
-                    {policy.options && policy.options.length > 0 && (
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Garanties optionnelles</label>
-                         <div className="flex flex-wrap gap-2">
-                           {policy.options.map(opt => (
-                             <span key={opt} className="px-3 py-1 bg-white text-slate-600 text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-200">
-                               {opt}
-                             </span>
-                           ))}
-                         </div>
+                    {/* Résumé */}
+                    {policy.summary && (
+                      <div className="space-y-3">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <Info className="w-3 h-3 text-primary-500" /> Description courte
+                        </label>
+                        <div className="bg-white p-6 rounded-3xl border border-slate-100 text-sm text-slate-700 leading-relaxed shadow-sm">
+                          {policy.summary}
+                        </div>
                       </div>
                     )}
-
-                    <div className="space-y-3">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Info className="w-3 h-3 text-primary-500" /> Note de synthèse IA</label>
-                       <div className="bg-white p-6 rounded-3xl border border-slate-100 text-sm text-slate-700 leading-relaxed shadow-sm">
-                          {policy.summary || (isSearchingLink === policy.id ? "Analyse en cours..." : "Pas de résumé disponible pour ce contrat.")}
-                       </div>
-                    </div>
 
                     <div className="flex gap-2 pt-4">
                        <button onClick={() => onEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>

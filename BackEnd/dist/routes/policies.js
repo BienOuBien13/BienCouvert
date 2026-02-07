@@ -74,9 +74,14 @@ router.post('/', upload.single('file'), async (req, res) => {
         };
         // Insertion dans PostgreSQL
         const policyId = await storage_1.storage.writePolicy(newPolicy);
-        newPolicy.id = policyId;
-        // Réponse immédiate au client
-        res.json({ ...newPolicy, message: 'Policy created successfully' });
+        // Récupérer la policy complète avec les JOINs (insurer label, type label, etc.)
+        const createdPolicies = await storage_1.storage.readPolicies(userId);
+        const createdPolicy = createdPolicies.find((p) => p.id === policyId.toString());
+        if (!createdPolicy) {
+            return res.status(500).json({ message: 'Failed to retrieve created policy' });
+        }
+        // Réponse avec la policy complète
+        res.json({ ...createdPolicy, message: 'Policy created successfully' });
     }
     catch (err) {
         console.error('❌ Erreur création policy:', err);

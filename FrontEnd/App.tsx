@@ -328,7 +328,13 @@ function App() {
       case 'add':
         return (
           <div className="animate-fadeIn">
-            <AddPolicyPage onCancel={() => setActiveView('policies')} />
+            <AddPolicyPage 
+              onCancel={() => setActiveView('policies')}
+              onAdd={(policy) => {
+                setPolicies(prev => [policy, ...prev]);
+                console.log('✅ Policy ajoutée au state:', policy);
+              }}
+            />
           </div>
         );
       case 'smart-add':

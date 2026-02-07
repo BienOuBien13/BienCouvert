@@ -44,9 +44,10 @@ const insuranceIcons: Record<string, React.FC<any>> = {
 
 interface AddPolicyPageProps {
   onCancel?: () => void;
+  onAdd?: (policy: any) => void;
 }
 
-const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
+const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
   const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'configure'>('selectType');
   
@@ -256,8 +257,23 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
         throw new Error(errorData.message || 'Add policy failed');
       }
 
+      const createdPolicy = await response.json();
+      console.log('✅ Policy créée:', createdPolicy);
+      
+      // Notifier le parent avec la policy créée
+      if (onAdd) {
+        onAdd(createdPolicy);
+      }
+      
       alert('✅ Contrat ajouté au portefeuille');
-      if (onCancel) onCancel();
+      
+      // Réinitialiser le formulaire pour permettre l'ajout d'un autre contrat
+      setPolicyName('');
+      setSelectedFormule(null);
+      setSelectedOptions([]);
+      setCgData(null);
+      setSelectedInsurer(null);
+      setSelectedType(null);
     } catch (err: any) {
       console.error('Erreur ajout contrat:', err);
       setError(err.message || 'Erreur lors de l\'ajout au portefeuille');
