@@ -146,7 +146,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
       const data = await response.json();
       console.log('CG Data received:', data);
       setCgData(data);
-      setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
+      setPolicyName(`${selectedType!.labelFr} - ${selectedInsurer!.label}`);
       setStep('configure');
     } catch (err: any) {
       console.error('Error fetching CG:', err);
