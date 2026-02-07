@@ -46,6 +46,44 @@ router.post('/chat', async (req, res) => {
         res.status(500).json({ message: 'Chat error' });
     }
 });
+// Endpoint chat STREAMING - envoie la réponse progressivement via SSE
+router.post('/chat/stream', async (req, res) => {
+    const { message, policies, history } = req.body;
+    if (!message)
+        return res.status(400).json({ message: 'Missing message' });
+    try {
+        // Même enrichissement des policies que /chat
+        const policyIds = (policies || []).map((p) => p.id).filter(Boolean);
+        let enrichedPolicies = policies || [];
+        if (policyIds.length > 0) {
+            const userId = policies[0]?.userId;
+            if (userId) {
+                const allPolicies = await storage_1.storage.readPolicies(userId);
+                enrichedPolicies = allPolicies.filter((p) => policyIds.includes(String(p.id)));
+                console.log(`✅ ${enrichedPolicies.length} policies rechargées (streaming)`);
+            }
+        }
+        // Configuration SSE (Server-Sent Events)
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        // Callback pour chaque chunk reçu
+        const onChunk = (chunk) => {
+            res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+        };
+        // Appeler la fonction de streaming
+        await (0, geminiService_1.sendMessageToAssistantStream)(message, enrichedPolicies, history || [], onChunk);
+        // Signaler la fin du stream
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+    }
+    catch (e) {
+        console.error('❌ Chat streaming error:', e);
+        res.write(`data: ${JSON.stringify({ error: 'Erreur lors de la génération de la réponse' })}\n\n`);
+        res.end();
+    }
+});
 // Endpoint recherche d'infos sur une police via Gemini + Google Search
 router.post('/search-policy', async (req, res) => {
     const { provider, type, name } = req.body;

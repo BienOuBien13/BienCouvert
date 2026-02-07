@@ -541,42 +541,40 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
     }
     
-    const systemInstruction = `Tu es un assistant expert en assurance pour l'application AssurClair. Tu as accès aux documents contractuels complets de l'utilisateur via un système de vectorisation RAG.
+    const systemInstruction = `Tu es l'assistant expert en assurance pour AssurClair. Tu as DIRECTEMENT ACCÈS aux conditions générales complètes des contrats de l'utilisateur.
 
 CONTEXTE DISPONIBLE:
 
 ${enrichedContext}
 
-RÔLE ET COMPORTEMENT:
-- Tu ES l'expert qui a ACCÈS aux documents contractuels détaillés de l'utilisateur
-- CHERCHE la formule du contrat de l'utilisateur dans la section "📋 VOS CONTRATS" ci-dessus (ex: Initiale, Essentiel, Différence, Plénitude, Pertinence)
-- Quand on te demande le détail d'une garantie, réponds DIRECTEMENT en PERSONNALISANT selon la formule souscrite
-- Ne donne PAS une réponse générique listant toutes les formules - identifie SA formule et donne LES détails spécifiques
-- Ne dis JAMAIS "je n'ai pas accès aux documents" - tu y as accès via le contexte fourni
-- Ne dis JAMAIS "consultez vos Conditions Particulières" - tu DOIS répondre avec les infos du contexte
-- Si une info manque dans le contexte, cherche d'abord dans les extraits fournis avant de dire qu'elle est absente
-- Cite les passages pertinents des documents pour appuyer tes réponses
-- Sois précis sur les montants, plafonds, franchises quand ils apparaissent dans les extraits
-- Adopte un ton confiant et professionnel : tu connais les contrats de l'utilisateur
+RÈGLES ABSOLUES:
+- Tu AS accès aux documents contractuels via le contexte ci-dessus
+- Ne dis JAMAIS "je n'ai pas accès", "consultez vos documents", "vérifiez auprès de votre assureur"
+- Identifie la formule exacte du contrat dans "📋 VOS CONTRATS" (ex: TIERS ESSENTIEL, TOUS RISQUES CONFORT, Plénitude...)
+- Réponds UNIQUEMENT avec les infos SPÉCIFIQUES à SA formule
+- Utilise TOUJOURS le format bullet point (liste à puces avec -)
+- N'utilise JAMAIS de texte en gras (pas de ** ou __)
+- Reste concis et direct
+- Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
 
-STRUCTURE DE RÉPONSE:
-1. Identifie d'abord la formule du contrat dans "📋 VOS CONTRATS"
-2. Réponds DIRECTEMENT à la question avec les infos SPÉCIFIQUES à cette formule
-3. Cite les extraits pertinents entre guillemets
-4. Si vraiment aucune info dans le contexte fourni, dis-le clairement (mais ne renvoie pas vers d'autres documents)
-5. Ne renvoie JAMAIS l'utilisateur vers "son espace en ligne" ou "ses Conditions Particulières" - tu as les documents ici
+FORMAT DE RÉPONSE OBLIGATOIRE:
+- Une ligne d'introduction courte identifiant la formule
+- Liste à puces avec - (jamais de *)
+- Pas de sections avec titres en gras
+- Citer la source à la fin entre crochets
 
-Exemple de BONNE réponse:
-"Avec votre formule Plénitude MAIF pour votre 5008, voici votre Assistance déplacement:
-- Assistance 0 km: intervention dès le domicile (inclus)
-- Remorquage: illimité vers le garage de votre choix
-- Véhicule de remplacement: pendant toute la durée des réparations en cas d'accident, 20 jours en cas de vol, 7 jours en cas de panne
-- Hébergement: frais d'hôtel pris en charge si immobilisation loin du domicile
+Exemple CORRECT:
+Votre contrat MAAF AUTO avec formule TIERS ESSENTIEL couvre:
 
-Source: [Extrait CG MAIF - Options d'assistance]"
+- Responsabilité civile: dommages causés aux tiers (illimité pour dommages corporels, 100M€ pour dommages matériels)
+- Défense recours: prise en charge frais avocat jusqu'à 16 000€
+- Assistance aux personnes: incluse dès 0 km
+- Bris de pare-brise: en option (franchise 50€)
 
-Exemple de MAUVAISE réponse (à éviter):
-"Il existe plusieurs formules... Pour connaître précisément votre couverture, consultez vos Conditions Particulières."`;
+[Source: CG MAAF Auto - Tableau formules page 2]
+
+Exemple INTERDIT:
+Il existe plusieurs niveaux de garantie. **Responsabilité civile** est obligatoire... Pour connaître votre couverture exacte, consultez vos Conditions Particulières.`;
 
     const chatHistory = history.map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
@@ -605,6 +603,247 @@ Exemple de MAUVAISE réponse (à éviter):
     console.error('❌ gemini sendMessageToAssistant error:', err);
     console.error('Stack:', err?.stack);
     return `Une erreur s'est produite lors de la communication avec l'assistant: ${err?.message || 'Erreur inconnue'}`;
+  }
+};
+
+/**
+ * Version streaming de sendMessageToAssistant
+ * Envoie les chunks de réponse au fur et à mesure via un callback
+ * @param callback - Fonction appelée pour chaque chunk de texte reçu
+ */
+export const sendMessageToAssistantStream = async (
+  message: string,
+  policies: any[],
+  history: any[],
+  onChunk: (chunk: string) => void
+): Promise<void> => {
+  console.log(`\n🔍 sendMessageToAssistantStream reçoit ${policies.length} policies`);
+  
+  try {
+    const storage = require('../storage').storage;
+    
+    // Même logique d'extraction du contexte que sendMessageToAssistant
+    let questionEmbedding: number[];
+    try {
+      questionEmbedding = await generateEmbedding(message);
+      console.log(`✅ Embedding généré pour streaming: "${message.substring(0, 50)}..."`);
+    } catch (embErr) {
+      console.warn('⚠️ Échec embedding, mode dégradé sans RAG:', embErr);
+      questionEmbedding = new Array(768).fill(0);
+    }
+    
+    // Rechercher dans les embeddings (même logique)
+    let policyChunks: any[] = [];
+    let cgChunks: any[] = [];
+    
+    try {
+      const policyIds = policies.map(p => parseInt(p.id));
+      if (policyIds.length > 0) {
+        policyChunks = await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5);
+      }
+    } catch (ragErr) {
+      console.warn('⚠️ Échec recherche policy_embeddings:', ragErr);
+    }
+    
+    try {
+      const centralCgIds = policies.map(p => (p as any).centralCgId).filter(id => id != null);
+      const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
+      
+      if (centralCgIds.length > 0) {
+        const centralResults = await storage.query(
+          `SELECT 
+            cg.id,
+            cg.content_text,
+            i.label as insurer_label,
+            it.label_fr as type_label,
+            cg.metadata->>'productName' as product_name,
+            1 - (cg.embedding <=> $1::vector) as similarity
+          FROM central_cg cg
+          LEFT JOIN insurers i ON cg.insurer_code = i.code
+          LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+          WHERE cg.id = ANY($2)
+            AND cg.embedding IS NOT NULL
+          ORDER BY similarity DESC
+          LIMIT 5`,
+          [JSON.stringify(questionEmbedding), centralCgIds]
+        );
+        cgChunks = cgChunks.concat(centralResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
+      }
+      
+      if (userCgIds.length > 0) {
+        const userResults = await storage.query(
+          `SELECT 
+            ucg.id,
+            ucg.content_text,
+            'CG Personnalisé' as insurer_label,
+            it.label_fr as type_label,
+            1 - (ucg.embedding <=> $1::vector) as similarity
+          FROM user_cg ucg
+          LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+          WHERE ucg.id = ANY($2)
+            AND ucg.embedding IS NOT NULL
+          ORDER BY similarity DESC
+          LIMIT 3`,
+          [JSON.stringify(questionEmbedding), userCgIds]
+        );
+        cgChunks = cgChunks.concat(userResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
+      }
+    } catch (cgErr) {
+      console.warn('⚠️ Échec recherche CG:', cgErr);
+    }
+    
+    // Construction du contexte enrichi (même logique d'extraction multi-zones)
+    let enrichedContext = '';
+    
+    if (cgChunks.length > 0) {
+      enrichedContext += '📚 Conditions générales:\n\n';
+      cgChunks.forEach((cg: any) => {
+        const insurerName = cg.insurer_label || 'Assureur inconnu';
+        const productName = cg.product_name || cg.type_label || 'Produit';
+        
+        const keywords = message.toLowerCase()
+          .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
+          .split(/\s+/)
+          .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment'].includes(w));
+        
+        policies.forEach(p => {
+          const formula = (p as any).formula;
+          if (formula) {
+            keywords.push(...formula.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
+          }
+        });
+        
+        let extractedText = '';
+        const fullText = cg.content_text || '';
+        
+        if (keywords.length > 0 && fullText.length > 10000) {
+          const keywordPositions = new Map<string, number[]>();
+          keywords.forEach(kw => {
+            const regex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            let match;
+            const positions: number[] = [];
+            while ((match = regex.exec(fullText)) !== null) {
+              positions.push(match.index);
+            }
+            if (positions.length > 0) {
+              keywordPositions.set(kw, positions);
+            }
+          });
+          
+          if (keywordPositions.size > 0) {
+            const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
+            const extractedChunks: string[] = [];
+            const maxChunks = 3;
+            const chunkSize = 15000;
+            
+            const zones: number[] = [];
+            allPositions.forEach(pos => {
+              const hasNearbyZone = zones.some(z => Math.abs(z - pos) < 10000);
+              if (!hasNearbyZone) zones.push(pos);
+            });
+            
+            zones.slice(0, maxChunks).forEach(centerPos => {
+              const start = Math.max(0, centerPos - 5000);
+              const end = Math.min(fullText.length, centerPos + chunkSize);
+              extractedChunks.push(fullText.substring(start, end));
+            });
+            
+            extractedText = extractedChunks.join('\n[...]\n');
+          } else {
+            const third = Math.floor(fullText.length / 3);
+            extractedText = fullText.substring(0, 15000) + 
+                          '\n[...]\n' + 
+                          fullText.substring(third, third + 15000) + 
+                          '\n[...]\n' + 
+                          fullText.substring(fullText.length - 15000);
+          }
+        } else {
+          extractedText = fullText.substring(0, 40000);
+        }
+        
+        enrichedContext += `[${insurerName} - ${productName}]\n${extractedText}\n\n`;
+      });
+    }
+    
+    if (!enrichedContext) {
+      enrichedContext = 'Vos contrats:\n' + policies.map(p => {
+        const insurer = (p as any).insurer || 'Assureur inconnu';
+        const formula = (p as any).formula || null;
+        const options = (p as any).options || [];
+        const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        return `- ${p.name} (${p.type}) chez ${insurer}${formulaInfo}${optionsInfo}`;
+      }).join('\n');
+    } else {
+      const policiesInfo = policies.map(p => {
+        const insurer = (p as any).insurer || 'Assureur inconnu';
+        const formula = (p as any).formula || null;
+        const options = (p as any).options || [];
+        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+        return `${p.name}: ${insurer} / ${p.type}${formulaInfo}${optionsInfo}`;
+      }).join('\n');
+      enrichedContext = `📋 VOS CONTRATS:\n${policiesInfo}\n\n` + enrichedContext;
+    }
+    
+    const systemInstruction = `Tu es l'assistant expert en assurance pour AssurClair. Tu as DIRECTEMENT ACCÈS aux conditions générales complètes des contrats de l'utilisateur.
+
+CONTEXTE DISPONIBLE:
+
+${enrichedContext}
+
+RÈGLES ABSOLUES:
+- Tu AS accès aux documents contractuels via le contexte ci-dessus
+- Ne dis JAMAIS "je n'ai pas accès", "consultez vos documents", "vérifiez auprès de votre assureur"
+- Identifie la formule exacte du contrat dans "📋 VOS CONTRATS" (ex: TIERS ESSENTIEL, TOUS RISQUES CONFORT, Plénitude...)
+- Réponds UNIQUEMENT avec les infos SPÉCIFIQUES à SA formule
+- Utilise TOUJOURS le format bullet point (liste à puces avec -)
+- N'utilise JAMAIS de texte en gras (pas de ** ou __)
+- Reste concis et direct
+- Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
+
+FORMAT DE RÉPONSE OBLIGATOIRE:
+- Une ligne d'introduction courte identifiant la formule
+- Liste à puces avec - (jamais de *)
+- Pas de sections avec titres en gras
+- Citer la source à la fin entre crochets`;
+
+    const chatHistory = history.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.text }]
+    }));
+
+    const ai = getAiClient();
+    if (!ai) {
+      onChunk('[Erreur: Client AI non disponible]');
+      return;
+    }
+
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-2.5-flash'
+    });
+    
+    const chat = model.startChat({
+      history: chatHistory.length === 0 ? [
+        { role: 'user', parts: [{ text: systemInstruction }] },
+        { role: 'model', parts: [{ text: 'Compris.' }] }
+      ] : chatHistory
+    });
+
+    console.log(`📤 Envoi du message à Gemini (streaming)...`);
+    const result = await chat.sendMessageStream(message);
+    
+    for await (const chunk of result.stream) {
+      const chunkText = chunk.text();
+      if (chunkText) {
+        onChunk(chunkText);
+      }
+    }
+    
+    console.log(`✅ Streaming terminé`);
+  } catch (err: any) {
+    console.error('❌ gemini sendMessageToAssistantStream error:', err);
+    onChunk(`\n\n[Erreur: ${err?.message || 'Erreur inconnue'}]`);
   }
 };
 

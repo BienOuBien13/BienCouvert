@@ -107,6 +107,80 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 };
 
 /**
+ * Version streaming: envoie un message et reçoit la réponse progressivement
+ * @param onChunk - Callback appelé pour chaque morceau de texte reçu
+ */
+export const sendMessageToAssistantStream = async (
+  message: string, 
+  policies: Policy[], 
+  history: Message[],
+  onChunk: (chunk: string) => void,
+  onComplete: () => void,
+  onError: (error: string) => void
+): Promise<void> => {
+  try {
+    const response = await fetch(`${API_URL}/ai/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ message, policies, history })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Stream non disponible');
+    }
+
+    const decoder = new TextDecoder();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        onComplete();
+        break;
+      }
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            
+            if (data.error) {
+              onError(data.error);
+              return;
+            }
+            
+            if (data.done) {
+              onComplete();
+              return;
+            }
+            
+            if (data.chunk) {
+              onChunk(data.chunk);
+            }
+          } catch (e) {
+            console.warn('Erreur parsing SSE:', e);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Erreur sendMessageToAssistantStream:', e);
+    onError("Erreur de connexion au service IA");
+  }
+};
+
+/**
  * Détecte les optimisations possibles via le backend
  */
 export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {

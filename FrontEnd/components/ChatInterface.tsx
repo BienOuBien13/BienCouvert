@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { uuid } from '../utils/uuid';
 import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
-import { sendMessageToAssistant, connectLiveSession } from '../services/geminiService';
+import { sendMessageToAssistant, sendMessageToAssistantStream, connectLiveSession } from '../services/geminiService';
 
 interface Props {
   policies: Policy[];
@@ -34,12 +34,12 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
   };
 
   useEffect(() => {
-    // Ne pas scroller automatiquement au premier rendu
+    // Ne plus scroller automatiquement - l'utilisateur garde le contrôle
+    // Le scroll automatique est désactivé pour éviter les sauts de page
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      return;
     }
-    scrollToBottom();
+    // scrollToBottom() désactivé volontairement
   }, [messages, isLoading, isLive, liveUserText, liveModelText]);
 
   // Cleanup session on unmount
@@ -66,26 +66,60 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
     setInput('');
     setIsLoading(true);
 
-    try {
-      const responseText = await sendMessageToAssistant(userMessage.text, policies, messages);
-      
-      const botMessage: Message = {
-        id: uuid(),
-        role: 'model',
-        text: responseText,
-        timestamp: Date.now(),
-      };
+    // Créer un message bot vide qui sera rempli progressivement
+    const botMessageId = uuid();
+    const initialBotMessage: Message = {
+      id: botMessageId,
+      role: 'model',
+      text: '',
+      timestamp: Date.now(),
+    };
+    
+    setMessages(prev => [...prev, initialBotMessage]);
 
-      setMessages(prev => [...prev, botMessage]);
+    try {
+      let accumulatedText = '';
+      
+      await sendMessageToAssistantStream(
+        userMessage.text,
+        policies,
+        messages,
+        // onChunk: Ajouter progressivement le texte
+        (chunk: string) => {
+          accumulatedText += chunk;
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === botMessageId 
+                ? { ...msg, text: accumulatedText }
+                : msg
+            )
+          );
+        },
+        // onComplete
+        () => {
+          setIsLoading(false);
+        },
+        // onError
+        (error: string) => {
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === botMessageId 
+                ? { ...msg, text: `Erreur: ${error}` }
+                : msg
+            )
+          );
+          setIsLoading(false);
+        }
+      );
     } catch (error) {
-      const errorMessage: Message = {
-        id: uuid(),
-        role: 'model',
-        text: "Désolé, j'ai rencontré une erreur. Veuillez réessayer.",
-        timestamp: Date.now(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
+      const errorMessage = "Désolé, j'ai rencontré une erreur. Veuillez réessayer.";
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === botMessageId 
+            ? { ...msg, text: errorMessage }
+            : msg
+        )
+      );
       setIsLoading(false);
     }
   };
