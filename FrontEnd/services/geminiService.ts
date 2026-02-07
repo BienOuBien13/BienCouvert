@@ -119,11 +119,20 @@ export const sendMessageToAssistantStream = async (
   onError: (error: string) => void
 ): Promise<void> => {
   try {
+    // Récupérer le token CSRF
+    const csrfToken = await fetchCsrfToken();
+    
+    const headers: any = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await fetch(`${API_URL}/api/ai/chat/stream`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       credentials: 'include',
       body: JSON.stringify({ message, policies, history })
     });
