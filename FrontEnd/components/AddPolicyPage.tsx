@@ -81,8 +81,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
     const user = localStorage.getItem('user');
     if (user) {
       const userData = JSON.parse(user);
+      console.log('User data from localStorage:', userData);
       setUserEmail(userData.email);
-      setUserId(userData.id);
+      setUserId(userData.id || userData.user_id || ''); // Try both id and user_id
+      console.log('userId set to:', userData.id || userData.user_id);
     }
   };
 
