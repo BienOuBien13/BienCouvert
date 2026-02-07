@@ -129,15 +129,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
     setError('');
 
     try {
-      const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
-      const { csrfToken } = await csrfRes.json();
+      // GET requests don't need CSRF token
+      const url = `${API_URL}/api/cg/central/by-type-and-insurer?insurance_type_code=${encodeURIComponent(typeCode)}&insurer_code=${encodeURIComponent(insurerCode)}`;
       
-      const url = new URL(`${API_URL}/api/cg/central/by-type-and-insurer`);
-      url.searchParams.append('insurance_type_code', typeCode);
-      url.searchParams.append('insurer_code', insurerCode);
-      
-      const response = await fetch(url.toString(), {
-        headers: { 'X-CSRF-Token': csrfToken },
+      const response = await fetch(url, {
         credentials: 'include'
       });
       
@@ -149,10 +144,12 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
       }
       
       const data = await response.json();
+      console.log('CG Data received:', data);
       setCgData(data);
       setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
       setStep('configure');
     } catch (err: any) {
+      console.error('Error fetching CG:', err);
       if (err.message === 'NOT_FOUND') {
         setError('Aucune condition générale trouvée. Essayez le mode "CG Personnalisées".');
       } else {
