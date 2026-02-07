@@ -119,7 +119,7 @@ export const sendMessageToAssistantStream = async (
   onError: (error: string) => void
 ): Promise<void> => {
   try {
-    const response = await fetch(`${API_URL}/ai/chat/stream`, {
+    const response = await fetch(`${API_URL}/api/ai/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
