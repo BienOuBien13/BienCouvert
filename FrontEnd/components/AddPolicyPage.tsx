@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 interface InsuranceType {
   code: string;
@@ -28,8 +28,11 @@ interface CGData {
   insurance_type_name: string;
 }
 
-const AddPolicyPage: React.FC = () => {
-  const navigate = useNavigate();
+interface AddPolicyPageProps {
+  onCancel?: () => void;
+}
+
+const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
   
   // Master data
@@ -71,11 +74,11 @@ const AddPolicyPage: React.FC = () => {
   const loadMasterData = async () => {
     try {
       const [typesRes, insurersRes] = await Promise.all([
-        axios.get('/api/masterdata/insurance-types'),
-        axios.get('/api/masterdata/insurers')
+        fetch(`${API_URL}/api/masterdata/insurance-types`).then(r => r.json()),
+        fetch(`${API_URL}/api/masterdata/insurers`).then(r => r.json())
       ]);
-      setInsuranceTypes(typesRes.data);
-      setInsurers(insurersRes.data);
+      setInsuranceTypes(typesRes);
+      setInsurers(insurersRes);
     } catch (err) {
       console.error('Erreur chargement données:', err);
       setError('Impossible de charger les données');
@@ -94,23 +97,34 @@ const AddPolicyPage: React.FC = () => {
     setCgData(null);
 
     try {
-      const csrfToken = await axios.get('/api/csrf-token').then(r => r.data.csrfToken);
-      const response = await axios.get('/api/cg/central/by-type-and-insurer', {
-        params: {
-          insurance_type_code: selectedType,
-          insurer_code: selectedInsurer
-        },
-        headers: { 'X-CSRF-Token': csrfToken }
+      const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
+      const { csrfToken } = await csrfRes.json();
+      
+      const url = new URL(`${API_URL}/api/cg/central/by-type-and-insurer`);
+      url.searchParams.append('insurance_type_code', selectedType);
+      url.searchParams.append('insurer_code', selectedInsurer);
+      
+      const response = await fetch(url.toString(), {
+        headers: { 'X-CSRF-Token': csrfToken },
+        credentials: 'include'
       });
       
-      setCgData(response.data);
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('NOT_FOUND');
+        }
+        throw new Error('API_ERROR');
+      }
+      
+      const data = await response.json();
+      setCgData(data);
       
       // Pré-remplir le nom du contrat
       const typeName = insuranceTypes.find(t => t.code === selectedType)?.name || '';
       const insurerName = insurers.find(i => i.code === selectedInsurer)?.name || '';
       setPolicyName(`${typeName} - ${insurerName}`);
     } catch (err: any) {
-      if (err.response?.status === 404) {
+      if (err.message === 'NOT_FOUND') {
         setError('Aucune condition générale trouvée pour cette combinaison. Essayez le mode "CG Personnalisées".');
       } else {
         setError('Erreur lors de la recherche des conditions générales');
@@ -131,7 +145,8 @@ const AddPolicyPage: React.FC = () => {
     setError('');
 
     try {
-      const csrfToken = await axios.get('/api/csrf-token').then(r => r.data.csrfToken);
+      const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
+      const { csrfToken } = await csrfRes.json();
       
       const formData = new FormData();
       formData.append('pdf', pdfFile);
@@ -139,24 +154,30 @@ const AddPolicyPage: React.FC = () => {
       formData.append('insurer_code', customInsurer);
       formData.append('user_email', userEmail);
 
-      const response = await axios.post('/api/cg/user/upload', formData, {
+      const response = await fetch(`${API_URL}/api/cg/user/upload`, {
+        method: 'POST',
         headers: { 
-          'X-CSRF-Token': csrfToken,
-          'Content-Type': 'multipart/form-data'
-        }
+          'X-CSRF-Token': csrfToken
+        },
+        body: formData,
+        credentials: 'include'
       });
+      
+      if (!response.ok) throw new Error('Upload failed');
+      
+      const data = await response.json();
 
       setCgData({
-        id: response.data.id,
-        formules: response.data.formules,
-        options: response.data.options,
-        resume_court: response.data.resume_court,
-        insurer_name: response.data.insurer_name,
-        insurance_type_name: response.data.insurance_type_name
+        id: data.id,
+        formules: data.formules,
+        options: data.options,
+        resume_court: data.resume_court,
+        insurer_name: data.insurer_name,
+        insurance_type_name: data.insurance_type_name
       });
 
       // Pré-remplir le nom du contrat
-      setPolicyName(`${response.data.insurance_type_name} - ${response.data.insurer_name}`);
+      setPolicyName(`${data.insurance_type_name} - ${data.insurer_name}`);
       
     } catch (err: any) {
       console.error('Erreur upload:', err);
@@ -177,25 +198,34 @@ const AddPolicyPage: React.FC = () => {
     setError('');
 
     try {
-      const csrfToken = await axios.get('/api/csrf-token').then(r => r.data.csrfToken);
+      const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
+      const { csrfToken } = await csrfRes.json();
       
       const insurerCode = mode === 'standard' ? selectedInsurer : customInsurer;
       const typeCode = mode === 'standard' ? selectedType : customType;
 
-      await axios.post('/api/policies', {
-        name: policyName,
-        insurer_code: insurerCode,
-        insurance_type_code: typeCode,
-        formula: selectedFormule,
-        options: selectedOptions,
-        cg_source: mode === 'standard' ? 'central' : 'user',
-        cg_id: cgData.id
-      }, {
-        headers: { 'X-CSRF-Token': csrfToken }
+      const response = await fetch(`${API_URL}/api/policies`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({
+          name: policyName,
+          insurer_code: insurerCode,
+          insurance_type_code: typeCode,
+          formula: selectedFormule,
+          options: selectedOptions,
+          cg_source: mode === 'standard' ? 'central' : 'user',
+          cg_id: cgData.id
+        }),
+        credentials: 'include'
       });
+      
+      if (!response.ok) throw new Error('Add policy failed');
 
       alert('✅ Contrat ajouté au portefeuille');
-      navigate('/');
+      if (onCancel) onCancel();
     } catch (err: any) {
       console.error('Erreur ajout contrat:', err);
       setError('Erreur lors de l\'ajout au portefeuille');
@@ -389,14 +419,14 @@ const AddPolicyPage: React.FC = () => {
             </div>
 
             {/* Options */}
-            {Object.keys(cgData.options).length > 0 && (
+            {cgData.options && Object.keys(cgData.options).length > 0 && (
               <div>
                 <label className="block text-sm font-medium mb-2">Options</label>
                 <div className="space-y-2">
                   {Object.entries(cgData.options).map(([category, opts]) => (
                     <div key={category}>
                       <p className="text-xs text-gray-500 uppercase mb-2">{category.replace('_', ' ')}</p>
-                      {opts.map(option => (
+                      {(opts as string[]).map(option => (
                         <label key={option} className="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                           <input
                             type="checkbox"
