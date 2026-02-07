@@ -117,14 +117,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
     setSelectedInsurer(insurer);
     
     if (mode === 'standard') {
-      await searchCG(selectedType!.code, insurer.code);
+      await searchCG(selectedType!.code, insurer.code, insurer);
     } else {
       setStep('configure');
     }
   };
 
   // Mode standard : recherche des CG disponibles
-  const searchCG = async (typeCode: string, insurerCode: string) => {
+  const searchCG = async (typeCode: string, insurerCode: string, insurer: Insurer) => {
     setLoading(true);
     setError('');
 
@@ -146,7 +146,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
       const data = await response.json();
       console.log('CG Data received:', data);
       setCgData(data);
-      setPolicyName(`${selectedType!.labelFr} - ${selectedInsurer!.label}`);
+      setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
       setStep('configure');
     } catch (err: any) {
       console.error('Error fetching CG:', err);
