@@ -43,104 +43,44 @@ router.get('/', async (req, res) => {
 router.post('/', upload.single('file'), async (req, res) => {
     try {
         const body = req.body;
-        // Validation minimale côté serveur : au moins un nom ou un document
-        if (!body.name && !req.file && !(body.fileData && body.fileName)) {
-            return res.status(400).json({ message: 'Missing required fields (name or file)' });
-        }
         // Validation du userId : doit être un entier valide
         const userId = body.userId ? parseInt(body.userId) : null;
         if (!userId || isNaN(userId)) {
             return res.status(400).json({ message: 'Valid userId is required' });
         }
-        // Construction de l'objet police avec toutes les propriétés nécessaires
+        // Validation des codes requis
+        if (!body.insurerCode || !body.insurance_type_code) {
+            return res.status(400).json({ message: 'insurerCode and insurance_type_code are required' });
+        }
+        // Construction de l'objet policy avec la nouvelle structure
         const newPolicy = {
-            userId: userId, // ID de l'utilisateur propriétaire (INTEGER requis)
-            policyNumber: body.policyNumber || `POL-${Date.now()}`, // Génère un numéro si absent
-            insurer: body.insurer || 'Non spécifié', // Assureur (requis)
-            insurerCode: body.insurerCode || body.insurer, // Code assureur pour FK
-            type: body.type || 'Autre', // Type d'assurance (requis)
-            typeCode: body.typeCode || body.type, // Code type pour FK
-            premium: body.annualPremium ? parseFloat(body.annualPremium) : null, // Prime annuelle en €
-            coverage: body.coverage ? parseFloat(body.coverage) : null, // Montant couverture
-            startDate: body.startDate || new Date().toISOString().split('T')[0], // Date de début
-            endDate: body.endDate || null, // Date de fin
-            status: body.status || 'active', // Statut (active par défaut)
-            documentUrl: body.sourceUrl || null, // URL source si provient du web
-            documentData: null, // Document en base64 (rempli plus bas)
+            userId: userId,
+            insurerCode: body.insurerCode,
+            insuranceTypeCode: body.insurance_type_code,
+            centralCgId: body.cg_source === 'central' ? body.cg_id : null,
+            userCgId: body.cg_source === 'user' ? body.cg_id : null,
+            startDate: body.startDate || new Date().toISOString().split('T')[0],
+            endDate: body.endDate || null,
+            status: body.status || 'active',
+            documentUrl: body.sourceUrl || null,
             metadata: {
                 name: body.name || 'Contrat sans nom',
-                fileName: null,
-                mimeType: body.mimeType || 'text/html',
-                coverageDetail: body.coverageDetail || null,
+                formula: body.formula || null,
                 options: body.options || [],
-                summary: body.summary || null,
-                isInternalSource: body.isInternalSource || false
+                premium: body.premium || null,
+                coverage: body.coverage || null,
+                summary: body.summary || null
             }
         };
-        // --- Mode 1 : Upload via multipart/form-data (fichier reçu par multer) ---
-        if (req.file) {
-            newPolicy.documentData = req.file.buffer.toString('base64');
-            newPolicy.metadata.fileName = req.file.originalname;
-            newPolicy.metadata.mimeType = req.file.mimetype;
-            // Tentative de génération d'un résumé via l'IA
-            try {
-                newPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.documentData, newPolicy.metadata.mimeType);
-            }
-            catch (e) {
-                console.warn('Résumé automatique échoué pour upload de fichier', e);
-            }
-        }
-        // --- Mode 2 : Upload JSON avec base64 ---
-        else if (body.fileData && body.fileName) {
-            newPolicy.documentData = body.fileData;
-            newPolicy.metadata.fileName = body.fileName;
-            newPolicy.metadata.mimeType = body.mimeType || newPolicy.metadata.mimeType;
-            if (!newPolicy.metadata.summary) {
-                try {
-                    newPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(newPolicy.documentData, newPolicy.metadata.mimeType);
-                }
-                catch (e) {
-                    console.warn('Résumé automatique échoué pour fileData', e);
-                }
-            }
-        }
         // Insertion dans PostgreSQL
         const policyId = await storage_1.storage.writePolicy(newPolicy);
         newPolicy.id = policyId;
-        // ⚡ Réponse immédiate au client
-        res.json(newPolicy);
-        // 🔄 Vectorisation automatique si PDF présent - en arrière-plan (non-bloquant)
-        if (newPolicy.documentData && newPolicy.metadata.mimeType === 'application/pdf') {
-            (async () => {
-                try {
-                    console.log(`🚀 Démarrage vectorisation en arrière-plan pour policy ${policyId}`);
-                    // Extraire le texte du PDF avec Gemini
-                    const { GoogleGenerativeAI } = require('@google/generative-ai');
-                    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-                    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-                    const result = await model.generateContent([
-                        {
-                            inlineData: {
-                                mimeType: 'application/pdf',
-                                data: newPolicy.documentData
-                            }
-                        },
-                        "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
-                    ]);
-                    const pdfText = result.response.text();
-                    console.log(`✅ Texte extrait (${pdfText.length} caractères) pour policy ${policyId}`);
-                    await storage_1.storage.vectorizePolicyPdf(policyId, pdfText);
-                    console.log(`✅ PDF vectorisé avec succès pour policy ${policyId}`);
-                }
-                catch (e) {
-                    console.error(`❌ Vectorisation PDF ${policyId} échouée:`, e);
-                }
-            })().catch(err => console.error('❌ Erreur async vectorisation policy:', err));
-        }
+        // Réponse immédiate au client
+        res.json({ ...newPolicy, message: 'Policy created successfully' });
     }
     catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Server error' });
+        console.error('❌ Erreur création policy:', err);
+        res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 /**

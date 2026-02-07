@@ -104,7 +104,7 @@ export const storage = {
         i.label as insurer_label,
         i.logo_url as insurer_logo
       FROM policies p
-      LEFT JOIN insurance_types it ON p.type_code = it.code
+      LEFT JOIN insurance_types it ON p.insurance_type_code = it.code
       LEFT JOIN insurers i ON p.insurer_code = i.code
     `;
     const params: any[] = [];
@@ -114,7 +114,7 @@ export const storage = {
       params.push(userId);
     }
     
-    queryText += ' ORDER BY p.id';
+    queryText += ' ORDER BY p.created_at DESC';
     
     const result = await query(queryText, params);
     return result.rows.map(row => {
@@ -123,29 +123,24 @@ export const storage = {
         id: row.id.toString(),
         userId: row.user_id.toString(),
         name: metadata.name || 'Contrat sans nom',
-        insurer: row.insurer_label || row.insurer || 'Non spécifié',
+        insurer: row.insurer_label || 'Non spécifié',
         insurerCode: row.insurer_code,
         insurerLogo: row.insurer_logo,
-        type: row.type_label || row.type || 'Autre',
-        typeCode: row.type_code,
-        coverageDetail: metadata.coverageDetail || null,
+        type: row.type_label || 'Autre',
+        typeCode: row.insurance_type_code,
+        formula: metadata.formula || null,
         options: metadata.options || [],
-        fileData: row.document_data || null,
-        fileName: metadata.fileName || null,
+        premium: metadata.premium ? parseFloat(metadata.premium) : null,
+        coverage: metadata.coverage ? parseFloat(metadata.coverage) : null,
         sourceUrl: row.document_url || null,
-        mimeType: metadata.mimeType || 'text/html',
         summary: metadata.summary || null,
-        addedAt: row.start_date ? new Date(row.start_date).getTime() : Date.now(),
-        annualPremium: row.premium ? parseFloat(row.premium) : undefined,
-        isInternalSource: metadata.isInternalSource || false,
-        // Garder aussi les propriétés natives pour compatibilité
-        policyNumber: row.policy_number,
-        premium: row.premium ? parseFloat(row.premium) : null,
-        coverage: row.coverage ? parseFloat(row.coverage) : null,
         startDate: row.start_date,
         endDate: row.end_date,
         status: row.status,
-        centralCgId: row.central_cg_id
+        centralCgId: row.central_cg_id,
+        userCgId: row.user_cg_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
       };
     }) as T[];
   },
@@ -156,46 +151,50 @@ export const storage = {
    */
   writePolicy: async (data: any) => {
     const { 
-      id, userId, policyNumber, insurer, type, premium, coverage,
-      startDate, endDate, status, documentUrl, documentData, metadata, centralCgId,
-      insurerCode, typeCode
+      id, userId, insurerCode, insuranceTypeCode, centralCgId, userCgId,
+      startDate, endDate, status, documentUrl, metadata
     } = data;
     
-    // DEBUG: Log ce qui est reçu
-    console.log('🔍 writePolicy reçoit:', { insurer, type, insurerCode, typeCode });
+    // Validation des codes requis
+    if (!insurerCode || !insuranceTypeCode) {
+      throw new Error('insurerCode and insuranceTypeCode are required');
+    }
     
-    // Utiliser les codes fournis, sinon fallback sur les valeurs type/insurer
-    const finalTypeCode = typeCode || type;
-    const finalInsurerCode = insurerCode || insurer;
+    // Construire l'objet metadata complet
+    const metadataObj = {
+      name: metadata?.name || 'Contrat sans nom',
+      formula: metadata?.formula || null,
+      options: metadata?.options || [],
+      premium: metadata?.premium || null,
+      coverage: metadata?.coverage || null,
+      summary: metadata?.summary || null,
+      ...metadata
+    };
     
-    console.log('🔍 Codes finaux:', { finalInsurerCode, finalTypeCode });
-    
-    // Sérialiser metadata en JSON si c'est un objet
-    const metadataJson = metadata ? JSON.stringify(metadata) : null;
+    const metadataJson = JSON.stringify(metadataObj);
     
     if (id) {
       // Mise à jour
       await query(
         `UPDATE policies 
-         SET user_id = $1, policy_number = $2, insurer = $3, type = $4, 
-             insurer_code = $5, type_code = $6,
-             premium = $7, coverage = $8, start_date = $9, end_date = $10,
-             status = $11, document_url = $12, document_data = $13, 
-             metadata = $14, central_cg_id = $15, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $16`,
-        [userId, policyNumber, insurer, type, finalInsurerCode, finalTypeCode, premium, coverage, startDate, 
-         endDate, status, documentUrl, documentData, metadataJson, centralCgId || null, id]
+         SET user_id = $1, insurer_code = $2, insurance_type_code = $3,
+             central_cg_id = $4, user_cg_id = $5, start_date = $6, end_date = $7,
+             status = $8, document_url = $9, metadata = $10, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $11`,
+        [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null, 
+         startDate, endDate, status, documentUrl, metadataJson, id]
       );
+      return id;
     } else {
       // Insertion
       const result = await query(
         `INSERT INTO policies 
-         (user_id, policy_number, insurer, type, insurer_code, type_code, premium, coverage, 
-          start_date, end_date, status, document_url, document_data, metadata, central_cg_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         (user_id, insurer_code, insurance_type_code, central_cg_id, user_cg_id,
+          start_date, end_date, status, document_url, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
-        [userId, policyNumber, insurer, type, finalInsurerCode, finalTypeCode, premium, coverage, startDate, 
-         endDate, status || 'active', documentUrl, documentData, metadataJson, centralCgId || null]
+        [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null,
+         startDate, endDate, status || 'active', documentUrl, metadataJson]
       );
       return result.rows[0].id;
     }

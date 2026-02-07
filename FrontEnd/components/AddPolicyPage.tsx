@@ -239,23 +239,28 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
         body: JSON.stringify({
           userId: userId,
           name: policyName,
-          insurer_code: selectedInsurer!.code,
+          insurerCode: selectedInsurer!.code,
           insurance_type_code: selectedType!.code,
           formula: selectedFormule,
           options: selectedOptions,
           cg_source: mode === 'standard' ? 'central' : 'user',
-          cg_id: cgData.id
+          cg_id: cgData.id,
+          startDate: new Date().toISOString().split('T')[0],
+          status: 'active'
         }),
         credentials: 'include'
       });
       
-      if (!response.ok) throw new Error('Add policy failed');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Add policy failed');
+      }
 
       alert('✅ Contrat ajouté au portefeuille');
       if (onCancel) onCancel();
     } catch (err: any) {
       console.error('Erreur ajout contrat:', err);
-      setError('Erreur lors de l\'ajout au portefeuille');
+      setError(err.message || 'Erreur lors de l\'ajout au portefeuille');
     } finally {
       setLoading(false);
     }
