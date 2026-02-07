@@ -78,7 +78,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
   }, []);
 
   const loadUserData = () => {
-    const user = localStorage.getItem('user');
+    const user = localStorage.getItem('assurclair_current_user');
     if (user) {
       const userData = JSON.parse(user);
       console.log('User data from localStorage:', userData);
