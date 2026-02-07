@@ -5,12 +5,11 @@
  */
 
 import express, { Request, Response } from 'express';
-import { Pool } from 'pg';
 import multer from 'multer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { query } from '../db';
 
 const router = express.Router();
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // Configuration multer pour l'upload de fichiers PDF
@@ -43,7 +42,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
     }
 
     console.log('[CG] Querying database for:', { insurance_type_code, insurer_code });
-    const result = await pool.query(
+    const result = await query(
       `SELECT 
         id,
         insurer_code,
@@ -125,7 +124,7 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
     const text = await extractTextFromPdf(base64Pdf);
 
     // 2. Extraire les métadonnées enrichies
-    const insuranceTypeResult = await pool.query(
+    const insuranceTypeResult = await query(
       'SELECT name FROM insurance_types WHERE code = $1',
       [insurance_type_code]
     );
@@ -137,14 +136,14 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
     const embedding = await generateEmbedding(text);
 
     // 4. Récupérer les noms complets de l'assureur et du type
-    const insurerResult = await pool.query(
+    const insurerResult = await query(
       'SELECT name FROM insurers WHERE code = $1',
       [insurer_code]
     );
     const insurerName = insurerResult.rows[0]?.name || insurer_code;
 
     // 5. Insérer dans user_cg
-    const insertResult = await pool.query(
+    const insertResult = await query(
       `INSERT INTO user_cg (
         insurer_code,
         insurance_type_code,
