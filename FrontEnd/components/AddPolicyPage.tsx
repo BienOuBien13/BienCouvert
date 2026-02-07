@@ -70,17 +70,19 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState('');
 
   useEffect(() => {
     loadInsuranceTypes();
-    loadUserEmail();
+    loadUserData();
   }, []);
 
-  const loadUserEmail = () => {
+  const loadUserData = () => {
     const user = localStorage.getItem('user');
     if (user) {
       const userData = JSON.parse(user);
       setUserEmail(userData.email);
+      setUserId(userData.id);
     }
   };
 
@@ -233,6 +235,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel }) => {
           'X-CSRF-Token': csrfToken
         },
         body: JSON.stringify({
+          userId: userId,
           name: policyName,
           insurer_code: selectedInsurer!.code,
           insurance_type_code: selectedType!.code,
