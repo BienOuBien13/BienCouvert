@@ -1,7 +1,6 @@
 {
   "name": "assurclair-backend",
   "version": "0.1.0",
-  "type": "module",
   "description": "Minimal backend for AssurClair - provides auth, policies and AI endpoints",
   "main": "dist/index.js",
   "scripts": {
