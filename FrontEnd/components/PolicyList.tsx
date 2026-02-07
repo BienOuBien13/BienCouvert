@@ -144,9 +144,9 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                         <FileText className="w-3 h-3" /> Document de référence
                       </label>
 
-                      {(policy as any).centralCgId || (policy as any).userCgId ? (
+                      {((policy as any).cgUrl || policy.sourceUrl) ? (
                         <a 
-                          href={`${import.meta.env.VITE_API_URL || ''}/api/cg/${(policy as any).centralCgId ? 'central' : 'user'}/${(policy as any).centralCgId || (policy as any).userCgId}`}
+                          href={(policy as any).cgUrl || policy.sourceUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
@@ -154,21 +154,8 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                           <div className="flex items-center gap-3">
                             <FileText className="w-5 h-5" />
                             <span className="text-xs font-black uppercase tracking-widest">
-                              Conditions Générales {(policy as any).centralCgId ? '(Standards)' : '(Personnalisées)'}
+                              Conditions Générales PDF
                             </span>
-                          </div>
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      ) : policy.sourceUrl ? (
-                        <a 
-                          href={policy.sourceUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
-                        >
-                          <div className="flex items-center gap-3">
-                            <FileText className="w-5 h-5" />
-                            <span className="text-xs font-black uppercase tracking-widest">Conditions Générales (.PDF)</span>
                           </div>
                           <ExternalLink className="w-4 h-4" />
                         </a>

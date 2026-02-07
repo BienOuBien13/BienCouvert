@@ -267,13 +267,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       
       alert('✅ Contrat ajouté au portefeuille');
       
-      // Réinitialiser le formulaire pour permettre l'ajout d'un autre contrat
-      setPolicyName('');
-      setSelectedFormule(null);
-      setSelectedOptions([]);
-      setCgData(null);
-      setSelectedInsurer(null);
-      setSelectedType(null);
+      // Retourner au portefeuille
+      if (onCancel) {
+        onCancel();
+      }
     } catch (err: any) {
       console.error('Erreur ajout contrat:', err);
       setError(err.message || 'Erreur lors de l\'ajout au portefeuille');
@@ -355,16 +352,16 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               <button
                 key={type.code}
                 onClick={() => handleSelectType(type)}
-                className="relative p-6 rounded-2xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all group bg-white"
+                className="relative p-4 rounded-2xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all group bg-white"
                 style={{ borderColor: selectedType?.code === type.code ? type.color : undefined }}
               >
                 <div 
-                  className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center text-white"
+                  className="w-12 h-12 rounded-full mx-auto mb-2 flex items-center justify-center text-white"
                   style={{ backgroundColor: type.color }}
                 >
-                  <IconComponent className="w-8 h-8" />
+                  <IconComponent className="w-6 h-6" />
                 </div>
-                <h3 className="font-bold text-center text-gray-900">{type.labelFr}</h3>
+                <h3 className="font-bold text-center text-sm text-gray-900">{type.labelFr}</h3>
               </button>
             );
           })}

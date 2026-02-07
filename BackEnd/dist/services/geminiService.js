@@ -404,39 +404,58 @@ const sendMessageToAssistant = async (message, policies, history) => {
             enrichedContext += '📚 Conditions générales:\n\n';
             cgChunks.forEach((cg, idx) => {
                 const insurerName = cg.insurer_label || cg.insurer || 'Assureur inconnu';
+                const productName = cg.product_name || cg.type_label || 'Produit';
                 // Extraction intelligente : chercher les mots-clés de la question dans le document
                 const keywords = message.toLowerCase()
                     .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
                     .split(/\s+/)
-                    .filter(w => w.length > 4 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment'].includes(w));
+                    .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment', 'moi', 'mes', 'mon', 'les', 'des', 'une'].includes(w));
+                // Ajouter les formules des policies comme mots-clés
+                policies.forEach(p => {
+                    const formula = p.formula;
+                    if (formula) {
+                        keywords.push(...formula.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+                    }
+                });
                 let extractedText = '';
                 const fullText = cg.content_text || '';
                 if (keywords.length > 0 && fullText.length > 10000) {
-                    // Chercher les positions des mots-clés dans le texte
-                    const positions = [];
+                    // Chercher TOUTES les positions des mots-clés dans le texte
+                    const keywordPositions = new Map();
                     keywords.forEach(kw => {
-                        const pos = fullText.toLowerCase().indexOf(kw);
-                        if (pos > -1)
-                            positions.push(pos);
+                        const regex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                        let match;
+                        const positions = [];
+                        while ((match = regex.exec(fullText)) !== null) {
+                            positions.push(match.index);
+                        }
+                        if (positions.length > 0) {
+                            keywordPositions.set(kw, positions);
+                        }
                     });
-                    if (positions.length > 0) {
-                        // Extraire autour du premier mot-clé trouvé (±8000 chars = 10k total)
-                        const centerPos = Math.min(...positions);
-                        const start = Math.max(0, centerPos - 2000);
-                        const end = Math.min(fullText.length, centerPos + 8000);
+                    if (keywordPositions.size > 0) {
+                        // Trouver la zone avec le plus de mots-clés
+                        const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
+                        console.log(`   📌 Trouvé ${allPositions.length} occurrences de mots-clés [${Array.from(keywordPositions.keys()).join(', ')}]`);
+                        // Prendre la première occurrence comme centre, puis extraire largement
+                        const centerPos = allPositions[0];
+                        const start = Math.max(0, centerPos - 5000);
+                        const end = Math.min(fullText.length, centerPos + 20000);
                         extractedText = fullText.substring(start, end);
-                        console.log(`   📌 Extraction ciblée autour de "${keywords[0]}" (pos ${centerPos}, extrait ${end - start} chars)`);
+                        console.log(`   📌 Extraction autour de pos ${centerPos} (${end - start} chars extraits)`);
                     }
                     else {
-                        // Aucun mot-clé trouvé, prendre une partie plus large
-                        extractedText = fullText.substring(0, 15000);
+                        // Aucun mot-clé trouvé, prendre le début du document
+                        extractedText = fullText.substring(0, 20000);
+                        console.log(`   ⚠️ Aucun mot-clé trouvé, extraction début document (20k chars)`);
                     }
                 }
                 else {
-                    // Document court ou pas de mots-clés, prendre une partie plus large (15k chars au lieu de 5k)
-                    extractedText = fullText.substring(0, 15000);
+                    // Document court ou pas de mots-clés, prendre une grande partie
+                    extractedText = fullText.substring(0, 25000);
+                    console.log(`   📝 Document court ou peu de mots-clés, extraction 25k chars`);
                 }
-                enrichedContext += `[${insurerName} - ${cg.product_name}]\n${extractedText}...\n\n`;
+                enrichedContext += `[${insurerName} - ${productName}]\n${extractedText}\n\n`;
             });
         }
         // Si aucun contexte RAG, fallback sur metadata

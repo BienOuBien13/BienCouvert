@@ -91,10 +91,14 @@ exports.storage = {
         p.*,
         it.label_fr as type_label,
         i.label as insurer_label,
-        i.logo_url as insurer_logo
+        i.logo_url as insurer_logo,
+        ccg.url as central_cg_url,
+        ucg.url as user_cg_url
       FROM policies p
       LEFT JOIN insurance_types it ON p.insurance_type_code = it.code
       LEFT JOIN insurers i ON p.insurer_code = i.code
+      LEFT JOIN central_cg ccg ON p.central_cg_id = ccg.id
+      LEFT JOIN user_cg ucg ON p.user_cg_id = ucg.id
     `;
         const params = [];
         if (userId) {
@@ -131,7 +135,8 @@ exports.storage = {
                 options: metadata.options || [],
                 premium: metadata.premium ? parseFloat(metadata.premium) : null,
                 coverage: metadata.coverage ? parseFloat(metadata.coverage) : null,
-                sourceUrl: row.document_url || null,
+                sourceUrl: row.document_url || row.central_cg_url || row.user_cg_url || null,
+                cgUrl: row.central_cg_url || row.user_cg_url || null,
                 summary: metadata.summary || null,
                 startDate: row.start_date,
                 endDate: row.end_date,
