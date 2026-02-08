@@ -2,6 +2,20 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Install build dependencies for canvas (Python, build tools, native libraries)
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev
+
 # Copier juste les manifests pour optimiser le cache
 COPY package.json package-lock.json ./
 
@@ -16,6 +30,17 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Install runtime dependencies for canvas (native libraries only, no build tools)
+RUN apk add --no-cache \
+    cairo \
+    jpeg \
+    pango \
+    giflib \
+    pixman \
+    pangomm \
+    libjpeg-turbo \
+    freetype
 
 # Copier uniquement ce qui est nécessaire en prod
 COPY package*.json ./
