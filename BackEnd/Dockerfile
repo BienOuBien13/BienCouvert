@@ -42,11 +42,13 @@ RUN apk add --no-cache \
     libjpeg-turbo \
     freetype
 
-# Copier uniquement ce qui est nécessaire en prod
+# Copy package files
 COPY package*.json ./
-RUN npm ci --omit=dev
 
-# Copier les sources compilés
+# Copy compiled node_modules from builder (includes canvas binary)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy compiled TypeScript
 COPY --from=builder /app/dist ./dist
 
 # Copier le fichier .env de production
