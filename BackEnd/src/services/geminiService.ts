@@ -587,10 +587,11 @@ Il existe plusieurs niveaux de garantie. **Responsabilité civile** est obligato
     
     // Ajouter le contexte système au premier message si l'historique est vide
     const chat = model.startChat({
-      history: chatHistory.length === 0 ? [
+      history: [
         { role: 'user', parts: [{ text: systemInstruction }] },
-        { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance en m\'appuyant sur les documents fournis.' }] }
-      ] : chatHistory
+        { role: 'model', parts: [{ text: 'Compris, je suis prêt à vous aider avec vos polices d\'assurance en m\'appuyant sur les documents fournis.' }] },
+        ...chatHistory
+      ]
     });
 
     console.log(`📤 Envoi du message à Gemini...`);
@@ -824,10 +825,11 @@ FORMAT DE RÉPONSE OBLIGATOIRE:
     });
     
     const chat = model.startChat({
-      history: chatHistory.length === 0 ? [
+      history: [
         { role: 'user', parts: [{ text: systemInstruction }] },
-        { role: 'model', parts: [{ text: 'Compris.' }] }
-      ] : chatHistory
+        { role: 'model', parts: [{ text: 'Compris.' }] },
+        ...chatHistory
+      ]
     });
 
     console.log(`📤 Envoi du message à Gemini (streaming)...`);
