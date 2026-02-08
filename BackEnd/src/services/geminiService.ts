@@ -17,7 +17,7 @@ let client: any | null = null;
  * Crée et met en cache un client Gemini si la clé est disponible.
  * Retourne `null` si la clé est absente ou si l'import échoue.
  */
-function getAiClient() {
+export function getAiClient() {
   if (!GEMINI_KEY) return null;
   if (!client) {
     try {
