@@ -470,8 +470,8 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
             console.log(`   📌 Trouvé ${allPositions.length} occurrences de mots-clés [${Array.from(keywordPositions.keys()).join(', ')}]`);
             
             const extractedChunks: string[] = [];
-            const maxChunks = 3; // Extraire jusqu'à 3 zones différentes
-            const chunkSize = 15000; // 15k par chunk
+            const maxChunks = 5; // Extraire jusqu'à 5 zones différentes
+            const chunkSize = 20000; // 20k par chunk
             
             // Grouper les positions proches ensemble
             const zones: number[] = [];
@@ -734,8 +734,8 @@ export const sendMessageToAssistantStream = async (
           if (keywordPositions.size > 0) {
             const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
             const extractedChunks: string[] = [];
-            const maxChunks = 3;
-            const chunkSize = 15000;
+            const maxChunks = 5;
+            const chunkSize = 20000;
             
             const zones: number[] = [];
             allPositions.forEach(pos => {

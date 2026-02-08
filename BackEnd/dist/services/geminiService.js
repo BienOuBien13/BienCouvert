@@ -438,8 +438,8 @@ const sendMessageToAssistant = async (message, policies, history) => {
                         const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
                         console.log(`   📌 Trouvé ${allPositions.length} occurrences de mots-clés [${Array.from(keywordPositions.keys()).join(', ')}]`);
                         const extractedChunks = [];
-                        const maxChunks = 3; // Extraire jusqu'à 3 zones différentes
-                        const chunkSize = 15000; // 15k par chunk
+                        const maxChunks = 5; // Extraire jusqu'à 5 zones différentes
+                        const chunkSize = 20000; // 20k par chunk
                         // Grouper les positions proches ensemble
                         const zones = [];
                         allPositions.forEach(pos => {
@@ -671,8 +671,8 @@ const sendMessageToAssistantStream = async (message, policies, history, onChunk)
                     if (keywordPositions.size > 0) {
                         const allPositions = Array.from(keywordPositions.values()).flat().sort((a, b) => a - b);
                         const extractedChunks = [];
-                        const maxChunks = 3;
-                        const chunkSize = 15000;
+                        const maxChunks = 5;
+                        const chunkSize = 20000;
                         const zones = [];
                         allPositions.forEach(pos => {
                             const hasNearbyZone = zones.some(z => Math.abs(z - pos) < 10000);
