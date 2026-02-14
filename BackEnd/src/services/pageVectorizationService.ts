@@ -25,9 +25,9 @@ interface PageData {
 /**
  * Extrait une page de PDF en texte + image
  */
-async function extractPage(pdfBuffer: Buffer, pageNum: number): Promise<PageData | null> {
+async function extractPage(pdfData: Uint8Array, pageNum: number): Promise<PageData | null> {
   try {
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
+    const loadingTask = pdfjsLib.getDocument({ data: pdfData });
     const pdfDoc = await loadingTask.promise;
     
     if (pageNum > pdfDoc.numPages) {
@@ -126,9 +126,10 @@ export async function vectorizeCgByPages(
     }
 
     const pdfBuffer = Buffer.from(effectivePdfBase64, 'base64');
+    const pdfUint8Array = new Uint8Array(pdfBuffer);
     
     // Compter les pages
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
+    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array });
     const pdfDoc = await loadingTask.promise;
     const numPages = pdfDoc.numPages;
     
@@ -142,7 +143,7 @@ export async function vectorizeCgByPages(
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       console.log(`\n📄 Page ${pageNum}/${numPages}...`);
       
-      const pageData = await extractPage(pdfBuffer, pageNum);
+      const pageData = await extractPage(pdfUint8Array, pageNum);
       if (!pageData) {
         console.warn(`⚠️ Échec extraction page ${pageNum}`);
         continue;

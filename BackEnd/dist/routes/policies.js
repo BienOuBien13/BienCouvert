@@ -279,6 +279,12 @@ router.post('/central-cg', async (req, res) => {
         }
         // Récupérer l'utilisateur actif depuis le token/session
         const userId = req.user?.id || 'system';
+        // Le PDF est déjà en base64 (data:application/pdf;base64,...)
+        let pdfBase64 = null;
+        if (pdfData && pdfData.startsWith('data:application/pdf;base64,')) {
+            pdfBase64 = pdfData.split(',')[1];
+            console.log('📄 PDF en base64 extrait pour stockage');
+        }
         // Création de la nouvelle entrée avec la nouvelle structure
         const newEntry = {
             insurerCode,
@@ -292,6 +298,7 @@ router.post('/central-cg', async (req, res) => {
             status: 'active',
             contentText: null,
             embedding: null,
+            pdfBase64,
             metadata: {
                 indexedFormulas: metadata?.indexedFormulas || [],
                 indexedOptions: metadata?.indexedOptions || {},
@@ -308,14 +315,9 @@ router.post('/central-cg', async (req, res) => {
         (async () => {
             try {
                 console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
-                // Le PDF est déjà en base64 (data:application/pdf;base64,...)
-                let pdfBase64;
-                if (pdfData.startsWith('data:application/pdf;base64,')) {
-                    pdfBase64 = pdfData.split(',')[1];
-                    console.log('📄 PDF en base64 extrait');
-                }
-                else {
-                    throw new Error('Format PDF invalide - doit être en base64');
+                // Le PDF est déjà stocké en base, pas besoin de le re-extraire
+                if (!pdfBase64) {
+                    throw new Error('PDF base64 non disponible pour vectorisation');
                 }
                 console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
                 // Alimenter central_cg_pages et coverage_facts
