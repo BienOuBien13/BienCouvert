@@ -238,7 +238,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 exports.detectDuplicates = detectDuplicates;
 /**
  * Génère un embedding de 768 dimensions pour un texte donné
- * Utilise le modèle embedding-001 de Gemini
+ * Utilise le modèle text-embedding-004 de Gemini (compatible API v1beta)
  */
 const generateEmbedding = async (text) => {
     const ai = getAiClient();
@@ -247,7 +247,7 @@ const generateEmbedding = async (text) => {
         return new Array(768).fill(0);
     }
     try {
-        const model = ai.getGenerativeModel({ model: 'embedding-001' });
+        const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
         const result = await model.embedContent(text);
         return result.embedding.values;
     }

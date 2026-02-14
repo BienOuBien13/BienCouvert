@@ -17,8 +17,9 @@ const pool = new Pool({
   user: process.env.POSTGRES_USER || 'postgres',
   password: process.env.POSTGRES_PASSWORD,
   max: 20,                          // Nombre maximum de clients dans le pool
-  idleTimeoutMillis: 30000,        // Temps avant de fermer une connexion inactive
-  connectionTimeoutMillis: 5000,    // Timeout pour établir une connexion
+  idleTimeoutMillis: 300000,        // 5 min avant de fermer une connexion inactive (augmenté pour vectorisation longue)
+  connectionTimeoutMillis: 10000,   // Timeout pour établir une connexion
+  statement_timeout: 600000,        // 10 min max par requête (pour vectorisation longue)
   // 🔒 Connexion SSL/TLS pour chiffrer les communications avec PostgreSQL (RGPD + Cybersécu)
   ssl: process.env.NODE_ENV === 'production' || process.env.POSTGRES_SSL === 'true' 
     ? { rejectUnauthorized: false }  // En production Azure, accepter les certificats auto-signés

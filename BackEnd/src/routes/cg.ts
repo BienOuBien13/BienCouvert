@@ -265,7 +265,7 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 }
 
 async function generateEmbedding(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: 'embedding-001' });
+  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
   const result = await model.embedContent(text);
   return result.embedding.values;
 }
