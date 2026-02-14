@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateShareableReport = exports.indexCgDocument = exports.parsePoliciesFromText = exports.sendMessageToAssistantStream = exports.sendMessageToAssistant = exports.chunkText = exports.generateEmbedding = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
+exports.getAiClient = getAiClient;
 const dotenv_1 = __importDefault(require("dotenv"));
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
@@ -237,7 +238,7 @@ Retourne un tableau JSON d'optimisations avec les champs:
 exports.detectDuplicates = detectDuplicates;
 /**
  * Génère un embedding de 768 dimensions pour un texte donné
- * Utilise le modèle text-embedding-004 de Gemini
+ * Utilise le modèle embedding-001 de Gemini
  */
 const generateEmbedding = async (text) => {
     const ai = getAiClient();
@@ -246,7 +247,7 @@ const generateEmbedding = async (text) => {
         return new Array(768).fill(0);
     }
     try {
-        const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
+        const model = ai.getGenerativeModel({ model: 'embedding-001' });
         const result = await model.embedContent(text);
         return result.embedding.values;
     }

@@ -135,7 +135,7 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
  */
 async function generateEmbedding(text) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+    const model = genAI.getGenerativeModel({ model: 'embedding-001' });
     const result = await model.embedContent(text);
     return result.embedding.values;
   } catch (error) {

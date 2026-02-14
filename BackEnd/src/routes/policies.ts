@@ -2,6 +2,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import { storage } from '../storage';
 import { summarizePolicy, searchPolicyInfo, detectDuplicates } from '../services/geminiService';
+import { query } from '../db';
+import pool from '../db';
+import { vectorizeCgByPages } from '../services/pageVectorizationService';
 
 // -----------------------------------------------------------------------------
 // Routes /policies
@@ -291,6 +294,13 @@ router.post('/central-cg', async (req, res) => {
     // Récupérer l'utilisateur actif depuis le token/session
     const userId = (req as any).user?.id || 'system';
     
+    // Le PDF est déjà en base64 (data:application/pdf;base64,...)
+    let pdfBase64: string | null = null;
+    if (pdfData && pdfData.startsWith('data:application/pdf;base64,')) {
+      pdfBase64 = pdfData.split(',')[1];
+      console.log('📄 PDF en base64 extrait pour stockage');
+    }
+
     // Création de la nouvelle entrée avec la nouvelle structure
     const newEntry: any = {
       insurerCode,
@@ -304,6 +314,7 @@ router.post('/central-cg', async (req, res) => {
       status: 'active',
       contentText: null,
       embedding: null,
+      pdfBase64,
       metadata: {
         indexedFormulas: metadata?.indexedFormulas || [],
         indexedOptions: metadata?.indexedOptions || {},
@@ -323,44 +334,39 @@ router.post('/central-cg', async (req, res) => {
     (async () => {
       try {
         console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
-        const { GoogleGenerativeAI } = require('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         
-        // Le PDF est déjà en base64 (data:application/pdf;base64,...)
-        let pdfBase64: string;
-        if (pdfData.startsWith('data:application/pdf;base64,')) {
-          pdfBase64 = pdfData.split(',')[1];
-          console.log('📄 PDF en base64 extrait');
-        } else {
-          throw new Error('Format PDF invalide - doit être en base64');
+        // Le PDF est déjà stocké en base, pas besoin de le re-extraire
+        if (!pdfBase64) {
+          throw new Error('PDF base64 non disponible pour vectorisation');
         }
         
         console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
-        
-        const result = await model.generateContent([
-          {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: pdfBase64
-            }
-          },
-          "Extrais tout le texte de ce document PDF en français, mot pour mot, sans résumé."
-        ]);
-        
-        const pdfText = result.response.text();
-        console.log(`✅ Texte extrait (${pdfText.length} caractères)`);
-        
-        // Stocker le texte et vectoriser
-        const { query } = require('../db');
+
+        // Alimenter central_cg_pages et coverage_facts
+        const pageResult = await vectorizeCgByPages(pool, entryId, url || '', pdfBase64);
+        console.log(`✅ Vectorisation page par page OK pour CG ${entryId}:`, pageResult);
+
+        // Agréger le texte complet depuis les pages pour central_cg.content_text
+        const textResult = await query(
+          `SELECT COALESCE(string_agg(content_text, E'\n\n' ORDER BY page_number), '') AS full_text
+           FROM central_cg_pages
+           WHERE central_cg_id = $1`,
+          [entryId]
+        );
+
+        const fullText = textResult.rows[0]?.full_text || '';
         await query(
           'UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-          [pdfText, entryId]
+          [fullText, entryId]
         );
-        console.log(`✅ Texte sauvegardé en DB pour CG ${entryId}`);
-        
-        await storage.vectorizeCentralCg(entryId, pdfText);
-        console.log(`✅ CG ${entryId} vectorisée avec succès`);
+        console.log(`✅ Texte agrégé sauvegardé en DB pour CG ${entryId} (${fullText.length} caractères)`);
+
+        if (fullText.trim().length > 0) {
+          await storage.vectorizeCentralCg(entryId, fullText);
+          console.log(`✅ Embedding central_cg mis à jour pour CG ${entryId}`);
+        } else {
+          console.warn(`⚠️ Texte vide après extraction pages pour CG ${entryId}, embedding non mis à jour`);
+        }
       } catch (e) {
         console.error(`❌ Vectorisation CG ${entryId} échouée:`, e);
       }

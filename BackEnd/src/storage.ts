@@ -271,7 +271,7 @@ export const storage = {
   writeCentralCgEntry: async (data: any) => {
     const { 
       id, insurerCode, insuranceTypeCode, version, type, owner, 
-      detail, url, targetFilename, status, contentText, embedding, metadata
+      detail, url, targetFilename, status, contentText, embedding, metadata, pdfBase64
     } = data;
     
     // S'assurer que metadata est un objet JSON valide
@@ -284,21 +284,21 @@ export const storage = {
         `UPDATE central_cg 
          SET insurer_code = $1, insurance_type_code = $2, version = $3, type = $4,
              owner = $5, detail = $6, url = $7, target_filename = $8, status = $9,
-             content_text = $10, embedding = $11, metadata = $12, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $13`,
+             content_text = $10, embedding = $11, metadata = $12, pdf_base64 = $13, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $14`,
         [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
-         targetFilename, status, contentText, embeddingJson, metadataJson, id]
+         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null, id]
       );
     } else {
       // Insertion
       const result = await query(
         `INSERT INTO central_cg 
          (insurer_code, insurance_type_code, version, type, owner, detail, url, 
-          target_filename, status, content_text, embedding, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          target_filename, status, content_text, embedding, metadata, pdf_base64)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING id`,
         [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
-         targetFilename, status, contentText, embeddingJson, metadataJson]
+         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null]
       );
       return result.rows[0].id;
     }
@@ -369,7 +369,21 @@ export const storage = {
     const { generateEmbedding } = require('./services/geminiService');
     
     console.log(`📄 Vectorisation CG ${cgId}...`);
+    if (!text || !text.trim()) {
+      throw new Error(`Vectorisation CG ${cgId} impossible: texte vide`);
+    }
+
     const embedding = await generateEmbedding(text);
+
+    const isValidEmbedding = Array.isArray(embedding)
+      && embedding.length === 768
+      && embedding.some((value: number) => Number.isFinite(value) && value !== 0);
+
+    if (!isValidEmbedding) {
+      throw new Error(
+        `Embedding invalide pour CG ${cgId} (vecteur nul ou incomplet). Vérifiez GEMINI_API_KEY et l'accès au modèle d'embedding.`
+      );
+    }
     
     await query(
       `UPDATE central_cg SET embedding = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,

@@ -58,7 +58,7 @@ async function extractTextFromPdf(pdfPath) {
 async function generateEmbedding(text) {
   console.log('  🔮 Génération de l\'embedding...');
   
-  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+  const model = genAI.getGenerativeModel({ model: 'embedding-001' });
   const result = await model.embedContent(text.substring(0, 20000)); // Limite à 20k caractères
   
   const embedding = result.embedding.values;

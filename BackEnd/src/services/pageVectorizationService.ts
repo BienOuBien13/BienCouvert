@@ -98,11 +98,16 @@ function detectTable(text: string): boolean {
 export async function vectorizeCgByPages(
   pool: Pool,
   centralCgId: number,
-  pdfUrl: string
+  pdfUrl: string,
+  pdfBase64?: string
 ): Promise<{ pagesProcessed: number; tablesExtracted: number; factsCreated: number }> {
   console.log(`\n🔄 Vectorisation page par page du CG ${centralCgId}...`);
   
   try {
+    // Nettoyage préalable pour garantir un état cohérent en cas de re-traitement
+    await pool.query('DELETE FROM coverage_facts WHERE central_cg_id = $1', [centralCgId]);
+    await pool.query('DELETE FROM central_cg_pages WHERE central_cg_id = $1', [centralCgId]);
+
     // Récupérer les infos du CG
     const cgResult = await pool.query(
       'SELECT insurer_code, insurance_type_code, pdf_base64 FROM central_cg WHERE id = $1',
@@ -114,7 +119,13 @@ export async function vectorizeCgByPages(
     }
     
     const cg = cgResult.rows[0];
-    const pdfBuffer = Buffer.from(cg.pdf_base64, 'base64');
+    const effectivePdfBase64 = pdfBase64 || cg.pdf_base64;
+
+    if (!effectivePdfBase64) {
+      throw new Error(`Aucun PDF disponible pour le CG ${centralCgId}`);
+    }
+
+    const pdfBuffer = Buffer.from(effectivePdfBase64, 'base64');
     
     // Compter les pages
     const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });

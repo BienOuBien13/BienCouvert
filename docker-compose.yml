@@ -7,6 +7,8 @@ services:
     build:
       context: ./BackEnd
       dockerfile: Dockerfile
+    env_file:
+      - ./BackEnd/.env.production
     ports:
       - "4000:4000"
     environment:
@@ -19,7 +21,6 @@ services:
       - POSTGRES_PASSWORD=Remi1982
       - JWT_SECRET=${JWT_SECRET:-change_this_in_production}
       - CSRF_SECRET=${CSRF_SECRET:-csrf-secret-change-in-production}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - FRONTEND_ORIGIN=https://biencouvert.fr,https://www.biencouvert.fr,http://localhost:3000,https://52.143.159.51,http://52.143.159.51,http://52.143.159.51:8080
     restart: unless-stopped
     healthcheck:
