@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
@@ -10,11 +10,24 @@ import { storageService } from '../services/storageService';
 import { indexCgDocument } from '../services/geminiService';
 import { useMasterData } from '../hooks/useMasterData';
 
+type VectorizationStatus = {
+  id: number;
+  status: 'pending' | 'processing' | 'done' | 'failed' | 'partial';
+  pagesTotal: number;
+  pagesProcessed: number;
+  tablesExtracted: number;
+  factsCount: number;
+  vectorizedAt: string | null;
+  error: string | null;
+};
+
 export const AdminView: React.FC = () => {
   const [repo, setRepo] = useState<CentralCgEntry[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
   const { types: insuranceTypes, insurers } = useMasterData();
+  const [vectorizationStatus, setVectorizationStatus] = useState<VectorizationStatus | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const [newEntry, setNewEntry] = useState({
     insurerCode: '',
@@ -46,6 +59,8 @@ export const AdminView: React.FC = () => {
       }
     };
     loadRepo();
+    // Cleanup polling on unmount
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
   const handleStartIndexing = async () => {
@@ -136,11 +151,29 @@ export const AdminView: React.FC = () => {
         pdfData: `[${Math.round(pdfBase64.length / 1024)}KB base64]`
       });
       
-      await storageService.saveCgEntry(entryToSave);
-      
-      // Message de succès avec info sur la vectorisation
-      alert('✅ Document ajouté avec succès!\n\nℹ️ La vectorisation du PDF se fait en arrière-plan et peut prendre quelques minutes. Le document sera pleinement opérationnel une fois la vectorisation terminée.');
-      
+      const savedEntry = await storageService.saveCgEntry(entryToSave);
+      const savedId = (savedEntry as any)?.id;
+
+      // Démarrer le polling de statut vectorisation si on a un id
+      if (savedId) {
+        setVectorizationStatus({ id: savedId, status: 'pending', pagesTotal: 0, pagesProcessed: 0, tablesExtracted: 0, factsCount: 0, vectorizedAt: null, error: null });
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = setInterval(async () => {
+          try {
+            const status = await storageService.getVectorizationStatus(savedId);
+            setVectorizationStatus(status);
+            if (status.status === 'done' || status.status === 'failed' || status.status === 'partial') {
+              clearInterval(pollingRef.current!);
+              pollingRef.current = null;
+              const data = await storageService.getCentralCgRepo();
+              setRepo(data || []);
+            }
+          } catch (e) {
+            console.warn('⚠️ Erreur polling statut vectorisation:', e);
+          }
+        }, 3000);
+      }
+
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
       setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', version: '', type: '', url: '' });
@@ -191,6 +224,49 @@ export const AdminView: React.FC = () => {
           {showAddForm ? 'Annuler' : <><Plus className="w-4 h-4" /> Indexer un nouveau document</>}
         </button>
       </div>
+
+      {/* Bandeau de progression vectorisation */}
+      {vectorizationStatus && (
+        <div className={`p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${
+          vectorizationStatus.status === 'done' ? 'bg-emerald-50 border-emerald-200' :
+          vectorizationStatus.status === 'failed' ? 'bg-red-50 border-red-200' :
+          'bg-blue-50 border-blue-200'
+        }`}>
+          {vectorizationStatus.status === 'done' ? (
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+          ) : vectorizationStatus.status === 'failed' ? (
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+          ) : (
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-black uppercase tracking-widest mb-1">
+              {vectorizationStatus.status === 'done' ? '✅ Vectorisation terminée' :
+               vectorizationStatus.status === 'failed' ? '❌ Vectorisation échouée' :
+               '⏳ Vectorisation en cours...'}
+            </p>
+            {vectorizationStatus.status !== 'failed' && vectorizationStatus.pagesTotal > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="flex-1 bg-white rounded-full h-2 overflow-hidden">
+                  <div
+                    className={`h-2 rounded-full transition-all ${vectorizationStatus.status === 'done' ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                    style={{ width: `${Math.round((vectorizationStatus.pagesProcessed / vectorizationStatus.pagesTotal) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] font-bold whitespace-nowrap">
+                  {vectorizationStatus.pagesProcessed}/{vectorizationStatus.pagesTotal} pages
+                  {vectorizationStatus.tablesExtracted > 0 && ` · ${vectorizationStatus.tablesExtracted} tableau(x)`}
+                  {vectorizationStatus.factsCount > 0 && ` · ${vectorizationStatus.factsCount} faits`}
+                </span>
+              </div>
+            )}
+            {vectorizationStatus.status === 'failed' && vectorizationStatus.error && (
+              <p className="text-[10px] text-red-600 font-medium mt-1 truncate">{vectorizationStatus.error}</p>
+            )}
+          </div>
+          <button onClick={() => setVectorizationStatus(null)} className="text-slate-400 hover:text-slate-600 text-xs shrink-0">✕</button>
+        </div>
+      )}
 
       {showAddForm && (
         <div className="bg-white p-8 rounded-[2.5rem] border-2 border-primary-100 shadow-2xl animate-scaleIn space-y-8">

@@ -85,7 +85,7 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
     
     if (cgResults.length > 0 && cgResults[0].similarity > 0.7) {
       const cg = cgResults[0];
-      console.log(`✅ CG trouvée dans RAG: ${cg.insurer} - ${cg.product_name} (similarité: ${cg.similarity})`);
+      console.log(`✅ CG trouvée dans RAG: ${cg.insurer_label || cg.insurer_code} - ${cg.product_name} (similarité: ${cg.similarity}, page: ${cg.page_number}, type: ${cg.chunk_type})`);
       
       // Extraire formules et options du contenu
       const promptExtract = `Analyse ce document de conditions générales et extrais:
@@ -110,7 +110,7 @@ Réponds en JSON:
       
       return {
         summary: extracted.summary || 'Informations extraites des conditions générales',
-        sourceUrl: cg.document_url,
+        sourceUrl: cg.url || undefined,
         detectedFormulas: Array.isArray(extracted.formulas) ? extracted.formulas : [],
         availableOptions: Array.isArray(extracted.options) ? extracted.options : []
       };

@@ -91,7 +91,7 @@ export const storageService = {
   /**
    * Sauvegarde une entrée CG dans le référentiel
    */
-  saveCgEntry: async (entry: Omit<CentralCgEntry, 'id' | 'lastVerified'>): Promise<void> => {
+  saveCgEntry: async (entry: Omit<CentralCgEntry, 'id' | 'lastVerified'>): Promise<any> => {
     console.log('📤 saveCgEntry - Envoi vers backend:', {
       insurer: entry.insurer,
       productName: entry.productName,
@@ -117,6 +117,22 @@ export const storageService = {
     await apiFetch(`/policies/central-cg/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  /**
+   * Retourne le statut de vectorisation d'une CG
+   */
+  getVectorizationStatus: async (id: number | string): Promise<{
+    id: number;
+    status: 'pending' | 'processing' | 'done' | 'failed' | 'partial';
+    pagesTotal: number;
+    pagesProcessed: number;
+    tablesExtracted: number;
+    factsCount: number;
+    vectorizedAt: string | null;
+    error: string | null;
+  }> => {
+    return apiFetch(`/policies/central-cg/${id}/vectorization-status`, { method: 'GET' });
   },
 
   /**

@@ -350,6 +350,51 @@ router.post('/central-cg', async (req, res) => {
     }
 });
 /**
+ * Route GET /api/policies/central-cg/:id/vectorization-status
+ * Retourne le statut de vectorisation d'une CG (pending/processing/done/failed/partial).
+ * Permet au frontend de suivre la progression de l'indexation en temps réel.
+ */
+router.get('/central-cg/:id/vectorization-status', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id))
+            return res.status(400).json({ message: 'Invalid id' });
+        const result = await (0, db_1.query)(`SELECT
+        cg.id,
+        cg.vectorization_status,
+        cg.pages_total,
+        cg.pages_processed,
+        cg.tables_extracted,
+        cg.vectorized_at,
+        cg.vectorization_error,
+        COUNT(p.id) AS pages_count,
+        COUNT(cf.id) AS facts_count
+       FROM central_cg cg
+       LEFT JOIN central_cg_pages p ON p.central_cg_id = cg.id
+       LEFT JOIN coverage_facts cf ON cf.central_cg_id = cg.id
+       WHERE cg.id = $1
+       GROUP BY cg.id`, [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'CG not found' });
+        }
+        const row = result.rows[0];
+        res.json({
+            id: row.id,
+            status: row.vectorization_status || (row.pages_count > 0 ? 'done' : 'pending'),
+            pagesTotal: row.pages_total || 0,
+            pagesProcessed: row.pages_processed || parseInt(row.pages_count) || 0,
+            tablesExtracted: row.tables_extracted || 0,
+            factsCount: parseInt(row.facts_count) || 0,
+            vectorizedAt: row.vectorized_at,
+            error: row.vectorization_error || null
+        });
+    }
+    catch (err) {
+        console.error('❌ Error in GET /central-cg/:id/vectorization-status:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
  * Route DELETE /api/policies/central-cg/:id
  * Suppression d'une entrée du référentiel central par son ID.
  * Accès restreint aux administrateurs.

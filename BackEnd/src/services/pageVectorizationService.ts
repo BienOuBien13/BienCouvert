@@ -81,6 +81,90 @@ async function extractPage(pdfData: Uint8Array, pageNum: number): Promise<PageDa
 }
 
 /**
+ * Codes de garanties connus (assurance auto + habitation + santé)
+ */
+const GUARANTEE_PATTERNS: { code: string; keywords: RegExp }[] = [
+  { code: 'RC',                keywords: /responsabilit[eé]\s+civile|r\.c\./i },
+  { code: 'DOMMAGES',         keywords: /dommages\s+(tous|collision|accident)|tous\s+risques/i },
+  { code: 'VOL',              keywords: /\bvol\b|tentative\s+de\s+vol/i },
+  { code: 'INCENDIE',         keywords: /incendie|explosion|attentat/i },
+  { code: 'BRIS_GLACE',       keywords: /bris\s+de\s+glaces?|vitrage|pare-?brise/i },
+  { code: 'ASSISTANCE',       keywords: /assistance|d[eé]pannage|remorquage/i },
+  { code: 'PJ',               keywords: /protection\s+juridique|d[eé]fense.+recours/i },
+  { code: 'CONDUCTEUR',       keywords: /conducteur|corporels?\s+du\s+conducteur/i },
+  { code: 'CAT_NAT',          keywords: /catastrophes?\s+naturelles?|cat\s*nat/i },
+  { code: 'FRANCHISE',        keywords: /franchise|participation/i },
+  { code: 'PLAFOND',          keywords: /plafond|limite\s+de\s+garantie|montant\s+maximum/i },
+];
+
+/**
+ * Classification sémantique d'une page de CG
+ * Retourne le chunk_type, les codes garanties détectés et la référence article
+ */
+function classifyPage(text: string, hasTable: boolean): {
+  chunkType: string;
+  guaranteeCodes: string[];
+  articleRef: string | null;
+  confidence: number;
+} {
+  if (!text || text.trim().length < 20) {
+    return { chunkType: 'inconnu', guaranteeCodes: [], articleRef: null, confidence: 0 };
+  }
+
+  // Si c'est un tableau de garanties, classification prioritaire
+  if (hasTable) {
+    return { chunkType: 'tableau', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.95 };
+  }
+
+  // Détection d'exclusions (forte spécificité)
+  const isExclusion = /\b(ne\s+(pas|point)\s+(couvrir|garantir|inclure)|exclusion|exclu[se]?|non\s+garanti|ne\s+sont\s+pas\s+couverts?)\b/i.test(text)
+    && !/article\s+\d/i.test(text.substring(0, 50));  // Pas juste un titre
+  if (isExclusion && text.length > 200) {
+    return { chunkType: 'exclusion', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.85 };
+  }
+
+  // Détection de restrictions (franchise, plafond, seuil)
+  const isRestriction = /\b(franchise|plafond|seuil|limite|jusqu\'[àa]|maximum|minimum|\d+\s*€|\d+\s*eur)/i.test(text)
+    && !/\bné(cessaire|faste)|franchir\b/i.test(text);
+  if (isRestriction && text.length > 150) {
+    return { chunkType: 'restriction', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.80 };
+  }
+
+  // Détection de garanties
+  const isGarantie = /\bgaranti[et]|\bcouverture|\bprise\s+en\s+charge|\bcoverage\b/i.test(text)
+    && !/définition|définit/i.test(text);
+  if (isGarantie && text.length > 200) {
+    return { chunkType: 'garantie', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.75 };
+  }
+
+  // Détection de définitions
+  const isDefinition = /\b(au\s+sens\s+du\s+présent|on\s+entend\s+par|désigne|signifie|s\'entend\s+comme)\b/i.test(text);
+  if (isDefinition) {
+    return { chunkType: 'definition', guaranteeCodes: [], articleRef: extractArticleRef(text), confidence: 0.80 };
+  }
+
+  // Contenu général
+  return { chunkType: 'general', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.60 };
+}
+
+/**
+ * Extrait les codes de garanties détectés dans un texte
+ */
+function extractGuaranteeCodes(text: string): string[] {
+  return GUARANTEE_PATTERNS
+    .filter(p => p.keywords.test(text))
+    .map(p => p.code);
+}
+
+/**
+ * Extrait la référence article (ex: "Article 12", "Art. 3.2", "§ 5")
+ */
+function extractArticleRef(text: string): string | null {
+  const match = text.match(/\b(art(?:icle|\.)?\s*[\d.]+[A-Za-z]?|§\s*\d+[\d.]*)/i);
+  return match ? match[0].trim() : null;
+}
+
+/**
  * Détecte si une page contient un tableau de garanties
  */
 function detectTable(text: string): boolean {
@@ -102,6 +186,14 @@ export async function vectorizeCgByPages(
   pdfBase64?: string
 ): Promise<{ pagesProcessed: number; tablesExtracted: number; factsCreated: number }> {
   console.log(`\n🔄 Vectorisation page par page du CG ${centralCgId}...`);
+
+  // Marquer comme "en cours" dès le début (ignore l'erreur si colonne absente)
+  try {
+    await pool.query(
+      `UPDATE central_cg SET vectorization_status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [centralCgId]
+    );
+  } catch (_) { /* colonne pas encore en DB */ }
   
   try {
     // Nettoyage préalable pour garantir un état cohérent en cas de re-traitement
@@ -134,6 +226,14 @@ export async function vectorizeCgByPages(
     const numPages = pdfDoc.numPages;
     
     console.log(`📄 ${numPages} pages à traiter`);
+
+    // Enregistrer le total de pages
+    try {
+      await pool.query(
+        `UPDATE central_cg SET pages_total = $1 WHERE id = $2`,
+        [numPages, centralCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
     
     let pagesProcessed = 0;
     let tablesExtracted = 0;
@@ -154,6 +254,10 @@ export async function vectorizeCgByPages(
       
       // Détecter tableau
       const hasTable = detectTable(pageData.contentText);
+
+      // ── Phase 1 : Classification sémantique du chunk ──
+      const classification = classifyPage(pageData.contentText, hasTable);
+      console.log(`   🏷️  Type: ${classification.chunkType} | Garanties: [${classification.guaranteeCodes.join(', ')}] | Art: ${classification.articleRef || '-'}`);
       
       let tableJson = null;
       let extractionConfidence = null;
@@ -175,13 +279,14 @@ export async function vectorizeCgByPages(
         }
       }
       
-      // Sauvegarder la page
+      // Sauvegarder la page avec les nouvelles colonnes de classification
       const pageInsert = await pool.query(
         `INSERT INTO central_cg_pages (
           central_cg_id, page_number, content_text, layout_text,
           embedding, page_image_base64, page_width, page_height,
-          has_table, table_json, table_extraction_confidence
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          has_table, table_json, table_extraction_confidence,
+          chunk_type, guarantee_codes, article_ref, classification_confidence
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         ON CONFLICT (central_cg_id, page_number) DO UPDATE SET
           content_text = EXCLUDED.content_text,
           layout_text = EXCLUDED.layout_text,
@@ -192,6 +297,10 @@ export async function vectorizeCgByPages(
           has_table = EXCLUDED.has_table,
           table_json = EXCLUDED.table_json,
           table_extraction_confidence = EXCLUDED.table_extraction_confidence,
+          chunk_type = EXCLUDED.chunk_type,
+          guarantee_codes = EXCLUDED.guarantee_codes,
+          article_ref = EXCLUDED.article_ref,
+          classification_confidence = EXCLUDED.classification_confidence,
           updated_at = CURRENT_TIMESTAMP
         RETURNING id`,
         [
@@ -205,7 +314,11 @@ export async function vectorizeCgByPages(
           pageData.height,
           hasTable,
           tableJson ? JSON.stringify(tableJson) : null,
-          extractionConfidence
+          extractionConfidence,
+          classification.chunkType,
+          classification.guaranteeCodes,    // TEXT[] — PostgreSQL accepte un tableau JS
+          classification.articleRef,
+          classification.confidence
         ]
       );
       
@@ -236,9 +349,24 @@ export async function vectorizeCgByPages(
       }
       
       pagesProcessed++;
-      console.log(`   ✅ Page ${pageNum} sauvegardée`);
+      console.log(`   ✅ Page ${pageNum} sauvegardée (${classification.chunkType})`);
     }
     
+    // Marquer la vectorisation comme terminée
+    try {
+      await pool.query(
+        `UPDATE central_cg
+         SET vectorization_status = 'done',
+             pages_processed = $1,
+             tables_extracted = $2,
+             vectorized_at = CURRENT_TIMESTAMP,
+             vectorization_error = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [pagesProcessed, tablesExtracted, centralCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
+
     console.log(`\n✅ Vectorisation terminée:`);
     console.log(`   - ${pagesProcessed} pages traitées`);
     console.log(`   - ${tablesExtracted} tableaux extraits`);
@@ -246,8 +374,19 @@ export async function vectorizeCgByPages(
     
     return { pagesProcessed, tablesExtracted, factsCreated };
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Erreur vectorisation par pages:', error);
+    // Marquer l'erreur en base
+    try {
+      await pool.query(
+        `UPDATE central_cg
+         SET vectorization_status = 'failed',
+             vectorization_error = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [error?.message || 'Erreur inconnue', centralCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
     throw error;
   }
 }

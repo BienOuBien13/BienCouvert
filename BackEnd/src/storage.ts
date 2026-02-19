@@ -404,14 +404,14 @@ export const storage = {
     const result = await query(
       `SELECT 
         pe.chunk_text, pe.chunk_index,
-        COALESCE(i.label, p.insurer) as provider, 
-        COALESCE(it.label_fr, p.type) as type, 
+        COALESCE(i.label, p.insurer_code) as provider, 
+        COALESCE(it.label_fr, p.insurance_type_code) as type, 
         p.metadata->>'name' as name,
         1 - (pe.embedding <=> $1::vector) as similarity
        FROM policy_embeddings pe
        JOIN policies p ON pe.policy_id = p.id
        LEFT JOIN insurers i ON p.insurer_code = i.code
-       LEFT JOIN insurance_types it ON p.type_code = it.code
+       LEFT JOIN insurance_types it ON p.insurance_type_code = it.code
        WHERE pe.policy_id = ANY($2)
        ORDER BY pe.embedding <=> $1::vector
        LIMIT $3`,
@@ -429,31 +429,70 @@ export const storage = {
    * @returns Documents CG pertinents
    */
   searchCentralCg: async (questionEmbedding: number[], insurers?: string[], limit: number = 3) => {
+    // Recherche sémantique dans les pages vectorisées (granulaire) ET dans central_cg (global)
+    // Priorité : central_cg_pages si disponibles (meilleure précision), sinon central_cg
     let queryText = `
-      SELECT 
-        cg.insurer,
-        cg.product_name, 
-        cg.content_text,
-        COALESCE(i.label, cg.insurer) as insurer_label,
-        COALESCE(it.label_fr, cg.metadata->>'type') as type,
-        1 - (cg.embedding <=> $1::vector) as similarity
-      FROM central_cg cg
+      SELECT
+        cg.insurer_code,
+        cg.insurance_type_code,
+        cg.metadata->>'productName' as product_name,
+        p.content_text,
+        p.chunk_type,
+        p.guarantee_codes,
+        p.article_ref,
+        p.page_number,
+        COALESCE(i.label, cg.insurer_code) as insurer_label,
+        COALESCE(it.label_fr, cg.insurance_type_code) as type,
+        1 - (p.embedding <=> $1::vector) as similarity
+      FROM central_cg_pages p
+      JOIN central_cg cg ON p.central_cg_id = cg.id
       LEFT JOIN insurers i ON cg.insurer_code = i.code
-      LEFT JOIN insurance_types it ON cg.type_code = it.code
-      WHERE cg.embedding IS NOT NULL
+      LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+      WHERE p.embedding IS NOT NULL AND cg.status = 'active'
     `;
-    
+
     const params: any[] = [JSON.stringify(questionEmbedding)];
-    
+
     if (insurers && insurers.length > 0) {
       params.push(insurers);
-      queryText += ` AND (cg.insurer = ANY($${params.length}) OR cg.insurer_code = ANY($${params.length}))`;
+      queryText += ` AND cg.insurer_code = ANY($${params.length})`;
     }
-    
-    queryText += ` ORDER BY cg.embedding <=> $1::vector LIMIT $${params.length + 1}`;
+
+    queryText += ` ORDER BY p.embedding <=> $1::vector LIMIT $${params.length + 1}`;
     params.push(limit);
-    
-    const result = await query(queryText, params);
+
+    let result = await query(queryText, params);
+
+    // Fallback sur central_cg.embedding si aucune page vectorisée
+    if (result.rows.length === 0) {
+      let fallbackQuery = `
+        SELECT
+          cg.insurer_code,
+          cg.insurance_type_code,
+          cg.metadata->>'productName' as product_name,
+          cg.content_text,
+          'general' as chunk_type,
+          '{}' as guarantee_codes,
+          NULL as article_ref,
+          0 as page_number,
+          COALESCE(i.label, cg.insurer_code) as insurer_label,
+          COALESCE(it.label_fr, cg.insurance_type_code) as type,
+          1 - (cg.embedding <=> $1::vector) as similarity
+        FROM central_cg cg
+        LEFT JOIN insurers i ON cg.insurer_code = i.code
+        LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+        WHERE cg.embedding IS NOT NULL AND cg.status = 'active'
+      `;
+      const fallbackParams: any[] = [JSON.stringify(questionEmbedding)];
+      if (insurers && insurers.length > 0) {
+        fallbackParams.push(insurers);
+        fallbackQuery += ` AND cg.insurer_code = ANY($${fallbackParams.length})`;
+      }
+      fallbackQuery += ` ORDER BY cg.embedding <=> $1::vector LIMIT $${fallbackParams.length + 1}`;
+      fallbackParams.push(limit);
+      result = await query(fallbackQuery, fallbackParams);
+    }
+
     return result.rows;
   }
 };
