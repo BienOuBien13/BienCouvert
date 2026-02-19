@@ -249,20 +249,48 @@ Retourne un tableau JSON d'optimisations avec les champs:
 };
 
 /**
- * Génère un embedding de 768 dimensions pour un texte donné
- * Utilise le modèle text-embedding-004 de Gemini (compatible API v1beta)
+ * Génère un embedding de 768 dimensions pour un texte donné.
+ * Utilise l'API REST Gemini v1 directement (le SDK JS utilise v1beta qui ne supporte
+ * plus text-embedding-004). Backoff exponentiel sur 429 / 503.
  */
-export const generateEmbedding = async (text: string): Promise<number[]> => {
-  const ai = getAiClient();
-  if (!ai) {
-    console.warn('No Gemini client - returning zero embedding');
+export const generateEmbedding = async (text: string, retries = 4): Promise<number[]> => {
+  if (!GEMINI_KEY) {
+    console.warn('No GEMINI_API_KEY - returning zero embedding');
     return new Array(768).fill(0);
   }
 
+  const url =
+    `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${GEMINI_KEY}`;
+
   try {
-    const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
-    const result = await model.embedContent(text);
-    return result.embedding.values;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'models/text-embedding-004',
+        content: { parts: [{ text: text.slice(0, 8192) }] }
+      })
+    });
+
+    if (response.status === 429 || response.status === 503) {
+      if (retries > 0) {
+        const wait = (5 - retries) * 4000; // 4s, 8s, 12s, 16s
+        console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s... (${retries} restantes)`);
+        await new Promise(r => setTimeout(r, wait));
+        return generateEmbedding(text, retries - 1);
+      }
+      console.error('generateEmbedding: rate limit dépassé après retries');
+      return new Array(768).fill(0);
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(`generateEmbedding error: ${response.status} ${body}`);
+      return new Array(768).fill(0);
+    }
+
+    const data = await response.json() as any;
+    return data.embedding?.values ?? new Array(768).fill(0);
   } catch (err) {
     console.error('generateEmbedding error:', err);
     return new Array(768).fill(0);

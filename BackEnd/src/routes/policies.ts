@@ -4,7 +4,7 @@ import { storage } from '../storage';
 import { summarizePolicy, searchPolicyInfo, detectDuplicates } from '../services/geminiService';
 import { query } from '../db';
 import pool from '../db';
-import { vectorizeCgByPages } from '../services/pageVectorizationService';
+import { vectorizeCgByPages, requestStopVectorization } from '../services/pageVectorizationService';
 
 // -----------------------------------------------------------------------------
 // Routes /policies
@@ -428,6 +428,18 @@ router.get('/central-cg/:id/vectorization-status', async (req, res) => {
     console.error('❌ Error in GET /central-cg/:id/vectorization-status:', err);
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+/**
+ * Route POST /api/policies/central-cg/:id/stop-vectorization
+ * Arrête proprement une vectorisation en cours pour un CG donné.
+ */
+router.post('/central-cg/:id/stop-vectorization', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
+  requestStopVectorization(id);
+  console.log(`⛔ Stop vectorisation demandé pour CG ${id}`);
+  res.json({ message: `Arrêt de la vectorisation du CG ${id} demandé.` });
 });
 
 /**

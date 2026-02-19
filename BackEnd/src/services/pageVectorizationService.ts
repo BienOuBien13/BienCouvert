@@ -13,6 +13,29 @@ import { extractTableFromPageImage, tableToFacts, saveCoverageFacts } from './ta
 // Configuration pdf.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = require('pdfjs-dist/legacy/build/pdf.worker.entry');
 
+// ─────────────────────────────────────────────────────────────
+// Mécanisme de STOP : permet d'annuler une vectorisation en cours
+// ─────────────────────────────────────────────────────────────
+const stopRequests = new Map<number, boolean>();
+
+/** Demande l'arrêt de la vectorisation d'un CG. */
+export function requestStopVectorization(cgId: number): void {
+  stopRequests.set(cgId, true);
+}
+
+/** Annule le flag de stop (nettoyage après arrêt). */
+export function clearStopVectorization(cgId: number): void {
+  stopRequests.delete(cgId);
+}
+
+/** Retourne true si l'arrêt a été demandé. */
+export function isStopRequested(cgId: number): boolean {
+  return stopRequests.get(cgId) === true;
+}
+
+// Délai minimum entre deux appels embedding (évite les 429 Gemini)
+const EMBED_RATE_DELAY_MS = 1200; // ~50 req/min max
+
 interface PageData {
   pageNumber: number;
   contentText: string;
@@ -238,17 +261,44 @@ export async function vectorizeCgByPages(
     let pagesProcessed = 0;
     let tablesExtracted = 0;
     let factsCreated = 0;
-    
+
+    // Nettoyer un éventuel flag stop résiduel
+    clearStopVectorization(centralCgId);
+
     // Traiter chaque page
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+
+      // ── Vérifier si un stop a été demandé ──
+      if (isStopRequested(centralCgId)) {
+        console.warn(`⛔ Vectorisation CG ${centralCgId} arrêtée à la page ${pageNum}/${numPages}`);
+        clearStopVectorization(centralCgId);
+        try {
+          await pool.query(
+            `UPDATE central_cg
+             SET vectorization_status = 'partial',
+                 pages_processed = $1,
+                 vectorization_error = 'Arrêtée manuellement à la page ' || $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [pagesProcessed, pageNum, centralCgId]
+          );
+        } catch (_) {}
+        return { pagesProcessed, tablesExtracted, factsCreated };
+      }
+
       console.log(`\n📄 Page ${pageNum}/${numPages}...`);
-      
+
       const pageData = await extractPage(pdfUint8Array, pageNum);
       if (!pageData) {
         console.warn(`⚠️ Échec extraction page ${pageNum}`);
         continue;
       }
-      
+
+      // Rate-limit : pause entre chaque appel embedding
+      if (pageNum > 1) {
+        await new Promise(r => setTimeout(r, EMBED_RATE_DELAY_MS));
+      }
+
       // Générer embedding
       const embedding = await generateEmbedding(pageData.contentText);
       
