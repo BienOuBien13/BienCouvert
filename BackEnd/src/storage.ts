@@ -349,11 +349,11 @@ export const storage = {
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const embedding = await generateEmbedding(chunk);
-      
+
       await query(
         `INSERT INTO policy_embeddings (policy_id, chunk_text, chunk_index, embedding, created_at)
          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-        [policyId, chunk, i, JSON.stringify(embedding)]
+        [policyId, chunk, i, embedding ? JSON.stringify(embedding) : null]
       );
     }
     
@@ -375,21 +375,16 @@ export const storage = {
 
     const embedding = await generateEmbedding(text);
 
-    const isValidEmbedding = Array.isArray(embedding)
-      && embedding.length === 768
-      && embedding.some((value: number) => Number.isFinite(value) && value !== 0);
-
-    if (!isValidEmbedding) {
-      throw new Error(
-        `Embedding invalide pour CG ${cgId} (vecteur nul ou incomplet). Vérifiez GEMINI_API_KEY et l'accès au modèle d'embedding.`
-      );
+    if (!embedding || !embedding.some((v: number) => v !== 0)) {
+      console.warn(`⚠️ Embedding indisponible pour CG ${cgId} — sauvegarde sans vecteur`);
+      return; // Non fatal : les pages sont quand même indexées en texte
     }
-    
+
     await query(
       `UPDATE central_cg SET embedding = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
       [JSON.stringify(embedding), cgId]
     );
-    
+
     console.log(`✅ CG ${cgId} vectorisé`);
   },
 

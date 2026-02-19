@@ -80,7 +80,8 @@ export const searchPolicyInfo = async (provider: string, type: string, name: str
     const storage = require('../storage').storage;
     const questionText = `Informations sur le contrat ${name} de ${provider} (${type})`;
     const questionEmbedding = await generateEmbedding(questionText);
-    
+    if (!questionEmbedding) throw new Error('Embedding indisponible');
+
     const cgResults = await storage.searchCentralCg(questionEmbedding, [provider], 1);
     
     if (cgResults.length > 0 && cgResults[0].similarity > 0.7) {
@@ -186,6 +187,7 @@ export const detectDuplicates = async (policies: Policy[], profile: any = {}): P
     try {
       // Chercher dans les embeddings de ce contrat
       const questionEmbedding = await generateEmbedding(`Garanties et couvertures du contrat ${p.name}`);
+      if (!questionEmbedding) throw new Error('Embedding indisponible');
       const chunks = await storage.searchPolicyEmbeddings(questionEmbedding, [parseInt(p.id)], 3);
       
       if (chunks.length > 0) {
@@ -257,43 +259,55 @@ Retourne un tableau JSON d'optimisations avec les champs:
  *  - Fallback sur embedding-001 (768 dims) si text-embedding-004 introuvable.
  *  - Backoff exponentiel sur 429 / 503.
  */
+// Modèles candidats pour embedding (ordre de préférence)
 const EMBEDDING_MODELS = [
-  { name: 'text-embedding-004', dims: 768 },
-  { name: 'embedding-001',      dims: 768 },
+  'text-embedding-004',
+  'text-multilingual-embedding-002',
+  'embedding-001',
+  'gemini-embedding-exp-03-07',
 ];
 
+// Cache du modèle qui fonctionne (évite de re-tester à chaque page)
+let _workingEmbedModel: string | null | undefined = undefined; // undefined = pas encore testé
+
 async function callEmbedApi(modelName: string, text: string, retries: number): Promise<number[] | null> {
+  // Utilise node-fetch pour compatibilité (évite les quirks du fetch natif Node)
+  const nodeFetch = require('node-fetch');
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // ⚠️ NE PAS mettre "model" dans le body — il est dans l'URL
-    body: JSON.stringify({
-      content: { parts: [{ text: text.slice(0, 8192) }] }
-    })
-  });
-
-  if (response.status === 429 || response.status === 503) {
-    if (retries > 0) {
-      const wait = (5 - retries) * 4000; // 4s, 8s, 12s, 16s
-      console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s... (${retries} restantes)`);
-      await new Promise(r => setTimeout(r, wait));
-      return callEmbedApi(modelName, text, retries - 1);
-    }
-    console.error('generateEmbedding: rate limit dépassé après retries');
+  let response: any;
+  try {
+    response = await nodeFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: { parts: [{ text: text.slice(0, 8192) }] }
+      })
+    });
+  } catch (err: any) {
+    console.error(`callEmbedApi network error [${modelName}]:`, err.message);
     return null;
   }
 
-  if (response.status === 404) {
-    // Modèle indisponible pour cette clé — essayer le suivant
+  if (response.status === 429 || response.status === 503) {
+    if (retries > 0) {
+      const wait = (5 - retries) * 4000;
+      console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s...`);
+      await new Promise(r => setTimeout(r, wait));
+      return callEmbedApi(modelName, text, retries - 1);
+    }
+    return null;
+  }
+
+  if (response.status === 404 || response.status === 400) {
+    // Modèle indisponible pour cette clé/région
     return null;
   }
 
   if (!response.ok) {
     const body = await response.text();
-    console.error(`generateEmbedding error [${modelName}]: ${response.status} ${body}`);
+    console.error(`callEmbedApi [${modelName}] ${response.status}: ${body.slice(0, 200)}`);
     return null;
   }
 
@@ -303,26 +317,48 @@ async function callEmbedApi(modelName: string, text: string, retries: number): P
   return values;
 }
 
-export const generateEmbedding = async (text: string, retries = 4): Promise<number[]> => {
+/**
+ * Génère un embedding pour un texte donné.
+ * Retourne null si aucun modèle n'est disponible (la vectorisation continue sans embedding).
+ * Met en cache le premier modèle qui fonctionne pour éviter de re-tester à chaque page.
+ */
+export const generateEmbedding = async (text: string, retries = 4): Promise<number[] | null> => {
   if (!GEMINI_KEY) {
-    console.warn('No GEMINI_API_KEY - returning zero embedding');
-    return new Array(768).fill(0);
+    console.warn('No GEMINI_API_KEY - embedding désactivé');
+    return null;
   }
 
-  for (const { name, dims } of EMBEDDING_MODELS) {
+  // Si on sait déjà qu'aucun modèle ne marche pour cette clé
+  if (_workingEmbedModel === null) return null;
+
+  // Utiliser directement le modèle connu si déjà trouvé
+  const modelsToTry = _workingEmbedModel
+    ? [_workingEmbedModel]
+    : EMBEDDING_MODELS;
+
+  for (const name of modelsToTry) {
     try {
       const values = await callEmbedApi(name, text, retries);
       if (values) {
+        if (_workingEmbedModel === undefined) {
+          console.log(`✅ Modèle embedding actif: ${name} (${values.length} dims)`);
+          _workingEmbedModel = name;
+        }
         return values;
       }
-      console.warn(`⚠️  Modèle ${name} indisponible, essai du suivant...`);
+      if (_workingEmbedModel === undefined) {
+        console.warn(`   ⚠️  ${name} → indisponible`);
+      }
     } catch (err) {
-      console.error(`generateEmbedding error [${name}]:`, err);
+      console.error(`generateEmbedding [${name}]:`, err);
     }
   }
 
-  console.error('generateEmbedding: aucun modèle disponible — embedding nul');
-  return new Array(768).fill(0);
+  if (_workingEmbedModel === undefined) {
+    console.error('❌ Aucun modèle embedding disponible pour cette clé API — les pages seront indexées sans vecteur (recherche sémantique désactivée).');
+    _workingEmbedModel = null; // ne plus réessayer
+  }
+  return null;
 };
 
 /**
@@ -381,20 +417,21 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     const storage = require('../storage').storage;
     
     // Étape 1: Générer l'embedding de la question (peut échouer si ZScaler)
-    let questionEmbedding: number[];
+    let questionEmbedding: number[] | null;
     try {
       questionEmbedding = await generateEmbedding(message);
-      console.log(`✅ Embedding généré pour: "${message.substring(0, 50)}..."`);
+      if (questionEmbedding) console.log(`✅ Embedding généré pour: "${message.substring(0, 50)}..."`);
+      else console.warn('⚠️ Embedding indisponible, mode dégradé sans RAG vectoriel');
     } catch (embErr) {
       console.warn('⚠️ Échec embedding, mode dégradé sans RAG:', embErr);
-      questionEmbedding = new Array(768).fill(0);
+      questionEmbedding = null;
     }
     
     // Étape 2: Rechercher dans les embeddings des contrats utilisateurs
     let policyChunks: any[] = [];
     try {
       const policyIds = policies.map(p => parseInt(p.id));
-      if (policyIds.length > 0) {
+      if (policyIds.length > 0 && questionEmbedding) {
         policyChunks = await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5);
         console.log(`✅ RAG Policies: ${policyChunks.length} chunks trouvés`);
       }
@@ -412,7 +449,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       console.log(`🔍 Recherche CG liés aux policies: ${centralCgIds.length} central_cg, ${userCgIds.length} user_cg`);
       
       // Recherche dans central_cg via embeddings
-      if (centralCgIds.length > 0) {
+      if (centralCgIds.length > 0 && questionEmbedding) {
         const centralResults = await storage.query(
           `SELECT 
             cg.id,
@@ -680,33 +717,34 @@ export const sendMessageToAssistantStream = async (
     const storage = require('../storage').storage;
     
     // Même logique d'extraction du contexte que sendMessageToAssistant
-    let questionEmbedding: number[];
+    let questionEmbedding: number[] | null;
     try {
       questionEmbedding = await generateEmbedding(message);
-      console.log(`✅ Embedding généré pour streaming: "${message.substring(0, 50)}..."`);
+      if (questionEmbedding) console.log(`✅ Embedding généré pour streaming: "${message.substring(0, 50)}..."`);
+      else console.warn('⚠️ Embedding indisponible, mode dégradé sans RAG vectoriel');
     } catch (embErr) {
       console.warn('⚠️ Échec embedding, mode dégradé sans RAG:', embErr);
-      questionEmbedding = new Array(768).fill(0);
+      questionEmbedding = null;
     }
-    
+
     // Rechercher dans les embeddings (même logique)
     let policyChunks: any[] = [];
     let cgChunks: any[] = [];
-    
+
     try {
       const policyIds = policies.map(p => parseInt(p.id));
-      if (policyIds.length > 0) {
+      if (policyIds.length > 0 && questionEmbedding) {
         policyChunks = await storage.searchPolicyEmbeddings(questionEmbedding, policyIds, 5);
       }
     } catch (ragErr) {
       console.warn('⚠️ Échec recherche policy_embeddings:', ragErr);
     }
-    
+
     try {
       const centralCgIds = policies.map(p => (p as any).centralCgId).filter(id => id != null);
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
-      
-      if (centralCgIds.length > 0) {
+
+      if (centralCgIds.length > 0 && questionEmbedding) {
         const centralResults = await storage.query(
           `SELECT 
             cg.id,

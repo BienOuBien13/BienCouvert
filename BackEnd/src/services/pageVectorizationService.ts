@@ -299,8 +299,10 @@ export async function vectorizeCgByPages(
         await new Promise(r => setTimeout(r, EMBED_RATE_DELAY_MS));
       }
 
-      // Générer embedding
-      const embedding = await generateEmbedding(pageData.contentText);
+      // Générer embedding (peut retourner null si indisponible — non fatal)
+      const embeddingValues = await generateEmbedding(pageData.contentText);
+      // pgvector accepte NULL — la page est quand même indexée en texte
+      const embedding = embeddingValues;
       
       // Détecter tableau
       const hasTable = detectTable(pageData.contentText);
@@ -340,7 +342,7 @@ export async function vectorizeCgByPages(
         ON CONFLICT (central_cg_id, page_number) DO UPDATE SET
           content_text = EXCLUDED.content_text,
           layout_text = EXCLUDED.layout_text,
-          embedding = EXCLUDED.embedding,
+          embedding = COALESCE(EXCLUDED.embedding, central_cg_pages.embedding),
           page_image_base64 = EXCLUDED.page_image_base64,
           page_width = EXCLUDED.page_width,
           page_height = EXCLUDED.page_height,
@@ -358,7 +360,7 @@ export async function vectorizeCgByPages(
           pageNum,
           pageData.contentText,
           pageData.layoutText,
-          JSON.stringify(embedding),
+          embedding ? JSON.stringify(embedding) : null,  // NULL si pas d'embedding dispo
           pageData.imageBase64,
           pageData.width,
           pageData.height,
