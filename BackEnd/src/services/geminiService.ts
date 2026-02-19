@@ -43,6 +43,17 @@ const generateSystemInstruction = (policies: Policy[] = []) => {
   return context;
 };
 
+/**
+ * Normalise un libellé en clé snake_case sans accents (identique à la normalisation DB coverage_facts)
+ */
+function normalizeKey(label: string): string {
+  return label
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 export const summarizePolicy = async (fileBase64: string, mimeType: string): Promise<string> => {
   const ai = getAiClient();
   if (!ai) {
@@ -508,7 +519,87 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     } catch (cgErr) {
       console.warn('⚠️ Échec recherche CG liées:', cgErr);
     }
-    
+
+    // Étape 3b: Données structurées coverage_facts (garantie × formule) — priorité absolue
+    let coverageFacts: any[] = [];
+    try {
+      const cgIdsForFacts = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+      if (cgIdsForFacts.length > 0) {
+        const formulaKeys = policies
+          .map(p => normalizeKey((p as any).formula || ''))
+          .filter((k: string) => k.length > 2);
+        let factsResult: any;
+        if (formulaKeys.length > 0) {
+          factsResult = await storage.query(
+            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
+                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM coverage_facts cf
+             JOIN central_cg cg ON cf.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
+             ORDER BY cf.guarantee_key`,
+            [cgIdsForFacts, formulaKeys]
+          );
+        } else {
+          factsResult = await storage.query(
+            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
+                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM coverage_facts cf
+             JOIN central_cg cg ON cf.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE cf.central_cg_id = ANY($1)
+             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 100`,
+            [cgIdsForFacts]
+          );
+        }
+        coverageFacts = factsResult.rows;
+        console.log(`✅ coverage_facts: ${coverageFacts.length} faits structurés`);
+      }
+    } catch (cfErr) {
+      console.warn('⚠️ Échec coverage_facts:', cfErr);
+    }
+
+    // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
+    let relevantPages: any[] = [];
+    try {
+      const cgIdsForPages = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+      if (cgIdsForPages.length > 0) {
+        const GUARANTEE_KEYWORDS: Record<string, string[]> = {
+          'BRIS_GLACE': ['bris', 'glace', 'vitrage', 'pare-brise', 'lunette'],
+          'VOL':        ['vol', 'cambriolage', 'tentative'],
+          'INCENDIE':   ['incendie', 'feu', 'explosion'],
+          'RC':         ['responsabilit', 'civil', 'tiers'],
+          'DOMMAGES':   ['dommages', 'collision', 'choc', 'accident'],
+          'ASSISTANCE': ['assistance', 'remorquage', 'panne'],
+          'PJ':         ['protection juridique', 'défense', 'defense', 'recours'],
+          'CONDUCTEUR': ['conducteur', 'corporel'],
+          'CAT_NAT':    ['catastrophe', 'naturelle', 'tempête', 'tempete', 'grêle', 'grele'],
+        };
+        const msgLower = message.toLowerCase();
+        const detectedCodes = Object.entries(GUARANTEE_KEYWORDS)
+          .filter(([, kws]) => kws.some(kw => msgLower.includes(kw)))
+          .map(([code]) => code);
+        if (detectedCodes.length > 0) {
+          const pagesResult = await storage.query(
+            `SELECT p.page_number, p.content_text, p.chunk_type, p.article_ref,
+                    cg.url as pdf_url, i.label as insurer_label
+             FROM central_cg_pages p
+             JOIN central_cg cg ON p.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE p.central_cg_id = ANY($1) AND p.guarantee_codes && $2::text[]
+             ORDER BY p.page_number LIMIT 10`,
+            [cgIdsForPages, detectedCodes]
+          );
+          relevantPages = pagesResult.rows;
+          console.log(`✅ Pages CG ciblées: ${relevantPages.length} pages (codes: ${detectedCodes.join(',')})`);
+        }
+      }
+    } catch (pgErr) {
+      console.warn('⚠️ Échec pages CG ciblées:', pgErr);
+    }
+
     // Étape 4: Construire le contexte enrichi
     let enrichedContext = '';
     
@@ -603,7 +694,49 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
         enrichedContext += `[${insurerName} - ${productName}]\n${extractedText}\n\n`;
       });
     }
-    
+
+    // Données structurées coverage_facts (tableau précis garantie × formule — source prioritaire)
+    if (coverageFacts.length > 0) {
+      const grouped = new Map<string, any[]>();
+      coverageFacts.forEach((f: any) => {
+        const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(f);
+      });
+      enrichedContext += '📊 TABLEAU DES GARANTIES PAR FORMULE (données structurées — à utiliser en PRIORITÉ):\n\n';
+      grouped.forEach((facts, key) => {
+        enrichedContext += `[${key}]\n`;
+        facts.forEach((f: any) => {
+          const statusIcon = f.coverage_status === 'included' ? '✓ INCLUSE'
+                           : f.coverage_status === 'optional' ? '○ EN OPTION'
+                           : f.coverage_status === 'excluded' ? '✗ EXCLUE'
+                           : '— N/A';
+          const details = [
+            f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+            f.franchise       ? `franchise: ${f.franchise}`      : '',
+            f.coverage_notes  ? f.coverage_notes.substring(0, 80) : ''
+          ].filter(Boolean).join(', ');
+          const pageSrc = f.source_page_number
+            ? ` [page ${f.source_page_number}${f.pdf_url ? ` | PDF: ${f.pdf_url}` : ''}]`
+            : '';
+          enrichedContext += `- ${f.guarantee_label}: ${statusIcon}${details ? ` (${details})` : ''}${pageSrc}\n`;
+        });
+        enrichedContext += '\n';
+      });
+    }
+
+    // Pages CG spécifiques à la garantie demandée (texte contractuel détaillé)
+    if (relevantPages.length > 0) {
+      enrichedContext += '📄 ARTICLES CG SPÉCIFIQUES À CETTE GARANTIE:\n\n';
+      relevantPages.forEach((p: any) => {
+        const artRef = p.article_ref ? ` | ${p.article_ref}` : '';
+        enrichedContext += `[${p.insurer_label || 'Assureur'} - page ${p.page_number}${artRef}]\n`;
+        enrichedContext += `${(p.content_text || '').substring(0, 2000)}\n`;
+        if (p.pdf_url) enrichedContext += `SOURCE: ${p.pdf_url} page ${p.page_number}\n`;
+        enrichedContext += '\n';
+      });
+    }
+
     // Si aucun contexte RAG, fallback sur metadata
     if (!enrichedContext) {
       console.log('⚠️ Aucun contexte RAG - utilisation metadata');
@@ -645,6 +778,8 @@ RÈGLES ABSOLUES:
 - Ne dis JAMAIS "je n'ai pas accès", "consultez vos documents", "vérifiez auprès de votre assureur"
 - Identifie la formule exacte du contrat dans "📋 VOS CONTRATS" (ex: TIERS ESSENTIEL, TOUS RISQUES CONFORT, Plénitude...)
 - Réponds UNIQUEMENT avec les infos SPÉCIFIQUES à SA formule
+- Si le contexte contient "📊 TABLEAU DES GARANTIES PAR FORMULE": c'est la source la plus fiable (extraction directe du document) — utilise-la EN PRIORITÉ pour confirmer si une garantie est incluse, en option ou exclue
+- Si le contexte contient "📄 ARTICLES CG SPÉCIFIQUES": utilise-les pour les détails (franchise, plafond, conditions, procédure de déclaration)
 - Utilise TOUJOURS le format bullet point (liste à puces avec -)
 - N'utilise JAMAIS de texte en gras (pas de ** ou __)
 - Reste concis et direct
@@ -654,7 +789,8 @@ FORMAT DE RÉPONSE OBLIGATOIRE:
 - Une ligne d'introduction courte identifiant la formule
 - Liste à puces avec - (jamais de *)
 - Pas de sections avec titres en gras
-- Citer la source à la fin entre crochets
+- Indiquer clairement si la garantie demandée est INCLUSE / EN OPTION / EXCLUE dans la formule de l'utilisateur
+- Terminer par une ligne source discrète: [NomProduit - page X](url_pdf) si url_pdf disponible, sinon [NomProduit - page X]
 
 Exemple CORRECT:
 Votre contrat MAAF AUTO avec formule TIERS ESSENTIEL couvre:
@@ -662,9 +798,9 @@ Votre contrat MAAF AUTO avec formule TIERS ESSENTIEL couvre:
 - Responsabilité civile: dommages causés aux tiers (illimité pour dommages corporels, 100M€ pour dommages matériels)
 - Défense recours: prise en charge frais avocat jusqu'à 16 000€
 - Assistance aux personnes: incluse dès 0 km
-- Bris de pare-brise: en option (franchise 50€)
+- Bris de glace: EN OPTION (franchise 50€ — à souscrire séparément)
 
-[Source: CG MAAF Auto - Tableau formules page 2]
+[CG MAAF Auto - page 5](https://storage.azure.com/cg/maaf-auto.pdf)
 
 Exemple INTERDIT:
 Il existe plusieurs niveaux de garantie. **Responsabilité civile** est obligatoire... Pour connaître votre couverture exacte, consultez vos Conditions Particulières.`;
@@ -786,7 +922,87 @@ export const sendMessageToAssistantStream = async (
     } catch (cgErr) {
       console.warn('⚠️ Échec recherche CG:', cgErr);
     }
-    
+
+    // Étape 3b: Données structurées coverage_facts (garantie × formule) — priorité absolue
+    let coverageFacts: any[] = [];
+    try {
+      const cgIdsForFacts = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+      if (cgIdsForFacts.length > 0) {
+        const formulaKeys = policies
+          .map(p => normalizeKey((p as any).formula || ''))
+          .filter((k: string) => k.length > 2);
+        let factsResult: any;
+        if (formulaKeys.length > 0) {
+          factsResult = await storage.query(
+            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
+                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM coverage_facts cf
+             JOIN central_cg cg ON cf.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
+             ORDER BY cf.guarantee_key`,
+            [cgIdsForFacts, formulaKeys]
+          );
+        } else {
+          factsResult = await storage.query(
+            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
+                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM coverage_facts cf
+             JOIN central_cg cg ON cf.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE cf.central_cg_id = ANY($1)
+             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 100`,
+            [cgIdsForFacts]
+          );
+        }
+        coverageFacts = factsResult.rows;
+        console.log(`✅ coverage_facts (stream): ${coverageFacts.length} faits structurés`);
+      }
+    } catch (cfErr) {
+      console.warn('⚠️ Échec coverage_facts (stream):', cfErr);
+    }
+
+    // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
+    let relevantPages: any[] = [];
+    try {
+      const cgIdsForPages = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+      if (cgIdsForPages.length > 0) {
+        const GUARANTEE_KEYWORDS: Record<string, string[]> = {
+          'BRIS_GLACE': ['bris', 'glace', 'vitrage', 'pare-brise', 'lunette'],
+          'VOL':        ['vol', 'cambriolage', 'tentative'],
+          'INCENDIE':   ['incendie', 'feu', 'explosion'],
+          'RC':         ['responsabilit', 'civil', 'tiers'],
+          'DOMMAGES':   ['dommages', 'collision', 'choc', 'accident'],
+          'ASSISTANCE': ['assistance', 'remorquage', 'panne'],
+          'PJ':         ['protection juridique', 'défense', 'defense', 'recours'],
+          'CONDUCTEUR': ['conducteur', 'corporel'],
+          'CAT_NAT':    ['catastrophe', 'naturelle', 'tempête', 'tempete', 'grêle', 'grele'],
+        };
+        const msgLower = message.toLowerCase();
+        const detectedCodes = Object.entries(GUARANTEE_KEYWORDS)
+          .filter(([, kws]) => kws.some(kw => msgLower.includes(kw)))
+          .map(([code]) => code);
+        if (detectedCodes.length > 0) {
+          const pagesResult = await storage.query(
+            `SELECT p.page_number, p.content_text, p.chunk_type, p.article_ref,
+                    cg.url as pdf_url, i.label as insurer_label
+             FROM central_cg_pages p
+             JOIN central_cg cg ON p.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE p.central_cg_id = ANY($1) AND p.guarantee_codes && $2::text[]
+             ORDER BY p.page_number LIMIT 10`,
+            [cgIdsForPages, detectedCodes]
+          );
+          relevantPages = pagesResult.rows;
+          console.log(`✅ Pages CG ciblées (stream): ${relevantPages.length} pages (codes: ${detectedCodes.join(',')})`);
+        }
+      }
+    } catch (pgErr) {
+      console.warn('⚠️ Échec pages CG ciblées (stream):', pgErr);
+    }
+
     // Construction du contexte enrichi (même logique d'extraction multi-zones)
     let enrichedContext = '';
     
@@ -859,7 +1075,49 @@ export const sendMessageToAssistantStream = async (
         enrichedContext += `[${insurerName} - ${productName}]\n${extractedText}\n\n`;
       });
     }
-    
+
+    // Donn\u00e9es structur\u00e9es coverage_facts (tableau pr\u00e9cis garantie \u00d7 formule)
+    if (coverageFacts.length > 0) {
+      const grouped = new Map<string, any[]>();
+      coverageFacts.forEach((f: any) => {
+        const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(f);
+      });
+      enrichedContext += '\ud83d\udcca TABLEAU DES GARANTIES PAR FORMULE (donn\u00e9es structur\u00e9es \u2014 \u00e0 utiliser en PRIORIT\u00c9):\n\n';
+      grouped.forEach((facts, key) => {
+        enrichedContext += `[${key}]\n`;
+        facts.forEach((f: any) => {
+          const statusIcon = f.coverage_status === 'included' ? '\u2713 INCLUSE'
+                           : f.coverage_status === 'optional' ? '\u25cb EN OPTION'
+                           : f.coverage_status === 'excluded' ? '\u2717 EXCLUE'
+                           : '\u2014 N/A';
+          const details = [
+            f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+            f.franchise       ? `franchise: ${f.franchise}`      : '',
+            f.coverage_notes  ? f.coverage_notes.substring(0, 80) : ''
+          ].filter(Boolean).join(', ');
+          const pageSrc = f.source_page_number
+            ? ` [page ${f.source_page_number}${f.pdf_url ? ` | PDF: ${f.pdf_url}` : ''}]`
+            : '';
+          enrichedContext += `- ${f.guarantee_label}: ${statusIcon}${details ? ` (${details})` : ''}${pageSrc}\n`;
+        });
+        enrichedContext += '\n';
+      });
+    }
+
+    // Pages CG sp\u00e9cifiques \u00e0 la garantie demand\u00e9e
+    if (relevantPages.length > 0) {
+      enrichedContext += '\ud83d\udcc4 ARTICLES CG SP\u00c9CIFIQUES \u00c0 CETTE GARANTIE:\n\n';
+      relevantPages.forEach((p: any) => {
+        const artRef = p.article_ref ? ` | ${p.article_ref}` : '';
+        enrichedContext += `[${p.insurer_label || 'Assureur'} - page ${p.page_number}${artRef}]\n`;
+        enrichedContext += `${(p.content_text || '').substring(0, 2000)}\n`;
+        if (p.pdf_url) enrichedContext += `SOURCE: ${p.pdf_url} page ${p.page_number}\n`;
+        enrichedContext += '\n';
+      });
+    }
+
     if (!enrichedContext) {
       enrichedContext = 'Vos contrats:\n' + policies.map(p => {
         const insurer = (p as any).insurer || 'Assureur inconnu';
@@ -892,16 +1150,19 @@ RÈGLES ABSOLUES:
 - Ne dis JAMAIS "je n'ai pas accès", "consultez vos documents", "vérifiez auprès de votre assureur"
 - Identifie la formule exacte du contrat dans "📋 VOS CONTRATS" (ex: TIERS ESSENTIEL, TOUS RISQUES CONFORT, Plénitude...)
 - Réponds UNIQUEMENT avec les infos SPÉCIFIQUES à SA formule
+- Si le contexte contient "📊 TABLEAU DES GARANTIES PAR FORMULE": c'est la source la plus fiable — utilise-la EN PRIORITÉ pour confirmer si une garantie est incluse, en option ou exclue
+- Si le contexte contient "📄 ARTICLES CG SPÉCIFIQUES": utilise-les pour les détails (franchise, plafond, conditions)
 - Utilise TOUJOURS le format bullet point (liste à puces avec -)
 - N'utilise JAMAIS de texte en gras (pas de ** ou __)
 - Reste concis et direct
+- Indiquer clairement si la garantie demandée est INCLUSE / EN OPTION / EXCLUE dans la formule de l'utilisateur
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
 
 FORMAT DE RÉPONSE OBLIGATOIRE:
 - Une ligne d'introduction courte identifiant la formule
 - Liste à puces avec - (jamais de *)
 - Pas de sections avec titres en gras
-- Citer la source à la fin entre crochets`;
+- Terminer par une ligne source discrète: [NomProduit - page X](url_pdf) si url_pdf disponible, sinon [NomProduit - page X]`;
 
     const chatHistory = history.map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
