@@ -249,52 +249,80 @@ Retourne un tableau JSON d'optimisations avec les champs:
 };
 
 /**
- * Génère un embedding de 768 dimensions pour un texte donné.
- * Utilise l'API REST Gemini v1 directement (le SDK JS utilise v1beta qui ne supporte
- * plus text-embedding-004). Backoff exponentiel sur 429 / 503.
+ * Génère un embedding pour un texte donné via l'API REST Gemini.
+ *
+ * Règles REST Gemini (AI Studio) :
+ *  - Le modèle est dans l'URL, PAS dans le body.
+ *  - v1beta est la version correcte pour les clés AI Studio.
+ *  - Fallback sur embedding-001 (768 dims) si text-embedding-004 introuvable.
+ *  - Backoff exponentiel sur 429 / 503.
  */
+const EMBEDDING_MODELS = [
+  { name: 'text-embedding-004', dims: 768 },
+  { name: 'embedding-001',      dims: 768 },
+];
+
+async function callEmbedApi(modelName: string, text: string, retries: number): Promise<number[] | null> {
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // ⚠️ NE PAS mettre "model" dans le body — il est dans l'URL
+    body: JSON.stringify({
+      content: { parts: [{ text: text.slice(0, 8192) }] }
+    })
+  });
+
+  if (response.status === 429 || response.status === 503) {
+    if (retries > 0) {
+      const wait = (5 - retries) * 4000; // 4s, 8s, 12s, 16s
+      console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s... (${retries} restantes)`);
+      await new Promise(r => setTimeout(r, wait));
+      return callEmbedApi(modelName, text, retries - 1);
+    }
+    console.error('generateEmbedding: rate limit dépassé après retries');
+    return null;
+  }
+
+  if (response.status === 404) {
+    // Modèle indisponible pour cette clé — essayer le suivant
+    return null;
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.error(`generateEmbedding error [${modelName}]: ${response.status} ${body}`);
+    return null;
+  }
+
+  const data = await response.json() as any;
+  const values: number[] | undefined = data.embedding?.values;
+  if (!values || values.length === 0) return null;
+  return values;
+}
+
 export const generateEmbedding = async (text: string, retries = 4): Promise<number[]> => {
   if (!GEMINI_KEY) {
     console.warn('No GEMINI_API_KEY - returning zero embedding');
     return new Array(768).fill(0);
   }
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${GEMINI_KEY}`;
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'models/text-embedding-004',
-        content: { parts: [{ text: text.slice(0, 8192) }] }
-      })
-    });
-
-    if (response.status === 429 || response.status === 503) {
-      if (retries > 0) {
-        const wait = (5 - retries) * 4000; // 4s, 8s, 12s, 16s
-        console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s... (${retries} restantes)`);
-        await new Promise(r => setTimeout(r, wait));
-        return generateEmbedding(text, retries - 1);
+  for (const { name, dims } of EMBEDDING_MODELS) {
+    try {
+      const values = await callEmbedApi(name, text, retries);
+      if (values) {
+        return values;
       }
-      console.error('generateEmbedding: rate limit dépassé après retries');
-      return new Array(768).fill(0);
+      console.warn(`⚠️  Modèle ${name} indisponible, essai du suivant...`);
+    } catch (err) {
+      console.error(`generateEmbedding error [${name}]:`, err);
     }
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.error(`generateEmbedding error: ${response.status} ${body}`);
-      return new Array(768).fill(0);
-    }
-
-    const data = await response.json() as any;
-    return data.embedding?.values ?? new Array(768).fill(0);
-  } catch (err) {
-    console.error('generateEmbedding error:', err);
-    return new Array(768).fill(0);
   }
+
+  console.error('generateEmbedding: aucun modèle disponible — embedding nul');
+  return new Array(768).fill(0);
 };
 
 /**
