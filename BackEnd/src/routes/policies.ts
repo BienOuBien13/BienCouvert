@@ -293,15 +293,16 @@ router.post('/central-cg', async (req, res) => {
 
     // Récupérer l'utilisateur actif depuis le token/session
     const userId = (req as any).user?.id || 'system';
-    
+
     // Le PDF est déjà en base64 (data:application/pdf;base64,...)
     let pdfBase64: string | null = null;
     if (pdfData && pdfData.startsWith('data:application/pdf;base64,')) {
       pdfBase64 = pdfData.split(',')[1];
-      console.log('📄 PDF en base64 extrait pour stockage');
+      console.log(`📄 PDF en base64 extrait (${Math.round(pdfData.length / 1024)} KB)`);
     }
 
-    // Création de la nouvelle entrée avec la nouvelle structure
+    // ⚡ INSERT léger : métadonnées uniquement, SANS le PDF base64
+    // → réponse immédiate au client, pas de timeout 504 même pour les gros PDFs
     const newEntry: any = {
       insurerCode,
       insuranceTypeCode,
@@ -314,53 +315,54 @@ router.post('/central-cg', async (req, res) => {
       status: 'active',
       contentText: null,
       embedding: null,
-      pdfBase64,
+      pdfBase64: null,          // stocké en background pour ne pas bloquer la réponse
       metadata: {
         indexedFormulas: metadata?.indexedFormulas || [],
         indexedOptions: metadata?.indexedOptions || {},
         description: metadata?.description || '',
-        productName  // Conservé pour compatibilité
+        productName
       }
     };
-    
+
     const entryId = await storage.writeCentralCgEntry(newEntry);
     newEntry.id = entryId;
-    
-    // ⚡ Réponse immédiate au client (évite le timeout 504)
+
+    // ⚡ Réponse immédiate au client
     res.json({ ...newEntry, vectorizationStatus: 'pending' });
-    
-    // 🔄 Vectorisation automatique du PDF en arrière-plan (non-bloquant)
-    // Cette opération peut prendre plusieurs minutes pour de gros PDFs
+
+    // 🔄 Tout le reste en arrière-plan : stockage PDF + vectorisation
     (async () => {
       try {
-        console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
-        
-        // Le PDF est déjà stocké en base, pas besoin de le re-extraire
         if (!pdfBase64) {
           throw new Error('PDF base64 non disponible pour vectorisation');
         }
-        
-        console.log(`✅ PDF prêt (${Math.round(pdfBase64.length / 1024)}KB en base64)`);
 
-        // Alimenter central_cg_pages et coverage_facts
+        // Étape 1 : stocker le PDF base64 (UPDATE non bloquant pour le client)
+        await query(
+          'UPDATE central_cg SET pdf_base64 = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [pdfBase64, entryId]
+        );
+        console.log(`✅ PDF stocké en DB pour CG ${entryId} (${Math.round(pdfBase64.length / 1024)} KB)`);
+
+        // Étape 2 : vectorisation page par page
+        console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);
         const pageResult = await vectorizeCgByPages(pool, entryId, url || '', pdfBase64);
         console.log(`✅ Vectorisation page par page OK pour CG ${entryId}:`, pageResult);
 
-        // Agréger le texte complet depuis les pages pour central_cg.content_text
+        // Étape 3 : agréger le texte complet
         const textResult = await query(
           `SELECT COALESCE(string_agg(content_text, E'\n\n' ORDER BY page_number), '') AS full_text
-           FROM central_cg_pages
-           WHERE central_cg_id = $1`,
+           FROM central_cg_pages WHERE central_cg_id = $1`,
           [entryId]
         );
-
         const fullText = textResult.rows[0]?.full_text || '';
         await query(
           'UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
           [fullText, entryId]
         );
-        console.log(`✅ Texte agrégé sauvegardé en DB pour CG ${entryId} (${fullText.length} caractères)`);
+        console.log(`✅ Texte agrégé sauvegardé pour CG ${entryId} (${fullText.length} chars)`);
 
+        // Étape 4 : embedding global
         if (fullText.trim().length > 0) {
           await storage.vectorizeCentralCg(entryId, fullText);
           console.log(`✅ Embedding central_cg mis à jour pour CG ${entryId}`);
