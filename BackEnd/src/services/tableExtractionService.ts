@@ -104,7 +104,7 @@ export async function extractTableFromPageImage(
       return null;
     }
 
-    const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' });
     
     const prompt = `Tu es un expert en analyse de documents d'assurance. Analyse cette image de page de conditions générales et extrait le tableau de garanties s'il existe.
 

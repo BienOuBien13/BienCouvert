@@ -8,6 +8,7 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from '../db';
+import { generateEmbedding as generateEmbeddingCentral } from '../services/geminiService';
 
 const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -83,9 +84,10 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       version: cg.version,
       detail: cg.detail,
       url: cg.url,
-      formules: cg.metadata?.formules || [],
-      options: cg.metadata?.options || { toutes_formules: [] },
-      resume_court: cg.metadata?.resume_court || '',
+      // Compatibilité : les CG admin stockent indexedFormulas, les user_cg stockent formules
+      formules: cg.metadata?.formules || cg.metadata?.indexedFormulas || [],
+      options: cg.metadata?.options || cg.metadata?.indexedOptions || { toutes_formules: [] },
+      resume_court: cg.metadata?.resume_court || cg.metadata?.description || '',
       insurer_name: cg.metadata?.insurer_name || '',
       insurance_type_name: cg.metadata?.insurance_type_name || ''
     };
@@ -132,8 +134,9 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
     
     const enrichedMetadata = await extractEnrichedMetadata(text, insuranceTypeName);
 
-    // 3. Générer l'embedding
-    const embedding = await generateEmbedding(text);
+    // 3. Générer l'embedding (null-safe)
+    const embeddingValues = await generateEmbeddingCentral(text);
+    const embeddingStr = embeddingValues ? `[${embeddingValues.join(',')}]` : null;
 
     // 4. Récupérer les noms complets de l'assureur et du type
     const insurerResult = await query(
@@ -166,7 +169,7 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         file.originalname,
         'active',
         text,
-        `[${embedding.join(',')}]`,
+        embeddingStr,
         JSON.stringify({
           insurer_name: insurerName,
           insurance_type_name: insuranceTypeName,
@@ -265,9 +268,9 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 }
 
 async function generateEmbedding(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-  const result = await model.embedContent(text);
-  return result.embedding.values;
+  // Kept for backward compat — now delegates to centralized null-safe version
+  const values = await generateEmbeddingCentral(text);
+  return values ?? new Array(768).fill(0);
 }
 
 export default router;
