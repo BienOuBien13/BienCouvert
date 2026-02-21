@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { WebSearchResult, DuplicateFinding, OptimizationFinding, Policy, Message, SmartExtractionResult, PolicyType } from '../types';
+import { query as dbQuery } from '../db';
 
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
@@ -416,16 +417,199 @@ export const chunkText = (text: string, maxChars: number = 3000): string[] => {
   return chunks;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: résolution robuste des coverage_facts pour un ensemble de policies
+// Gère tous les cas: centralCgId direct, fallback insurer+type, LIKE partiel, table_json
+// ─────────────────────────────────────────────────────────────────────────────
+export async function resolveCoverageFacts(storage: any, policies: any[], label = ''): Promise<any[]> {
+  const tag = label ? `[${label}] ` : '';
+  let coverageFacts: any[] = [];
+
+  try {
+    // ── Diagnostics de base ──
+    policies.forEach((p: any, i: number) => {
+      console.log(`${tag}📋 Policy ${i + 1}: name="${p.name}" insurer="${p.insurer}" insurerCode="${p.insurerCode}" typeCode="${p.typeCode}" formula="${p.formula}" centralCgId=${p.centralCgId} userCgId=${p.userCgId}`);
+    });
+
+    // ── Résolution des centralCgIds ──
+    // Priorité 1 : lien direct policy.central_cg_id
+    let cgIdsForFacts: number[] = policies
+      .map((p: any) => p.centralCgId)
+      .filter((id: any) => id != null)
+      .map(Number);
+
+    // Priorité 2 : si certaines policies n'ont pas de centralCgId, chercher par insurer_code + insurance_type_code
+    const policiesNoCgId = policies.filter((p: any) => !p.centralCgId);
+    if (policiesNoCgId.length > 0) {
+      console.log(`${tag}🔎 ${policiesNoCgId.length} policy(s) sans centralCgId — recherche par insurer+type`);
+      try {
+        const conditions = policiesNoCgId
+          .filter((p: any) => p.insurerCode && p.typeCode)
+          .map((_: any, i: number) => `(cg.insurer_code = $${i * 2 + 1} AND cg.insurance_type_code = $${i * 2 + 2})`)
+          .join(' OR ');
+        const params = policiesNoCgId
+          .filter((p: any) => p.insurerCode && p.typeCode)
+          .flatMap((p: any) => [p.insurerCode, p.typeCode]);
+
+        if (conditions && params.length > 0) {
+          const cgLookup = await dbQuery(
+            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            params
+          );
+          const found = cgLookup.rows.map((r: any) => Number(r.id));
+          console.log(`${tag}✅ CG trouvés par insurer+type: [${found.join(', ')}]`);
+          cgIdsForFacts = [...new Set([...cgIdsForFacts, ...found])];
+        } else {
+          console.warn(`${tag}⚠️ Impossible de résoudre CG: insurerCode ou typeCode manquant`);
+        }
+      } catch (e) {
+        console.warn(`${tag}⚠️ Échec lookup CG par insurer+type:`, e);
+      }
+    }
+
+    if (cgIdsForFacts.length === 0) {
+      console.warn(`${tag}⚠️ Aucun centralCgId résolu — coverage_facts indisponibles`);
+      return [];
+    }
+
+    console.log(`${tag}🔍 Recherche coverage_facts pour CG IDs: [${cgIdsForFacts.join(', ')}]`);
+
+    const coverageFactsBase = `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+                cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
+                cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
+         FROM coverage_facts cf
+         JOIN central_cg cg ON cf.central_cg_id = cg.id
+         LEFT JOIN insurers i ON cg.insurer_code = i.code`;
+
+    // Construire les variantes de clé de formule (avec ET sans _plus pour compat données existantes)
+    const formulasRaw = [...new Set(policies.map((p: any) => p.formula || '').filter(Boolean))];
+    const formulaKeys = [...new Set(formulasRaw.flatMap((f: string) => {
+      const withPlus = normalizeKey(f);
+      const withoutPlus = normalizeKey(f.replace(/\+/g, '')); // fallback ancien format
+      return [withPlus, withoutPlus].filter(k => k.length > 2);
+    }))];
+
+    console.log(`${tag}🔍 formulas brutes: [${formulasRaw.join(' | ')}] → formulaKeys: [${formulaKeys.join(', ')}]`);
+
+    let factsResult: any;
+
+    if (formulaKeys.length > 0) {
+      // ── Niveau 1: match exact (supporte les deux normalisations) ──
+      factsResult = await dbQuery(
+        `${coverageFactsBase} WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2) ORDER BY cf.guarantee_key`,
+        [cgIdsForFacts, formulaKeys]
+      );
+      console.log(`${tag}Niveau 1 (exact): ${factsResult.rows.length} faits`);
+
+      // ── Niveau 2: LIKE sur le préfixe de 2 mots ──
+      if (factsResult.rows.length === 0) {
+        const baseKeys = [...new Set(formulaKeys.map((k: string) => k.split('_').slice(0, 2).join('_')))] as string[];
+        const likeConditions = baseKeys.map((_: string, i: number) => `cf.formula_key LIKE $${i + 2}`).join(' OR ');
+        const likeParams: any[] = [cgIdsForFacts, ...baseKeys.map((k: string) => `${k}%`)];
+        factsResult = await dbQuery(
+          `${coverageFactsBase} WHERE cf.central_cg_id = ANY($1) AND (${likeConditions}) ORDER BY cf.guarantee_key`,
+          likeParams
+        );
+        console.log(`${tag}Niveau 2 (LIKE ${baseKeys.map(k => k + '%').join(', ')}): ${factsResult.rows.length} faits`);
+      }
+
+      // ── Niveau 3: fallback total (toutes formules du CG) ──
+      if (factsResult.rows.length === 0) {
+        factsResult = await dbQuery(
+          `${coverageFactsBase} WHERE cf.central_cg_id = ANY($1) ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
+          [cgIdsForFacts]
+        );
+        console.log(`${tag}Niveau 3 (toutes formules): ${factsResult.rows.length} faits`);
+      }
+    } else {
+      // Pas de formule connue: toutes les formules du CG
+      factsResult = await dbQuery(
+        `${coverageFactsBase} WHERE cf.central_cg_id = ANY($1) ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
+        [cgIdsForFacts]
+      );
+      console.log(`${tag}(sans formule) Niveau total: ${factsResult.rows.length} faits`);
+    }
+
+    coverageFacts = factsResult.rows;
+
+    // ── Niveau 4: fallback table_json ──
+    if (coverageFacts.length === 0) {
+      console.log(`${tag}🔄 Niveau 4: fallback table_json`);
+      try {
+        const tableResult = await dbQuery(
+          `SELECT p.table_json, p.page_number, cg.url as pdf_url, i.label as insurer_label
+           FROM central_cg_pages p
+           JOIN central_cg cg ON p.central_cg_id = cg.id
+           LEFT JOIN insurers i ON cg.insurer_code = i.code
+           WHERE p.central_cg_id = ANY($1) AND p.has_table = true AND p.table_json IS NOT NULL
+           ORDER BY p.page_number`,
+          [cgIdsForFacts]
+        );
+        tableResult.rows.forEach((row: any) => {
+          const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
+          if (table && Array.isArray(table.rows)) {
+            const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
+            table.rows.forEach((tableRow: any) => {
+              Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
+                const fKey = normalizeKey(geminiKey);
+                const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
+                const s = String(sym).trim().toLowerCase();
+                const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
+                  : /○|option/.test(s) ? 'optional'
+                  : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
+                  : s.length > 0 ? 'included' : 'not_applicable';
+                coverageFacts.push({
+                  guarantee_label: tableRow.guarantee || '',
+                  guarantee_key: normalizeKey(tableRow.guarantee || ''),
+                  formula_label: fLabel,
+                  formula_key: fKey,
+                  coverage_status: status,
+                  coverage_amount: null, franchise: null, coverage_notes: null,
+                  insurer_label: row.insurer_label,
+                  source_page_number: row.page_number,
+                  pdf_url: row.pdf_url
+                });
+              });
+            });
+          }
+        });
+        console.log(`${tag}Niveau 4 (table_json): ${coverageFacts.length} faits`);
+      } catch (tjErr) {
+        console.warn(`${tag}⚠️ Échec table_json fallback:`, tjErr);
+      }
+    }
+
+    // ── Log des formula_keys disponibles en DB ──
+    if (coverageFacts.length > 0) {
+      const availableFormulas = [...new Set(coverageFacts.map((f: any) => f.formula_key))];
+      console.log(`${tag}✅ ${coverageFacts.length} faits — formules disponibles: [${availableFormulas.join(', ')}]`);
+    } else {
+      // Debug: combien de faits existent pour ce CG (toutes formules confondues) ?
+      try {
+        const countResult = await dbQuery(
+          `SELECT formula_key, COUNT(*) as cnt FROM coverage_facts WHERE central_cg_id = ANY($1) GROUP BY formula_key ORDER BY formula_key`,
+          [cgIdsForFacts]
+        );
+        if (countResult.rows.length > 0) {
+          console.warn(`${tag}⚠️ coverage_facts vide après tous niveaux. Formules en DB: ${countResult.rows.map((r: any) => `${r.formula_key}(${r.cnt})`).join(', ')}`);
+        } else {
+          console.warn(`${tag}⚠️ AUCUNE donnée dans coverage_facts pour ces CG IDs`);
+        }
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error(`${tag}❌ resolveCoverageFacts erreur:`, err);
+  }
+
+  return coverageFacts;
+}
+
 export const sendMessageToAssistant = async (message: string, policies: Policy[], history: Message[]): Promise<string> => {
   const ai = getAiClient();
   if (!ai) {
     return "Le service d'assistant est temporairement indisponible. Veuillez configurer GEMINI_API_KEY.";
   }
-  // DEBUG: Afficher les policies reçues
-  console.log(`\n🔍 sendMessageToAssistant reçoit ${policies.length} policies:`);
-  policies.forEach((p: any, idx: number) => {
-    console.log(`   ${idx + 1}. ${p.name} - summary: "${p.summary}" - metadata:`, p.metadata ? JSON.stringify(p.metadata).substring(0, 100) : 'null');
-  });
+  console.log(`\n🔍 sendMessageToAssistant reçoit ${policies.length} policies`);
   try {
     const storage = require('../storage').storage;
     
@@ -463,7 +647,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       
       // Recherche dans central_cg via embeddings
       if (centralCgIds.length > 0 && questionEmbedding) {
-        const centralResults = await storage.query(
+        const centralResults = await dbQuery(
           `SELECT 
             cg.id,
             cg.content_text,
@@ -487,7 +671,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       
       // Recherche dans user_cg via embeddings
       if (userCgIds.length > 0) {
-        const userResults = await storage.query(
+        const userResults = await dbQuery(
           `SELECT 
             ucg.id,
             ucg.content_text,
@@ -523,116 +707,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     }
 
     // Étape 3b: Données structurées coverage_facts (garantie × formule) — priorité absolue
-    let coverageFacts: any[] = [];
-    try {
-      const cgIdsForFacts = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
-      if (cgIdsForFacts.length > 0) {
-        const formulaKeys = policies
-          .map(p => normalizeKey((p as any).formula || ''))
-          .filter((k: string) => k.length > 2);
-        const coverageFactsBase = `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
-                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
-                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM coverage_facts cf
-             JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code`;
-        let factsResult: any;
-        if (formulaKeys.length > 0) {
-          // Niveau 1: match exact de la formule (ex: "tous_risques_leasing")
-          factsResult = await storage.query(
-            `${coverageFactsBase}
-             WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
-             ORDER BY cf.guarantee_key`,
-            [cgIdsForFacts, formulaKeys]
-          );
-          // Niveau 2: si vide, match partiel LIKE (ex: "tous_risques_leasing" → "tous_risques%")
-          if (factsResult.rows.length === 0) {
-            const baseKeys = [...new Set(formulaKeys.map((k: string) => k.split('_').slice(0, 2).join('_')))] as string[];
-            const likeConditions = baseKeys.map((_: string, i: number) => `cf.formula_key LIKE $${i + 2}`).join(' OR ');
-            const likeParams: any[] = [cgIdsForFacts, ...baseKeys.map((k: string) => `${k}%`)];
-            factsResult = await storage.query(
-              `${coverageFactsBase}
-               WHERE cf.central_cg_id = ANY($1) AND (${likeConditions})
-               ORDER BY cf.guarantee_key`,
-              likeParams
-            );
-            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts LIKE (${baseKeys.join(',')}): ${factsResult.rows.length} faits`);
-          }
-          // Niveau 3 (fallback total): toutes les formules du document CG
-          if (factsResult.rows.length === 0) {
-            factsResult = await storage.query(
-              `${coverageFactsBase}
-               WHERE cf.central_cg_id = ANY($1)
-               ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
-              [cgIdsForFacts]
-            );
-            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts fallback (toutes formules): ${factsResult.rows.length} faits`);
-          }
-        } else {
-          factsResult = await storage.query(
-            `${coverageFactsBase}
-             WHERE cf.central_cg_id = ANY($1)
-             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
-            [cgIdsForFacts]
-          );
-        }
-        coverageFacts = factsResult.rows;
-        console.log(`✅ coverage_facts: ${coverageFacts.length} faits structurés`);
-      }
-    } catch (cfErr) {
-      console.warn('⚠️ Échec coverage_facts:', cfErr);
-    }
-
-    // Niveau 4 (table_json fallback): si coverage_facts vide, lire directement central_cg_pages.table_json
-    if (coverageFacts.length === 0) {
-      try {
-        const cgIdsForTableFallback = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
-        if (cgIdsForTableFallback.length > 0) {
-          const tableResult = await storage.query(
-            `SELECT p.table_json, p.page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM central_cg_pages p
-             JOIN central_cg cg ON p.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
-             WHERE p.central_cg_id = ANY($1) AND p.has_table = true AND p.table_json IS NOT NULL
-             ORDER BY p.page_number`,
-            [cgIdsForTableFallback]
-          );
-          tableResult.rows.forEach((row: any) => {
-            const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
-            if (table && Array.isArray(table.rows)) {
-              const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
-              table.rows.forEach((tableRow: any) => {
-                Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
-                  const fKey = normalizeKey(geminiKey);
-                  const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
-                  const s = String(sym).trim().toLowerCase();
-                  const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
-                    : /○|option/.test(s) ? 'optional'
-                    : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
-                    : s.length > 0 ? 'included' : 'not_applicable';
-                  coverageFacts.push({
-                    guarantee_label: tableRow.guarantee || '',
-                    guarantee_key: normalizeKey(tableRow.guarantee || ''),
-                    formula_label: fLabel,
-                    formula_key: fKey,
-                    coverage_status: status,
-                    coverage_amount: null,
-                    franchise: null,
-                    coverage_notes: null,
-                    insurer_label: row.insurer_label,
-                    source_page_number: row.page_number,
-                    pdf_url: row.pdf_url
-                  });
-                });
-              });
-            }
-          });
-          if (coverageFacts.length > 0) console.log(`✅ coverage_facts depuis table_json: ${coverageFacts.length} faits`);
-        }
-      } catch (tjErr) {
-        console.warn('⚠️ Échec table_json fallback:', tjErr);
-      }
-    }
+    const coverageFacts: any[] = await resolveCoverageFacts(storage, policies, 'chat');
 
     // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
     let relevantPages: any[] = [];
@@ -655,7 +730,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
           .filter(([, kws]) => kws.some(kw => msgLower.includes(kw)))
           .map(([code]) => code);
         if (detectedCodes.length > 0) {
-          const pagesResult = await storage.query(
+          const pagesResult = await dbQuery(
             `SELECT p.page_number, p.content_text, p.chunk_type, p.article_ref,
                     cg.url as pdf_url, i.label as insurer_label
              FROM central_cg_pages p
@@ -966,7 +1041,7 @@ export const sendMessageToAssistantStream = async (
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
 
       if (centralCgIds.length > 0 && questionEmbedding) {
-        const centralResults = await storage.query(
+        const centralResults = await dbQuery(
           `SELECT 
             cg.id,
             cg.content_text,
@@ -987,7 +1062,7 @@ export const sendMessageToAssistantStream = async (
       }
       
       if (userCgIds.length > 0) {
-        const userResults = await storage.query(
+        const userResults = await dbQuery(
           `SELECT 
             ucg.id,
             ucg.content_text,
@@ -1009,116 +1084,7 @@ export const sendMessageToAssistantStream = async (
     }
 
     // Étape 3b: Données structurées coverage_facts (garantie × formule) — priorité absolue
-    let coverageFacts: any[] = [];
-    try {
-      const cgIdsForFacts = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
-      if (cgIdsForFacts.length > 0) {
-        const formulaKeys = policies
-          .map(p => normalizeKey((p as any).formula || ''))
-          .filter((k: string) => k.length > 2);
-        const coverageFactsBase = `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
-                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
-                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM coverage_facts cf
-             JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code`;
-        let factsResult: any;
-        if (formulaKeys.length > 0) {
-          // Niveau 1: match exact de la formule
-          factsResult = await storage.query(
-            `${coverageFactsBase}
-             WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
-             ORDER BY cf.guarantee_key`,
-            [cgIdsForFacts, formulaKeys]
-          );
-          // Niveau 2: si vide, match partiel LIKE (ex: "tous_risques_leasing" → "tous_risques%")
-          if (factsResult.rows.length === 0) {
-            const baseKeys = [...new Set(formulaKeys.map((k: string) => k.split('_').slice(0, 2).join('_')))] as string[];
-            const likeConditions = baseKeys.map((_: string, i: number) => `cf.formula_key LIKE $${i + 2}`).join(' OR ');
-            const likeParams: any[] = [cgIdsForFacts, ...baseKeys.map((k: string) => `${k}%`)];
-            factsResult = await storage.query(
-              `${coverageFactsBase}
-               WHERE cf.central_cg_id = ANY($1) AND (${likeConditions})
-               ORDER BY cf.guarantee_key`,
-              likeParams
-            );
-            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts LIKE stream (${baseKeys.join(',')}): ${factsResult.rows.length} faits`);
-          }
-          // Niveau 3 (fallback total): toutes les formules du document CG
-          if (factsResult.rows.length === 0) {
-            factsResult = await storage.query(
-              `${coverageFactsBase}
-               WHERE cf.central_cg_id = ANY($1)
-               ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
-              [cgIdsForFacts]
-            );
-            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts fallback stream (toutes formules): ${factsResult.rows.length} faits`);
-          }
-        } else {
-          factsResult = await storage.query(
-            `${coverageFactsBase}
-             WHERE cf.central_cg_id = ANY($1)
-             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
-            [cgIdsForFacts]
-          );
-        }
-        coverageFacts = factsResult.rows;
-        console.log(`✅ coverage_facts (stream): ${coverageFacts.length} faits structurés`);
-      }
-    } catch (cfErr) {
-      console.warn('⚠️ Échec coverage_facts (stream):', cfErr);
-    }
-
-    // Niveau 4 (table_json fallback stream): si coverage_facts vide, lire directement central_cg_pages.table_json
-    if (coverageFacts.length === 0) {
-      try {
-        const cgIdsForTableFallback = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
-        if (cgIdsForTableFallback.length > 0) {
-          const tableResult = await storage.query(
-            `SELECT p.table_json, p.page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM central_cg_pages p
-             JOIN central_cg cg ON p.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
-             WHERE p.central_cg_id = ANY($1) AND p.has_table = true AND p.table_json IS NOT NULL
-             ORDER BY p.page_number`,
-            [cgIdsForTableFallback]
-          );
-          tableResult.rows.forEach((row: any) => {
-            const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
-            if (table && Array.isArray(table.rows)) {
-              const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
-              table.rows.forEach((tableRow: any) => {
-                Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
-                  const fKey = normalizeKey(geminiKey);
-                  const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
-                  const s = String(sym).trim().toLowerCase();
-                  const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
-                    : /○|option/.test(s) ? 'optional'
-                    : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
-                    : s.length > 0 ? 'included' : 'not_applicable';
-                  coverageFacts.push({
-                    guarantee_label: tableRow.guarantee || '',
-                    guarantee_key: normalizeKey(tableRow.guarantee || ''),
-                    formula_label: fLabel,
-                    formula_key: fKey,
-                    coverage_status: status,
-                    coverage_amount: null,
-                    franchise: null,
-                    coverage_notes: null,
-                    insurer_label: row.insurer_label,
-                    source_page_number: row.page_number,
-                    pdf_url: row.pdf_url
-                  });
-                });
-              });
-            }
-          });
-          if (coverageFacts.length > 0) console.log(`✅ coverage_facts depuis table_json (stream): ${coverageFacts.length} faits`);
-        }
-      } catch (tjErr) {
-        console.warn('⚠️ Échec table_json fallback (stream):', tjErr);
-      }
-    }
+    const coverageFacts: any[] = await resolveCoverageFacts(storage, policies, 'stream');
 
     // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
     let relevantPages: any[] = [];
@@ -1141,7 +1107,7 @@ export const sendMessageToAssistantStream = async (
           .filter(([, kws]) => kws.some(kw => msgLower.includes(kw)))
           .map(([code]) => code);
         if (detectedCodes.length > 0) {
-          const pagesResult = await storage.query(
+          const pagesResult = await dbQuery(
             `SELECT p.page_number, p.content_text, p.chunk_type, p.article_ref,
                     cg.url as pdf_url, i.label as insurer_label
              FROM central_cg_pages p

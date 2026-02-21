@@ -1,6 +1,7 @@
 ﻿import { Router } from 'express';
-import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport } from '../services/geminiService';
+import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts } from '../services/geminiService';
 import { storage } from '../storage';
+import { query as dbQuery } from '../db';
 
 const router = Router();
 
@@ -153,6 +154,85 @@ router.post('/generate-report', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Report generation error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEBUG: diagnostic état coverage_facts pour un userId
+// GET /api/ai/debug-coverage?userId=123
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/debug-coverage', async (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) return res.status(400).json({ error: 'userId requis (query param)' });
+
+  try {
+    const policies = await storage.readPolicies(parseInt(userId));
+    const policyInfo = policies.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      insurer: p.insurer,
+      insurerCode: p.insurerCode,
+      typeCode: p.typeCode,
+      formula: p.formula,
+      centralCgId: p.centralCgId,
+      userCgId: p.userCgId
+    }));
+
+    // Résoudre les CG IDs (copie de la logique du helper)
+    const cgIdsDirect = policies.map((p: any) => p.centralCgId).filter((id: any) => id != null).map(Number);
+
+    // Lookup par insurer+type pour ceux sans centralCgId
+    const policiesNoCgId = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
+    let cgIdsResolved: number[] = [...cgIdsDirect];
+    const cgLookupDetails: any[] = [];
+    for (const p of policiesNoCgId) {
+      const r = await dbQuery(
+        `SELECT id, insurer_code, insurance_type_code, version, status FROM central_cg WHERE insurer_code = $1 AND insurance_type_code = $2 ORDER BY version DESC LIMIT 3`,
+        [p.insurerCode, p.typeCode]
+      );
+      cgLookupDetails.push({ policy: p.name, insurerCode: p.insurerCode, typeCode: p.typeCode, found: r.rows });
+      if (r.rows[0]) cgIdsResolved.push(Number(r.rows[0].id));
+    }
+    cgIdsResolved = [...new Set(cgIdsResolved)];
+
+    // Compte coverage_facts par formula_key pour ces CG
+    let factsBreakdown: any[] = [];
+    if (cgIdsResolved.length > 0) {
+      const factsCount = await dbQuery(
+        `SELECT central_cg_id, formula_key, COUNT(*) as cnt FROM coverage_facts WHERE central_cg_id = ANY($1) GROUP BY central_cg_id, formula_key ORDER BY central_cg_id, formula_key`,
+        [cgIdsResolved]
+      );
+      factsBreakdown = factsCount.rows;
+    }
+
+    // Compte pages table_json
+    let tablePages: any[] = [];
+    if (cgIdsResolved.length > 0) {
+      const tpCount = await dbQuery(
+        `SELECT central_cg_id, COUNT(*) as pages_total, SUM(CASE WHEN has_table THEN 1 ELSE 0 END) as pages_with_table FROM central_cg_pages WHERE central_cg_id = ANY($1) GROUP BY central_cg_id`,
+        [cgIdsResolved]
+      );
+      tablePages = tpCount.rows;
+    }
+
+    // Test resolveCoverageFacts complet
+    const resolved = await resolveCoverageFacts(storage, policies, 'debug');
+
+    res.json({
+      userId,
+      policiesCount: policies.length,
+      policies: policyInfo,
+      cgIdsDirect,
+      cgIdsResolvedByInsurerType: cgLookupDetails,
+      cgIdsResolved,
+      coverageFactsBreakdown: factsBreakdown,
+      tablePages,
+      resolvedFactsCount: resolved.length,
+      resolvedFactsSample: resolved.slice(0, 10)
+    });
+  } catch (err: any) {
+    console.error('❌ debug-coverage error:', err);
+    res.status(500).json({ error: err?.message || 'Erreur interne' });
   }
 });
 
