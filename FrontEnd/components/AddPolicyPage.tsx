@@ -3,7 +3,7 @@
  * 2 modes : CG standards (depuis central_cg) ou CG personnalisées (upload PDF)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -72,6 +72,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   // Progression traitement async
   const [processingPercent, setProcessingPercent] = useState(0);
   const [processingPhase, setProcessingPhase] = useState('');
+  const pollAbortRef = useRef(false);
   
   // État général
   const [loading, setLoading] = useState(false);
@@ -174,6 +175,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   };
 
   // Mode personnalisé : upload PDF + polling de progression
+  const cancelPolling = () => {
+    pollAbortRef.current = true;
+    setIsUploading(false);
+    setProcessingPercent(0);
+    setProcessingPhase('');
+  };
+
   const uploadCustomCG = async () => {
     if (!pdfFile || !selectedType || !selectedInsurer) {
       setError('Veuillez sélectionner un fichier PDF');
@@ -184,6 +192,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       return;
     }
 
+    pollAbortRef.current = false;
     setIsUploading(true);
     setProcessingPercent(5);
     setProcessingPhase('Envoi du document...');
@@ -215,50 +224,71 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       const data = await response.json(); // 202 — id retourné immédiatement
       const cgId = data.id;
 
-      // Polling du statut jusqu'à la fin
       const phaseLabels: Record<string, string> = {
         extracting: 'Extraction du texte (Gemini)...',
         embedding: 'Analyse des métadonnées et formules...',
         processing: 'Vectorisation page par page...',
-        done: 'Traitement terminé !',
+        done: 'Traitement terminé ✔️',
         failed: 'Erreur lors du traitement'
       };
 
-      const pollStatus = async (): Promise<void> => {
-        return new Promise((resolve, reject) => {
-          const interval = setInterval(async () => {
-            try {
-              const statusRes = await fetch(`${API_URL}/api/cg/user/status/${cgId}`, { credentials: 'include' });
-              if (!statusRes.ok) return;
-              const status = await statusRes.json();
+      // Polling avec delay croissant pour éviter le rate-limiting nginx
+      const pollStatus = (): Promise<void> => new Promise((resolve, reject) => {
+        let retryDelay = 10000; // 10s initiales
+        let consecutiveErrors = 0;
 
-              setProcessingPercent(status.percent);
-              setProcessingPhase(
-                phaseLabels[status.status] || `Traitement en cours...`
-              );
+        const tick = async () => {
+          if (pollAbortRef.current) {
+            resolve();
+            return;
+          }
 
-              if (status.status === 'done') {
-                clearInterval(interval);
-                setCgData({
-                  id: cgId,
-                  formules: status.formules,
-                  options: status.options,
-                  resume_court: status.resume_court,
-                  insurer_name: status.insurer_name,
-                  insurance_type_name: status.insurance_type_name
-                });
-                setStep('configure');
-                resolve();
-              } else if (status.status === 'failed') {
-                clearInterval(interval);
-                reject(new Error(status.error || 'Traitement échoué'));
-              }
-            } catch (e) {
-              // Erreur réseau transitoire — on continue de poller
+          try {
+            const statusRes = await fetch(`${API_URL}/api/cg/user/status/${cgId}`, { credentials: 'include' });
+
+            if (statusRes.status === 429) {
+              // Rate limit — attendre plus longtemps
+              retryDelay = Math.min(retryDelay * 2, 60000);
+              console.warn(`Rate limit détecté, prøchain poll dans ${retryDelay / 1000}s`);
+              setTimeout(tick, retryDelay);
+              return;
             }
-          }, 3000);
-        });
-      };
+
+            consecutiveErrors = 0;
+            retryDelay = 10000; // reset sur succès
+
+            if (!statusRes.ok) { setTimeout(tick, retryDelay); return; }
+            const status = await statusRes.json();
+
+            setProcessingPercent(status.percent);
+            setProcessingPhase(phaseLabels[status.status] || 'Traitement en cours...');
+
+            if (status.status === 'done') {
+              setCgData({
+                id: cgId,
+                formules: status.formules,
+                options: status.options,
+                resume_court: status.resume_court,
+                insurer_name: status.insurer_name,
+                insurance_type_name: status.insurance_type_name
+              });
+              setStep('configure');
+              resolve();
+            } else if (status.status === 'failed') {
+              reject(new Error(status.error || 'Traitement échoué'));
+            } else {
+              setTimeout(tick, retryDelay);
+            }
+          } catch (e) {
+            consecutiveErrors++;
+            retryDelay = Math.min(10000 * consecutiveErrors, 60000);
+            setTimeout(tick, retryDelay);
+          }
+        };
+
+        // Premier appel après 10s (le traitement ne peut pas finir avant)
+        setTimeout(tick, retryDelay);
+      });
 
       await pollStatus();
       
@@ -579,8 +609,15 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 <span className="font-bold">{processingPercent}%</span>
               </div>
               <p className="text-xs text-blue-600">
-                L'analyse et la vectorisation peuvent prendre 1 à 3 minutes selon la taille du document.
+                L'analyse et la vectorisation peuvent prendre 1 à 3 minutes selon la taille du document. Le statut est vérifié toutes les 10 secondes.
               </p>
+              {/* Bouton annuler */}
+              <button
+                onClick={cancelPolling}
+                className="w-full mt-1 py-2 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 transition"
+              >
+                ⏹ Arrêter le suivi (le traitement continue en arrière-plan)
+              </button>
             </div>
           )}
         </div>

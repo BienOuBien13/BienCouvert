@@ -147,7 +147,9 @@ const apiLimiter = rateLimit({
   max: 100,                   // Maximum 100 requêtes par IP
   message: 'Trop de requêtes depuis cette adresse IP, veuillez réessayer plus tard.',
   standardHeaders: true,      // Retourne les headers RateLimit-*
-  legacyHeaders: false
+  legacyHeaders: false,
+  // Exclure les endpoints de polling de statut (vectorisation asynchrone)
+  skip: (req) => /\/api\/cg\/user\/status\//.test(req.originalUrl)
 });
 
 // Limiter strict pour l'authentification (login, register)
