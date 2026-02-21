@@ -5,6 +5,60 @@ import { Send, Bot, Mic, MicOff, Activity, X, Sparkles } from 'lucide-react';
 import { Message, Policy } from '../types';
 import { sendMessageToAssistant, sendMessageToAssistantStream, connectLiveSession } from '../services/geminiService';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Rendu Markdown simplifié : gère liens [text](url), gras, titres, listes
+// Les liens vers les CG deviennent des <a> cliquables pointant vers le PDF
+// ─────────────────────────────────────────────────────────────────────────────
+function renderMarkdown(text: string): string {
+  const lines = text.split('\n');
+  const parts: string[] = [];
+  let inList = false;
+
+  for (const rawLine of lines) {
+    // Gras : **text**
+    let line = rawLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Italique : *text*
+    line = line.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+    // Code inline : `code`
+    line = line.replace(/`([^`]+)`/g, '<code class="bg-slate-200 rounded px-1 text-[11px]">$1</code>');
+    // Liens Markdown [texte](url) → <a> cliquable ouvrant dans un nouvel onglet
+    line = line.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-primary-600 underline hover:text-primary-800 font-medium break-all">$1 ↗</a>'
+    );
+
+    // Éléments de liste (- ou •)
+    if (/^[-•]\s/.test(line)) {
+      if (!inList) { parts.push('<ul class="list-disc pl-5 space-y-0.5 my-1">'); inList = true; }
+      parts.push('<li>' + line.replace(/^[-•]\s/, '') + '</li>');
+      continue;
+    } else if (inList) {
+      parts.push('</ul>');
+      inList = false;
+    }
+
+    // Titres
+    if (/^#{1,3}\s/.test(line)) {
+      const level = (line.match(/^(#{1,3})\s/) || ['', ''])[1].length;
+      const content = line.replace(/^#{1,3}\s/, '');
+      const cls = level === 1 ? 'font-bold text-base text-slate-900 mt-3 mb-1' : 'font-semibold text-sm text-slate-800 mt-2';
+      parts.push(`<p class="${cls}">${content}</p>`);
+      continue;
+    }
+
+    // Ligne vide
+    if (line.trim() === '') { parts.push('<br>'); continue; }
+
+    // Ligne ordinaire
+    parts.push(line + '<br>');
+  }
+
+  if (inList) parts.push('</ul>');
+
+  // Nettoyer les <br> en double en fin de liste
+  return parts.join('').replace(/<\/ul><br>/g, '</ul>').replace(/(<br>){3,}/g, '<br><br>');
+}
+
 interface Props {
   policies: Policy[];
   messages: Message[];
@@ -237,15 +291,16 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
             key={msg.id}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm ${
-                msg.role === 'user'
-                  ? 'bg-primary-600 text-white rounded-br-none'
-                  : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'
-              }`}
-            >
-              {msg.text}
-            </div>
+            {msg.role === 'user' ? (
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm bg-primary-600 text-white rounded-br-none">
+                {msg.text}
+              </div>
+            ) : (
+              <div
+                className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }}
+              />
+            )}
           </div>
         ))}
 
@@ -260,9 +315,10 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
         
         {liveModelText && (
            <div className="flex justify-start">
-             <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed shadow-sm bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200">
-                {liveModelText}
-             </div>
+             <div
+               className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200"
+               dangerouslySetInnerHTML={{ __html: renderMarkdown(liveModelText) }}
+             />
            </div>
         )}
 

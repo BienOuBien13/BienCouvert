@@ -55,6 +55,15 @@ router.post('/', upload.single('file'), async (req: any, res) => {
       return res.status(400).json({ message: 'insurerCode and insurance_type_code are required' });
     }
 
+    // ── Limite de 10 contrats par utilisateur ──
+    const countResult = await query(
+      'SELECT COUNT(*) AS cnt FROM policies WHERE user_id = $1 AND status != $2',
+      [userId, 'cancelled']
+    );
+    if (parseInt(countResult.rows[0].cnt, 10) >= 10) {
+      return res.status(400).json({ message: 'LIMIT_REACHED', detail: 'Vous avez atteint la limite de 10 contrats dans votre portefeuille.' });
+    }
+
     // Construction de l'objet policy avec la nouvelle structure
     const newPolicy: any = {
       userId: userId,

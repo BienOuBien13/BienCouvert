@@ -151,13 +151,16 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                           rel="noopener noreferrer"
                           className="flex items-center justify-between w-full p-5 bg-slate-900 text-white rounded-2xl shadow-xl hover:bg-slate-800 transition-all group"
                         >
-                          <div className="flex items-center gap-3">
-                            <FileText className="w-5 h-5" />
-                            <span className="text-xs font-black uppercase tracking-widest">
-                              Conditions Générales PDF
-                            </span>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <FileText className="w-5 h-5 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <span className="text-xs font-black uppercase tracking-widest block">Conditions Générales PDF</span>
+                              <span className="text-[9px] text-slate-400 truncate block max-w-[200px]">
+                                {(() => { try { return new URL((policy as any).cgUrl || policy.sourceUrl || '').hostname; } catch { return (policy as any).cgUrl || policy.sourceUrl; } })()}
+                              </span>
+                            </div>
                           </div>
-                          <ExternalLink className="w-4 h-4" />
+                          <ExternalLink className="w-4 h-4 flex-shrink-0" />
                         </a>
                       ) : (
                         <button 

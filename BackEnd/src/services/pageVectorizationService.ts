@@ -8,7 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import { createCanvas } from 'canvas';
 import { generateEmbedding } from './geminiService';
-import { extractTableFromPageImage, tableToFacts, saveCoverageFacts } from './tableExtractionService';
+import { extractTableFromPageImage, tableToFacts, saveCoverageFacts, saveUserCoverageFacts } from './tableExtractionService';
 
 // Configuration pdf.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = require('pdfjs-dist/legacy/build/pdf.worker.entry');
@@ -492,4 +492,215 @@ export async function queryCoverageByGuarantee(
   );
   
   return result.rows;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Vectorisation d'un CG utilisateur (user_cg) page par page
+// Miroir de vectorizeCgByPages mais pour user_cg / user_cg_pages
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Vectorise un CG utilisateur page par page avec extraction de tableaux.
+ * Stocke les pages dans user_cg_pages et les faits dans user_coverage_facts.
+ */
+export async function vectorizeUserCgByPages(
+  pool: Pool,
+  userCgId: number,
+  pdfBase64: string,
+  userId?: number | null
+): Promise<{ pagesProcessed: number; tablesExtracted: number; factsCreated: number }> {
+  console.log(`\n🔄 Vectorisation page par page du CG utilisateur ${userCgId}...`);
+
+  try {
+    await pool.query(
+      `UPDATE user_cg SET vectorization_status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [userCgId]
+    );
+  } catch (_) { /* colonne pas encore en DB */ }
+
+  try {
+    // Nettoyage préalable
+    await pool.query('DELETE FROM user_coverage_facts WHERE user_cg_id = $1', [userCgId]);
+    await pool.query('DELETE FROM user_cg_pages WHERE user_cg_id = $1', [userCgId]);
+
+    // Récupérer les infos du CG utilisateur
+    const cgResult = await pool.query(
+      'SELECT insurer_code, insurance_type_code FROM user_cg WHERE id = $1',
+      [userCgId]
+    );
+
+    if (cgResult.rows.length === 0) {
+      throw new Error(`user_cg ${userCgId} introuvable`);
+    }
+
+    const cg = cgResult.rows[0];
+
+    const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+    const pdfUint8Array = new Uint8Array(pdfBuffer);
+
+    // Compter les pages
+    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array });
+    const pdfDoc = await loadingTask.promise;
+    const numPages = pdfDoc.numPages;
+
+    console.log(`📄 ${numPages} pages à traiter (user_cg ${userCgId})`);
+
+    try {
+      await pool.query(
+        `UPDATE user_cg SET pages_total = $1 WHERE id = $2`,
+        [numPages, userCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
+
+    let pagesProcessed = 0;
+    let tablesExtracted = 0;
+    let factsCreated = 0;
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      console.log(`\n📄 [user_cg ${userCgId}] Page ${pageNum}/${numPages}...`);
+
+      const pageData = await extractPage(pdfUint8Array, pageNum);
+      if (!pageData) {
+        console.warn(`⚠️ Échec extraction page ${pageNum}`);
+        continue;
+      }
+
+      if (pageNum > 1) {
+        await new Promise(r => setTimeout(r, EMBED_RATE_DELAY_MS));
+      }
+
+      const embeddingValues = await generateEmbedding(pageData.contentText);
+
+      const hasTable = detectTable(pageData.contentText);
+      const classification = classifyPage(pageData.contentText, hasTable);
+
+      let tableJson = null;
+      let extractionConfidence = null;
+
+      if (hasTable) {
+        console.log(`   📊 Tableau détecté, extraction Vision...`);
+        const table = await extractTableFromPageImage(
+          pageData.imageBase64,
+          cg.insurer_code,
+          cg.insurance_type_code
+        );
+
+        if (table) {
+          tableJson = table;
+          extractionConfidence = table.confidence;
+          tablesExtracted++;
+          console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties × ${table.headers.length - 1} formules`);
+        }
+      }
+
+      // Sauvegarder dans user_cg_pages
+      const pageInsert = await pool.query(
+        `INSERT INTO user_cg_pages (
+          user_cg_id, page_number, content_text, layout_text,
+          embedding, page_image_base64, page_width, page_height,
+          has_table, table_json, table_extraction_confidence,
+          chunk_type, guarantee_codes, article_ref, classification_confidence
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (user_cg_id, page_number) DO UPDATE SET
+          content_text = EXCLUDED.content_text,
+          layout_text = EXCLUDED.layout_text,
+          embedding = COALESCE(EXCLUDED.embedding, user_cg_pages.embedding),
+          page_image_base64 = EXCLUDED.page_image_base64,
+          page_width = EXCLUDED.page_width,
+          page_height = EXCLUDED.page_height,
+          has_table = EXCLUDED.has_table,
+          table_json = EXCLUDED.table_json,
+          table_extraction_confidence = EXCLUDED.table_extraction_confidence,
+          chunk_type = EXCLUDED.chunk_type,
+          guarantee_codes = EXCLUDED.guarantee_codes,
+          article_ref = EXCLUDED.article_ref,
+          classification_confidence = EXCLUDED.classification_confidence,
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING id`,
+        [
+          userCgId,
+          pageNum,
+          pageData.contentText,
+          pageData.layoutText,
+          embeddingValues ? JSON.stringify(embeddingValues) : null,
+          pageData.imageBase64,
+          pageData.width,
+          pageData.height,
+          hasTable,
+          tableJson ? JSON.stringify(tableJson) : null,
+          extractionConfidence,
+          classification.chunkType,
+          classification.guaranteeCodes,
+          classification.articleRef,
+          classification.confidence
+        ]
+      );
+
+      const pageId = pageInsert.rows[0].id;
+
+      // Si tableau extrait, créer les faits de couverture utilisateur
+      if (tableJson) {
+        const facts = tableToFacts(
+          tableJson,
+          cg.insurer_code,
+          cg.insurance_type_code,
+          userCgId,
+          pageId,
+          pageNum
+        );
+
+        await saveUserCoverageFacts(
+          pool,
+          facts,
+          cg.insurer_code,
+          cg.insurance_type_code,
+          userCgId,
+          userId ?? null,
+          pageId,
+          pageNum
+        );
+
+        factsCreated += facts.length;
+      }
+
+      pagesProcessed++;
+      console.log(`   ✅ Page ${pageNum} sauvegardée (user_cg, ${classification.chunkType})`);
+    }
+
+    // Marquer la vectorisation comme terminée
+    try {
+      await pool.query(
+        `UPDATE user_cg
+         SET vectorization_status = 'done',
+             pages_processed = $1,
+             tables_extracted = $2,
+             vectorized_at = CURRENT_TIMESTAMP,
+             vectorization_error = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [pagesProcessed, tablesExtracted, userCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
+
+    console.log(`\n✅ Vectorisation user_cg terminée:`);
+    console.log(`   - ${pagesProcessed} pages traitées`);
+    console.log(`   - ${tablesExtracted} tableaux extraits`);
+    console.log(`   - ${factsCreated} faits de couverture créés`);
+
+    return { pagesProcessed, tablesExtracted, factsCreated };
+
+  } catch (error: any) {
+    console.error('❌ Erreur vectorisation user_cg par pages:', error);
+    try {
+      await pool.query(
+        `UPDATE user_cg
+         SET vectorization_status = 'failed',
+             vectorization_error = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [error?.message || 'Erreur inconnue', userCgId]
+      );
+    } catch (_) { /* colonne pas encore en DB */ }
+    throw error;
+  }
 }

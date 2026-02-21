@@ -254,7 +254,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Add policy failed');
+        const msg = errorData.message === 'LIMIT_REACHED'
+          ? (errorData.detail || 'Vous avez atteint la limite de 10 contrats dans votre portefeuille.')
+          : (errorData.message || 'Add policy failed');
+        throw new Error(msg);
       }
 
       const createdPolicy = await response.json();
@@ -343,25 +346,32 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         </div>
       )}
 
-      {/* Étape 1: Sélection du type d'assurance */}
+      {/* Étape 1: Sélection du type d'assurance — liste compacte */}
       {step === 'selectType' && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="space-y-2">
           {insuranceTypes.map(type => {
             const IconComponent = getIcon(type.code);
+            const isSelected = selectedType?.code === type.code;
             return (
               <button
                 key={type.code}
                 onClick={() => handleSelectType(type)}
-                className="relative p-4 rounded-2xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all group bg-white"
-                style={{ borderColor: selectedType?.code === type.code ? type.color : undefined }}
+                className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all group ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50 shadow'
+                    : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm'
+                }`}
               >
-                <div 
-                  className="w-12 h-12 rounded-full mx-auto mb-2 flex items-center justify-center text-white"
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white flex-shrink-0"
                   style={{ backgroundColor: type.color }}
                 >
-                  <IconComponent className="w-6 h-6" />
+                  <IconComponent className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-center text-sm text-gray-900">{type.labelFr}</h3>
+                <span className={`font-semibold text-sm flex-grow ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                  {type.labelFr}
+                </span>
+                <svg className={`w-4 h-4 flex-shrink-0 transition-transform ${isSelected ? 'text-blue-500 translate-x-0.5' : 'text-gray-300 group-hover:text-blue-400 group-hover:translate-x-0.5'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </button>
             );
           })}

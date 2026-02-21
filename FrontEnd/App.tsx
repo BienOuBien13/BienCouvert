@@ -305,15 +305,21 @@ function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-3xl font-black text-slate-900 mb-2">Mon Portefeuille</h2>
-                <p className="text-slate-600 font-medium">{policies.length} contrat(s) d'assurance</p>
+                <p className="text-slate-600 font-medium">{policies.length} / 10 contrat(s)</p>
               </div>
-              <button
-                onClick={() => setActiveView('add')}
-                className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-primary-600 to-cyan-600 text-white rounded-2xl font-black hover:shadow-xl hover:scale-105 transition-all"
-              >
-                <Sparkles className="w-5 h-5" />
-                Ajouter des contrats
-              </button>
+              {policies.length >= 10 ? (
+                <div className="flex items-center gap-2 px-6 py-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl">
+                  <span className="text-xs font-black uppercase tracking-widest">Limite atteinte (10 max)</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setActiveView('add')}
+                  className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-primary-600 to-cyan-600 text-white rounded-2xl font-black hover:shadow-xl hover:scale-105 transition-all"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Ajouter des contrats
+                </button>
+              )}
             </div>
 
             <PolicyList 

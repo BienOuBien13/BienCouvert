@@ -43,8 +43,10 @@ export interface CentralCgEntry {
   };
   createdAt?: number;
   updatedAt?: number;
+  vectorizedAt?: string | null;     // Date de vectorisation
   // Compatibilité avec anciens champs (pour affichage)
   insurer?: string;                 // Label assureur (pour affichage)
+  insuranceTypeLabel?: string;      // Label type d'assurance (pour affichage)
   productName?: string;             // Nom du produit (pour affichage)
   indexedFormulas?: string[];       // Pour compatibilité
   indexedOptions?: string[];        // Pour compatibilité

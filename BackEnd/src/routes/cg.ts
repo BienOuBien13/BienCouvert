@@ -8,7 +8,9 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from '../db';
+import pool from '../db';
 import { generateEmbedding as generateEmbeddingCentral } from '../services/geminiService';
+import { vectorizeUserCgByPages } from '../services/pageVectorizationService';
 
 const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -157,8 +159,9 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         status,
         content_text,
         embedding,
-        metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        metadata,
+        pdf_base64
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING id`,
       [
         insurer_code,
@@ -178,11 +181,30 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
           options: enrichedMetadata.options,
           resume_court: enrichedMetadata.resume_court,
           uploaded_at: new Date().toISOString()
-        })
+        }),
+        base64Pdf
       ]
     );
 
     const cgId = insertResult.rows[0].id;
+
+    // 6. Récupérer l'id utilisateur à partir de l'email (pour user_coverage_facts)
+    let userId: number | null = null;
+    try {
+      const userResult = await query('SELECT id FROM users WHERE email = $1 LIMIT 1', [user_email]);
+      if (userResult.rows.length > 0) {
+        userId = userResult.rows[0].id;
+      }
+    } catch (_) { /* table users inaccessible — userId reste null */ }
+
+    // 7. Lancer la vectorisation page par page en arrière-plan (non bloquant)
+    vectorizeUserCgByPages(pool, cgId, base64Pdf, userId)
+      .then(({ pagesProcessed, tablesExtracted, factsCreated }) => {
+        console.log(`✅ Vectorisation user_cg ${cgId} terminée: ${pagesProcessed} pages, ${tablesExtracted} tableaux, ${factsCreated} faits`);
+      })
+      .catch(err => {
+        console.error(`❌ Erreur vectorisation user_cg ${cgId}:`, err);
+      });
 
     res.json({
       success: true,

@@ -319,3 +319,69 @@ export async function saveCoverageFacts(
     client.release();
   }
 }
+
+/**
+ * Sauvegarde les faits de couverture extraits pour un CG utilisateur (user_coverage_facts)
+ */
+export async function saveUserCoverageFacts(
+  pool: Pool,
+  facts: CoverageFact[],
+  insurerCode: string,
+  insuranceTypeCode: string,
+  userCgId: number,
+  userId: number | null,
+  sourcePageId: number | null,
+  sourcePageNumber: number
+): Promise<void> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const fact of facts) {
+      await client.query(
+        `INSERT INTO user_coverage_facts (
+          user_cg_id, user_id,
+          insurer_code, insurance_type_code,
+          guarantee_key, guarantee_label,
+          formula_key, formula_label,
+          coverage_status,
+          source_page_id, source_page_number,
+          extraction_confidence
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ON CONFLICT (user_cg_id, guarantee_key, formula_key)
+        DO UPDATE SET
+          guarantee_label = EXCLUDED.guarantee_label,
+          formula_label = EXCLUDED.formula_label,
+          coverage_status = EXCLUDED.coverage_status,
+          source_page_id = EXCLUDED.source_page_id,
+          source_page_number = EXCLUDED.source_page_number,
+          extraction_confidence = EXCLUDED.extraction_confidence,
+          updated_at = CURRENT_TIMESTAMP`,
+        [
+          userCgId,
+          userId,
+          insurerCode,
+          insuranceTypeCode,
+          fact.guarantee_key,
+          fact.guarantee_label,
+          fact.formula_key,
+          fact.formula_label,
+          fact.coverage_status,
+          sourcePageId,
+          sourcePageNumber,
+          0.85
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`✅ Sauvegardé ${facts.length} faits de couverture utilisateur`);
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}

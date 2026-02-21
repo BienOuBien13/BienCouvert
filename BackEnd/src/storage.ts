@@ -256,10 +256,12 @@ export const storage = {
       // Champs de compatibilité pour l'affichage
       insurer: row.insurer_label || row.insurer_code || 'Non spécifié',
       insurerLogo: row.insurer_logo,
+      insuranceTypeLabel: row.type_label || row.insurance_type_code || '',
       productName: row.metadata?.productName || 'Document CG',
       indexedFormulas: row.metadata?.indexedFormulas || [],
       indexedOptions: row.metadata?.indexedOptions || [],
       documentUrl: row.url,
+      vectorizedAt: row.vectorized_at || null,
       lastVerified: row.updated_at || row.created_at
     })) as T[];
   },

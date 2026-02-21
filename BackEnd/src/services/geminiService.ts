@@ -468,9 +468,8 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
     }
 
     if (cgIdsForFacts.length === 0) {
-      console.warn(`${tag}⚠️ Aucun centralCgId résolu — coverage_facts indisponibles`);
-      return [];
-    }
+      console.warn(`${tag}⚠️ Aucun centralCgId résolu — passage direct aux user_coverage_facts`);
+    } else {
 
     console.log(`${tag}🔍 Recherche coverage_facts pour CG IDs: [${cgIdsForFacts.join(', ')}]`);
 
@@ -597,6 +596,56 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
         }
       } catch (_) {}
     }
+    } // fin else (faits centraux)
+
+    // ── Résolution des user_coverage_facts (CG uploadés par l'utilisateur) ──
+    const userCgIdsForFacts = [...new Set(
+      policies.map((p: any) => p.userCgId).filter((id: any) => id != null).map(Number)
+    )];
+    if (userCgIdsForFacts.length > 0) {
+      console.log(`${tag}🔍 Recherche user_coverage_facts pour user_cg IDs: [${userCgIdsForFacts.join(', ')}]`);
+      try {
+        const formulasRawU = [...new Set(policies.map((p: any) => p.formula || '').filter(Boolean))];
+        const formulaKeysU = [...new Set(formulasRawU.flatMap((f: string) => {
+          const withPlus = normalizeKey(f);
+          const withoutPlus = normalizeKey(f.replace(/\+/g, ''));
+          return [withPlus, withoutPlus].filter(k => k.length > 2);
+        }))] as string[];
+
+        const userFactsBase = `SELECT ucf.guarantee_label, ucf.guarantee_key, ucf.formula_label, ucf.formula_key,
+                  ucf.coverage_status, NULL::text as coverage_amount, NULL::text as franchise, NULL::text as coverage_notes,
+                  ucf.source_page_number, uc.target_filename as pdf_url, NULL::text as insurer_label
+           FROM user_coverage_facts ucf
+           JOIN user_cg uc ON ucf.user_cg_id = uc.id`;
+
+        let userFactsResult: any;
+        if (formulaKeysU.length > 0) {
+          userFactsResult = await dbQuery(
+            `${userFactsBase} WHERE ucf.user_cg_id = ANY($1) AND ucf.formula_key = ANY($2) ORDER BY ucf.guarantee_key`,
+            [userCgIdsForFacts, formulaKeysU]
+          );
+          if (userFactsResult.rows.length === 0) {
+            userFactsResult = await dbQuery(
+              `${userFactsBase} WHERE ucf.user_cg_id = ANY($1) ORDER BY ucf.formula_key, ucf.guarantee_key LIMIT 200`,
+              [userCgIdsForFacts]
+            );
+          }
+        } else {
+          userFactsResult = await dbQuery(
+            `${userFactsBase} WHERE ucf.user_cg_id = ANY($1) ORDER BY ucf.formula_key, ucf.guarantee_key LIMIT 200`,
+            [userCgIdsForFacts]
+          );
+        }
+
+        if (userFactsResult.rows.length > 0) {
+          coverageFacts = [...coverageFacts, ...userFactsResult.rows];
+          console.log(`${tag}✅ +${userFactsResult.rows.length} faits user_coverage_facts ajoutés`);
+        }
+      } catch (uErr) {
+        console.warn(`${tag}⚠️ Échec lookup user_coverage_facts:`, uErr);
+      }
+    }
+
   } catch (err) {
     console.error(`${tag}❌ resolveCoverageFacts erreur:`, err);
   }

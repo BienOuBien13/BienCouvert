@@ -436,9 +436,9 @@ export const AdminView: React.FC = () => {
               <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100">
                 <th className="px-8 py-4">Assureur</th>
                 <th className="px-8 py-4">Nom</th>
-                <th className="px-8 py-4">Type</th>
+                <th className="px-8 py-4">Type d'assurance</th>
                 <th className="px-8 py-4">URL</th>
-                <th className="px-8 py-4">Intelligence</th>
+                <th className="px-8 py-4">Vectorisation</th>
                 <th className="px-8 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -452,9 +452,12 @@ export const AdminView: React.FC = () => {
                     <span className="font-bold text-slate-600">{entry.productName}</span>
                   </td>
                   <td className="px-8 py-5">
-                    <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase">
-                      {entry.type}
-                    </span>
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase block w-fit">
+                        {(entry as any).insuranceTypeLabel || entry.insuranceTypeCode || entry.type || '–'}
+                      </span>
+                      <span className="text-[9px] text-slate-400">{entry.insurerCode}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-5">
                     {entry.documentUrl ? (
@@ -474,13 +477,22 @@ export const AdminView: React.FC = () => {
                     )}
                   </td>
                   <td className="px-8 py-5">
-                    <div className="flex items-center gap-3">
-                       <div className="flex -space-x-1">
-                          <div className={`w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-black ${entry.indexedFormulas?.length ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>F</div>
-                          <div className={`w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-black ${entry.indexedOptions?.length ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>O</div>
-                       </div>
-                       <span className="text-[9px] font-bold text-slate-400 uppercase">{entry.indexedFormulas?.length + entry.indexedOptions?.length} points indexés</span>
-                    </div>
+                    {(entry as any).vectorizedAt ? (
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span className="text-[10px] font-bold text-emerald-700">Vectorisé</span>
+                        </div>
+                        <span className="text-[9px] text-slate-400">
+                          {new Date((entry as any).vectorizedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-slate-300" />
+                        <span className="text-[9px] text-slate-400">Non vectorisé</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-8 py-5 text-right">
                     <button 
