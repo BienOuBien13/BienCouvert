@@ -106,7 +106,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
 
 // -----------------------------------------------------------------------------
 // POST /api/cg/user/upload
-// Upload et vectorisation d'une CG personnalisée
+// Upload d'une CG personnalisée — réponse immédiate, traitement asynchrone
 // -----------------------------------------------------------------------------
 router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
@@ -123,47 +123,22 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
       return res.status(400).json({ error: 'Aucun fichier PDF fourni' });
     }
 
-    // 1. Extraire le texte du PDF
-    const base64Pdf = file.buffer.toString('base64');
-    const text = await extractTextFromPdf(base64Pdf);
-
-    // 2. Extraire les métadonnées enrichies
-    const insuranceTypeResult = await query(
-      'SELECT name FROM insurance_types WHERE code = $1',
-      [insurance_type_code]
-    );
-    const insuranceTypeName = insuranceTypeResult.rows[0]?.name || insurance_type_code;
-    
-    const enrichedMetadata = await extractEnrichedMetadata(text, insuranceTypeName);
-
-    // 3. Générer l'embedding (null-safe)
-    const embeddingValues = await generateEmbeddingCentral(text);
-    const embeddingStr = embeddingValues ? `[${embeddingValues.join(',')}]` : null;
-
-    // 4. Récupérer les noms complets de l'assureur et du type
-    const insurerResult = await query(
-      'SELECT name FROM insurers WHERE code = $1',
-      [insurer_code]
-    );
+    // 1. Récupérer les noms (rapide — pas de Gemini)
+    const [insurerResult, typeResult] = await Promise.all([
+      query('SELECT name FROM insurers WHERE code = $1', [insurer_code]),
+      query('SELECT name FROM insurance_types WHERE code = $1', [insurance_type_code])
+    ]);
     const insurerName = insurerResult.rows[0]?.name || insurer_code;
+    const insuranceTypeName = typeResult.rows[0]?.name || insurance_type_code;
 
-    // 5. Insérer dans user_cg
+    // 2. Insérer immédiatement avec statut 'extracting' — PDF stocké, pas encore traité
+    const base64Pdf = file.buffer.toString('base64');
+
     const insertResult = await query(
       `INSERT INTO user_cg (
-        insurer_code,
-        insurance_type_code,
-        version,
-        type,
-        detail,
-        url,
-        owner,
-        target_filename,
-        status,
-        content_text,
-        embedding,
-        metadata,
-        pdf_base64
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        insurer_code, insurance_type_code, version, type, detail, url,
+        owner, target_filename, status, metadata, pdf_base64, vectorization_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'extracting')
       RETURNING id`,
       [
         insurer_code,
@@ -175,15 +150,10 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         user_email,
         file.originalname,
         'active',
-        text,
-        embeddingStr,
         JSON.stringify({
           insurer_name: insurerName,
           insurance_type_name: insuranceTypeName,
           source: 'user_upload',
-          formules: enrichedMetadata.formules,
-          options: enrichedMetadata.options,
-          resume_court: enrichedMetadata.resume_court,
           uploaded_at: new Date().toISOString()
         }),
         base64Pdf
@@ -192,32 +162,25 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
 
     const cgId = insertResult.rows[0].id;
 
-    // 6. Récupérer l'id utilisateur à partir de l'email (pour user_coverage_facts)
+    // 3. Récupérer l'id utilisateur (pour user_coverage_facts)
     let userId: number | null = null;
     try {
       const userResult = await query('SELECT id FROM users WHERE email = $1 LIMIT 1', [user_email]);
-      if (userResult.rows.length > 0) {
-        userId = userResult.rows[0].id;
-      }
-    } catch (_) { /* table users inaccessible — userId reste null */ }
+      if (userResult.rows.length > 0) userId = userResult.rows[0].id;
+    } catch (_) {}
 
-    // 7. Lancer la vectorisation page par page en arrière-plan (non bloquant)
-    vectorizeUserCgByPages(pool, cgId, base64Pdf, userId)
-      .then(({ pagesProcessed, tablesExtracted, factsCreated }) => {
-        console.log(`✅ Vectorisation user_cg ${cgId} terminée: ${pagesProcessed} pages, ${tablesExtracted} tableaux, ${factsCreated} faits`);
-      })
-      .catch(err => {
-        console.error(`❌ Erreur vectorisation user_cg ${cgId}:`, err);
-      });
-
-    res.json({
+    // 4. Répondre immédiatement — traitement async en arrière-plan
+    res.status(202).json({
       success: true,
       id: cgId,
-      formules: enrichedMetadata.formules,
-      options: enrichedMetadata.options,
-      resume_court: enrichedMetadata.resume_court,
+      status: 'extracting',
       insurer_name: insurerName,
       insurance_type_name: insuranceTypeName
+    });
+
+    // 5. Pipeline asynchrone complet (extraction + vectorisation)
+    processUserCgAsync(cgId, base64Pdf, insuranceTypeName, userId).catch(err => {
+      console.error(`❌ Pipeline async user_cg ${cgId}:`, err);
     });
 
   } catch (error) {
@@ -225,6 +188,129 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
     res.status(500).json({ error: 'Erreur serveur lors de l\'upload de la CG' });
   }
 });
+
+// -----------------------------------------------------------------------------
+// GET /api/cg/user/status/:id
+// Statut de traitement d'une CG utilisateur (pour polling frontend)
+// -----------------------------------------------------------------------------
+router.get('/user/status/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await query(
+      `SELECT id, vectorization_status, pages_total, pages_processed, vectorization_error, metadata
+       FROM user_cg WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'CG introuvable' });
+    }
+
+    const row = result.rows[0];
+    const meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata || {});
+
+    // Calcul du pourcentage global
+    let percent = 5;
+    const vstatus = row.vectorization_status;
+    if (vstatus === 'extracting') percent = 20;
+    else if (vstatus === 'embedding') percent = 45;
+    else if (vstatus === 'processing') {
+      const total = row.pages_total || 1;
+      const done = row.pages_processed || 0;
+      percent = 50 + Math.round((done / total) * 45);
+    } else if (vstatus === 'done') percent = 100;
+    else if (vstatus === 'failed') percent = 0;
+
+    res.json({
+      id: row.id,
+      status: vstatus,
+      pages_total: row.pages_total || 0,
+      pages_processed: row.pages_processed || 0,
+      percent,
+      error: row.vectorization_error || null,
+      formules: meta.formules || [],
+      options: meta.options || {},
+      resume_court: meta.resume_court || '',
+      insurer_name: meta.insurer_name || '',
+      insurance_type_name: meta.insurance_type_name || ''
+    });
+  } catch (error) {
+    console.error('Erreur status CG:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Pipeline asynchrone : extraction texte → metadata → embedding → vectorisation
+// -----------------------------------------------------------------------------
+async function processUserCgAsync(
+  cgId: number,
+  base64Pdf: string,
+  insuranceTypeName: string,
+  userId: number | null
+): Promise<void> {
+  try {
+    // Phase 1 : extraction texte
+    console.log(`[user_cg ${cgId}] Phase 1: extraction texte...`);
+    const text = await extractTextFromPdf(base64Pdf);
+
+    // Phase 2 : extraction métadonnées
+    console.log(`[user_cg ${cgId}] Phase 2: extraction métadonnées...`);
+    await pool.query(
+      `UPDATE user_cg SET vectorization_status = 'embedding' WHERE id = $1`,
+      [cgId]
+    );
+    const enrichedMetadata = await extractEnrichedMetadata(text, insuranceTypeName);
+
+    // Phase 3 : embedding
+    console.log(`[user_cg ${cgId}] Phase 3: embedding...`);
+    const embeddingValues = await generateEmbeddingCentral(text);
+    const embeddingStr = embeddingValues ? `[${embeddingValues.join(',')}]` : null;
+
+    // Mise à jour complète avant vectorisation page par page
+    await pool.query(
+      `UPDATE user_cg
+       SET content_text = $1, embedding = $2, metadata = $3, vectorization_status = 'processing'
+       WHERE id = $4`,
+      [
+        text,
+        embeddingStr,
+        JSON.stringify({
+          ...(await getCurrentMeta(cgId)),
+          formules: enrichedMetadata.formules,
+          options: enrichedMetadata.options,
+          resume_court: enrichedMetadata.resume_court
+        }),
+        cgId
+      ]
+    );
+
+    // Phase 4 : vectorisation page par page
+    console.log(`[user_cg ${cgId}] Phase 4: vectorisation page par page...`);
+    const { pagesProcessed, tablesExtracted, factsCreated } = await vectorizeUserCgByPages(pool, cgId, base64Pdf, userId);
+    console.log(`✅ [user_cg ${cgId}] Pipeline terminé: ${pagesProcessed} pages, ${tablesExtracted} tableaux, ${factsCreated} faits`);
+
+  } catch (error: any) {
+    console.error(`❌ [user_cg ${cgId}] Pipeline échoué:`, error);
+    try {
+      await pool.query(
+        `UPDATE user_cg SET vectorization_status = 'failed', vectorization_error = $1 WHERE id = $2`,
+        [error?.message || 'Erreur inconnue', cgId]
+      );
+    } catch (_) {}
+  }
+}
+
+async function getCurrentMeta(cgId: number): Promise<any> {
+  try {
+    const r = await pool.query('SELECT metadata FROM user_cg WHERE id = $1', [cgId]);
+    if (r.rows.length > 0) {
+      const m = r.rows[0].metadata;
+      return typeof m === 'string' ? JSON.parse(m) : (m || {});
+    }
+  } catch (_) {}
+  return {};
+}
 
 // -----------------------------------------------------------------------------
 // Fonctions utilitaires

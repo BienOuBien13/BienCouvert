@@ -69,6 +69,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [contractVersion, setContractVersion] = useState('001');
   const [docType, setDocType] = useState('CG');
   const [contractUrl, setContractUrl] = useState('');
+  // Progression traitement async
+  const [processingPercent, setProcessingPercent] = useState(0);
+  const [processingPhase, setProcessingPhase] = useState('');
   
   // État général
   const [loading, setLoading] = useState(false);
@@ -170,7 +173,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     }
   };
 
-  // Mode personnalisé : upload PDF
+  // Mode personnalisé : upload PDF + polling de progression
   const uploadCustomCG = async () => {
     if (!pdfFile || !selectedType || !selectedInsurer) {
       setError('Veuillez sélectionner un fichier PDF');
@@ -182,6 +185,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     }
 
     setIsUploading(true);
+    setProcessingPercent(5);
+    setProcessingPhase('Envoi du document...');
     setError('');
 
     try {
@@ -200,32 +205,66 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
       const response = await fetch(`${API_URL}/api/cg/user/upload`, {
         method: 'POST',
-        headers: { 
-          'X-CSRF-Token': csrfToken
-        },
+        headers: { 'X-CSRF-Token': csrfToken },
         body: formData,
         credentials: 'include'
       });
       
       if (!response.ok) throw new Error('Upload failed');
       
-      const data = await response.json();
+      const data = await response.json(); // 202 — id retourné immédiatement
+      const cgId = data.id;
 
-      setCgData({
-        id: data.id,
-        formules: data.formules,
-        options: data.options,
-        resume_court: data.resume_court,
-        insurer_name: data.insurer_name,
-        insurance_type_name: data.insurance_type_name
-      });
+      // Polling du statut jusqu'à la fin
+      const phaseLabels: Record<string, string> = {
+        extracting: 'Extraction du texte (Gemini)...',
+        embedding: 'Analyse des métadonnées et formules...',
+        processing: 'Vectorisation page par page...',
+        done: 'Traitement terminé !',
+        failed: 'Erreur lors du traitement'
+      };
 
-      // Avancer vers la sélection de formule
-      setStep('configure');
+      const pollStatus = async (): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          const interval = setInterval(async () => {
+            try {
+              const statusRes = await fetch(`${API_URL}/api/cg/user/status/${cgId}`, { credentials: 'include' });
+              if (!statusRes.ok) return;
+              const status = await statusRes.json();
+
+              setProcessingPercent(status.percent);
+              setProcessingPhase(
+                phaseLabels[status.status] || `Traitement en cours...`
+              );
+
+              if (status.status === 'done') {
+                clearInterval(interval);
+                setCgData({
+                  id: cgId,
+                  formules: status.formules,
+                  options: status.options,
+                  resume_court: status.resume_court,
+                  insurer_name: status.insurer_name,
+                  insurance_type_name: status.insurance_type_name
+                });
+                setStep('configure');
+                resolve();
+              } else if (status.status === 'failed') {
+                clearInterval(interval);
+                reject(new Error(status.error || 'Traitement échoué'));
+              }
+            } catch (e) {
+              // Erreur réseau transitoire — on continue de poller
+            }
+          }, 3000);
+        });
+      };
+
+      await pollStatus();
       
     } catch (err: any) {
       console.error('Erreur upload:', err);
-      setError('Erreur lors de l\'analyse du document');
+      setError(err.message === 'Upload failed' ? 'Erreur lors de l\'envoi du document' : (err.message || 'Erreur lors de l\'analyse du document'));
     } finally {
       setIsUploading(false);
     }
@@ -519,15 +558,29 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isUploading ? (
-              <><span className="animate-spin">⏳</span> Analyse et vectorisation en cours...</>
+              <>⏳ Traitement en cours ({processingPercent}%)...</>
             ) : (
               <><Upload className="w-5 h-5" /> Analyser et vectoriser</>  
             )}
           </button>
 
           {isUploading && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-              Le document est en cours d'analyse. Les formules et garanties seront extraites automatiquement. Cela peut prendre quelques instants.
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              {/* Barre de progression */}
+              <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
+                <div
+                  className="h-3 rounded-full bg-blue-600 transition-all duration-700"
+                  style={{ width: `${processingPercent}%` }}
+                />
+              </div>
+              {/* Étiquette */}
+              <div className="flex items-center justify-between text-sm text-blue-800">
+                <span>{processingPhase || 'Traitement en cours...'}</span>
+                <span className="font-bold">{processingPercent}%</span>
+              </div>
+              <p className="text-xs text-blue-600">
+                L'analyse et la vectorisation peuvent prendre 1 à 3 minutes selon la taille du document.
+              </p>
             </div>
           )}
         </div>
