@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { storage } from '../storage';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -17,6 +18,15 @@ import { logAudit, AuditAction, getAuditContext } from '../services/auditService
 const router = Router();
 // Clé secrète pour signer les tokens JWT (à configurer via variable d'environnement en production)
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+
+// 🔒 Rate limiter strict réservé aux routes d'authentification (login / register uniquement)
+// Les routes protégées comme PUT /me ou GET /me ne sont PAS limitées
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 5,                     // Maximum 5 tentatives d'authentification par IP
+  message: 'Trop de tentatives de connexion. Veuillez réessayer dans 15 minutes.',
+  skipSuccessfulRequests: true // Ne compte que les échecs
+});
 
 /**
  * Génère un token JWT pour un utilisateur authentifié.
@@ -78,7 +88,7 @@ function authMiddleware(req: any, res: any, next: any) {
  * Vérifie l'unicité de l'email, hache le mot de passe avec bcrypt,
  * crée le compte et retourne un token JWT en cookie httpOnly.
  */
-router.post('/register', [
+router.post('/register', authLimiter, [
   // 🔒 Validation des inputs avec express-validator
   body('email')
     .isEmail().withMessage('Email invalide')
@@ -193,7 +203,7 @@ router.post('/register', [
  * Connexion d'un utilisateur existant.
  * Vérifie les identifiants (email/mot de passe) et retourne un token JWT en cookie httpOnly.
  */
-router.post('/login', [
+router.post('/login', authLimiter, [
   // 🔒 Validation des inputs
   body('email')
     .isEmail().withMessage('Email invalide')
@@ -477,6 +487,40 @@ router.put('/me', authMiddleware, async (req: any, res) => {
   } catch (err) {
     console.error('❌ Error in PUT /me:', err);
     res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * Route GET /api/auth/me/analysis-profile (protégée)
+ * Retourne le profil de profilage détaillé de l'utilisateur (questionnaire AnalysisView).
+ */
+router.get('/me/analysis-profile', authMiddleware, async (req: any, res) => {
+  try {
+    const profile = await storage.readAnalysisProfile(parseInt(req.user.id));
+    res.json({ profile: profile || {} });
+  } catch (err) {
+    console.error('GET /me/analysis-profile error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route PUT /api/auth/me/analysis-profile (protégée)
+ * Crée ou met à jour le profil de profilage détaillé de l'utilisateur.
+ */
+router.put('/me/analysis-profile', authMiddleware, async (req: any, res) => {
+  try {
+    const userId = parseInt(req.user.id);
+    const data = req.body;
+    if (!data || typeof data !== 'object') {
+      return res.status(400).json({ message: 'Body invalide' });
+    }
+    await storage.writeAnalysisProfile(userId, data);
+    const saved = await storage.readAnalysisProfile(userId);
+    res.json({ profile: saved });
+  } catch (err) {
+    console.error('PUT /me/analysis-profile error:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

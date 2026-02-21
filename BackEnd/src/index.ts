@@ -148,16 +148,10 @@ const apiLimiter = rateLimit({
   message: 'Trop de requêtes depuis cette adresse IP, veuillez réessayer plus tard.',
   standardHeaders: true,      // Retourne les headers RateLimit-*
   legacyHeaders: false,
-  // Exclure les endpoints de polling de statut (vectorisation asynchrone)
-  skip: (req) => /\/api\/cg\/user\/status\//.test(req.originalUrl)
-});
-
-// Limiter strict pour l'authentification (login, register)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
-  max: 5,                     // Maximum 5 tentatives par IP
-  message: 'Trop de tentatives de connexion. Veuillez réessayer dans 15 minutes.',
-  skipSuccessfulRequests: true // Ne compte que les échecs
+  // Exclure les endpoints de polling de statut et les endpoints de profil utilisateur
+  skip: (req) =>
+    /\/api\/cg\/user\/status\//.test(req.originalUrl) ||
+    /\/api\/auth\/me/.test(req.originalUrl)
 });
 
 // Application des middlewares
@@ -193,7 +187,8 @@ app.get('/api/csrf-token', (req, res) => {
 });
 
 // Montage des routes principales de l'API
-app.use('/api/auth', authLimiter, doubleCsrfProtection, authRoutes);        // 🔒 Auth avec rate limiting + CSRF
+// 🔒 authLimiter est appliqué directement sur les routes /login et /register (dans auth.ts)
+app.use('/api/auth', doubleCsrfProtection, authRoutes);                     // 🔒 Auth avec CSRF
 app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // 🔒 Policies avec CSRF
 app.use('/api/ai', doubleCsrfProtection, aiRoutes);                         // 🔒 AI avec CSRF
 app.use('/api/masterdata', masterDataRoutes);                               // 📊 Master Data (lecture seule, pas de CSRF)

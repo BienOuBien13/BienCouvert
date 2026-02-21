@@ -115,6 +115,25 @@ export const authService = {
     return response.user;
   },
 
+  /**
+   * Récupère le profil d'analyse détaillé de l'utilisateur courant (questionnaire AnalysisView)
+   */
+  getAnalysisProfile: async (): Promise<UserProfileData> => {
+    const response = await apiFetch('/auth/me/analysis-profile', { method: 'GET' });
+    return response.profile || {};
+  },
+
+  /**
+   * Met à jour le profil d'analyse détaillé de l'utilisateur courant
+   */
+  updateAnalysisProfile: async (data: UserProfileData): Promise<UserProfileData> => {
+    const response = await apiFetch('/auth/me/analysis-profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return response.profile || data;
+  },
+
   /**   * Suppression du compte utilisateur (RGPD Art. 17 - Droit à l'effacement)
    */
   deleteAccount: async (): Promise<void> => {

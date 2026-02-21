@@ -92,6 +92,126 @@ export const storage = {
   },
 
   /**
+   * Lit le profil d'analyse détaillé d'un utilisateur depuis user_analysis_profiles
+   * @param userId - ID de l'utilisateur
+   * @returns Objet profil ou null si non trouvé
+   */
+  readAnalysisProfile: async (userId: number): Promise<any | null> => {
+    const result = await query(
+      'SELECT * FROM user_analysis_profiles WHERE user_id = $1',
+      [userId]
+    );
+    if (result.rows.length === 0) return null;
+    const r = result.rows[0];
+    return {
+      adultsCount:           r.adults_count,
+      childrenCount:         r.children_count,
+      householdMembersAges:  r.household_members_ages || [],
+      hasPets:               r.has_pets,
+      petDetails:            r.pet_details,
+      postalCode:            r.postal_code,
+      housingStatus:         r.housing_status,
+      housingType:           r.housing_type,
+      residenceType:         r.residence_type,
+      housingSurface:        r.housing_surface,
+      constructionYear:      r.construction_year,
+      hasPool:               r.has_pool,
+      hasGarden:             r.has_garden,
+      reconstructionValue:   r.reconstruction_value,
+      highTechValue:         r.high_tech_value,
+      jewelryValue:          r.jewelry_value,
+      vehiclesCount:         r.vehicles_count,
+      monthlyIncome:         r.monthly_income,
+      workStatus:            r.work_status,
+      profession:            r.profession,
+      teleworkDays:          r.telework_days,
+      riskySports:           r.risky_sports || [],
+      healthNeeds:           r.health_needs || [],
+      healthSpecifics:       r.health_specifics,
+      claimsLast5Years:      r.claims_last_5_years,
+      riskTolerance:         r.risk_tolerance,
+    };
+  },
+
+  /**
+   * Crée ou met à jour le profil d'analyse d'un utilisateur (upsert)
+   * @param userId - ID de l'utilisateur
+   * @param data   - Données du profil (équivalent UserProfileData)
+   */
+  writeAnalysisProfile: async (userId: number, data: any): Promise<void> => {
+    await query(
+      `INSERT INTO user_analysis_profiles (
+        user_id, adults_count, children_count, household_members_ages,
+        has_pets, pet_details, postal_code, housing_status, housing_type,
+        residence_type, housing_surface, construction_year, has_pool, has_garden,
+        reconstruction_value, high_tech_value, jewelry_value, vehicles_count,
+        monthly_income, work_status, profession, telework_days, risky_sports,
+        health_needs, health_specifics, claims_last_5_years, risk_tolerance,
+        updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27, NOW()
+      )
+      ON CONFLICT (user_id) DO UPDATE SET
+        adults_count            = EXCLUDED.adults_count,
+        children_count          = EXCLUDED.children_count,
+        household_members_ages  = EXCLUDED.household_members_ages,
+        has_pets                = EXCLUDED.has_pets,
+        pet_details             = EXCLUDED.pet_details,
+        postal_code             = EXCLUDED.postal_code,
+        housing_status          = EXCLUDED.housing_status,
+        housing_type            = EXCLUDED.housing_type,
+        residence_type          = EXCLUDED.residence_type,
+        housing_surface         = EXCLUDED.housing_surface,
+        construction_year       = EXCLUDED.construction_year,
+        has_pool                = EXCLUDED.has_pool,
+        has_garden              = EXCLUDED.has_garden,
+        reconstruction_value    = EXCLUDED.reconstruction_value,
+        high_tech_value         = EXCLUDED.high_tech_value,
+        jewelry_value           = EXCLUDED.jewelry_value,
+        vehicles_count          = EXCLUDED.vehicles_count,
+        monthly_income          = EXCLUDED.monthly_income,
+        work_status             = EXCLUDED.work_status,
+        profession              = EXCLUDED.profession,
+        telework_days           = EXCLUDED.telework_days,
+        risky_sports            = EXCLUDED.risky_sports,
+        health_needs            = EXCLUDED.health_needs,
+        health_specifics        = EXCLUDED.health_specifics,
+        claims_last_5_years     = EXCLUDED.claims_last_5_years,
+        risk_tolerance          = EXCLUDED.risk_tolerance,
+        updated_at              = NOW()`,
+      [
+        userId,
+        data.adultsCount          ?? 1,
+        data.childrenCount        ?? 0,
+        data.householdMembersAges ?? [],
+        data.hasPets              ?? false,
+        data.petDetails           ?? null,
+        data.postalCode           ?? null,
+        data.housingStatus        ?? null,
+        data.housingType          ?? null,
+        data.residenceType        ?? null,
+        data.housingSurface       ?? null,
+        data.constructionYear     ?? null,
+        data.hasPool              ?? false,
+        data.hasGarden            ?? false,
+        data.reconstructionValue  ?? null,
+        data.highTechValue        ?? null,
+        data.jewelryValue         ?? null,
+        data.vehiclesCount        ?? 0,
+        data.monthlyIncome        ?? null,
+        data.workStatus           ?? null,
+        data.profession           ?? null,
+        data.teleworkDays         ?? 0,
+        data.riskySports          ?? [],
+        data.healthNeeds          ?? [],
+        data.healthSpecifics      ?? null,
+        data.claimsLast5Years     ?? 0,
+        data.riskTolerance        ?? null,
+      ]
+    );
+  },
+
+  /**
    * Lit la liste des polices d'assurance depuis la table policies
    * @param userId - (Optionnel) ID de l'utilisateur pour filtrer ses polices
    * @returns Promise avec tableau d'objets police

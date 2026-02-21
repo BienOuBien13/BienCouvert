@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Zap, CheckCircle, ChevronRight, ChevronLeft,
   User as UserIcon, Shield, Briefcase, Heart, Palmtree, Compass, Info,
@@ -10,6 +10,7 @@ import {
 import { Policy, OptimizationFinding, UserProfileData, User } from '../types';
 import { detectOptimizations } from '../services/geminiService';
 import { generateOptimizationPDF } from '../services/pdfService';
+import { authService } from '../services/authService';
 
 interface Props {
   policies: Policy[];
@@ -71,6 +72,17 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Charger le profil saved depuis la table dédiée au montage du composant
+  useEffect(() => {
+    authService.getAnalysisProfile()
+      .then(savedProfile => {
+        if (savedProfile && Object.keys(savedProfile).length > 0) {
+          onUpdateProfile(savedProfile);
+        }
+      })
+      .catch(err => console.warn('Impossible de charger le profil d’analyse:', err));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const currentStep = STEPS[currentStepIndex];
 
   const handleNext = () => {
@@ -92,6 +104,10 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     try {
+      // Persister le profil dans la table dédiée avant analyse
+      await authService.updateAnalysisProfile(profile).catch(err =>
+        console.warn('Sauvegarde du profil d’analyse échouée (analyse continue):', err)
+      );
       const results = await detectOptimizations(policies, profile);
       setFindings(results);
       setHasAnalyzed(true);
