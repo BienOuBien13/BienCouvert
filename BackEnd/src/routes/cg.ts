@@ -125,11 +125,11 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
 
     // 1. Récupérer les noms (rapide — pas de Gemini)
     const [insurerResult, typeResult] = await Promise.all([
-      query('SELECT name FROM insurers WHERE code = $1', [insurer_code]),
-      query('SELECT name FROM insurance_types WHERE code = $1', [insurance_type_code])
+      query('SELECT label, full_name FROM insurers WHERE code = $1', [insurer_code]),
+      query('SELECT label_fr FROM insurance_types WHERE code = $1', [insurance_type_code])
     ]);
-    const insurerName = insurerResult.rows[0]?.name || insurer_code;
-    const insuranceTypeName = typeResult.rows[0]?.name || insurance_type_code;
+    const insurerName = insurerResult.rows[0]?.full_name || insurerResult.rows[0]?.label || insurer_code;
+    const insuranceTypeName = typeResult.rows[0]?.label_fr || insurance_type_code;
 
     // 2. Insérer immédiatement avec statut 'extracting' — PDF stocké, pas encore traité
     const base64Pdf = file.buffer.toString('base64');
