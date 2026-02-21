@@ -191,12 +191,13 @@ function extractArticleRef(text: string): string | null {
  * Détecte si une page contient un tableau de garanties
  */
 function detectTable(text: string): boolean {
-  // Heuristiques simples
-  const hasFormulas = /tiers|tous risques|confort|essentiel|leasing/i.test(text);
-  const hasGuarantees = /responsabilit|bris|vol|incendie|dommages|assistance/i.test(text);
-  const hasSymbols = /[✓✔○●•]/g.test(text) || /\b(inclus|option|exclu)\b/i.test(text);
-  
-  return hasFormulas && hasGuarantees && (hasSymbols || text.split('\n').length > 10);
+  // Heuristiques améliorées: plus permissives pour capturer plus de pages avec tableau
+  const hasFormulas = /tiers[\s-]*(eco|essentiel|\+)?|tous[\s-]*risques|confort|essentiel\+?|leasing|integral|plenitude|plénitude|bronze|silver|gold/i.test(text);
+  const hasGuarantees = /responsabilit|bris[\s-]*de[\s-]*glac|vitrage|pare[\s-]*brise|\bvol\b|incendie|dommages|assistance|conducteur/i.test(text);
+  const hasSymbols = /[\u2713\u2714\u25cb\u25cf\u2022]/g.test(text) || /\b(inclus|option|exclu|oui|non)\b/i.test(text);
+  const hasMultipleLines = text.split('\n').length > 5;
+
+  return hasFormulas && hasGuarantees && (hasSymbols || hasMultipleLines);
 }
 
 /**

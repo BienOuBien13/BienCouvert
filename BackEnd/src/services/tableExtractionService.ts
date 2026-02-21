@@ -50,9 +50,20 @@ function normalizeGuaranteeKey(label: string): string {
 
 /**
  * Normalise un nom de formule en clé snake_case
+ * Traitement spécial du '+' qui devient '_plus' (ex: "TIERS ESSENTIEL+" → "tiers_essentiel_plus")
  */
 function normalizeFormulaKey(label: string): string {
-  return normalizeGuaranteeKey(label);
+  return label
+    .toLowerCase()
+    .replace(/\+/g, '_plus')  // "TIERS ESSENTIEL+" → "...essentiel_plus"
+    .replace(/[àáâäã]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôöõ]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ç]/g, 'c')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 /**
@@ -145,7 +156,7 @@ INSTRUCTIONS:
 1. Identifie s'il y a un tableau de synthèse des garanties
 2. Extrait les en-têtes (noms des formules en colonnes)
 3. Extrait chaque ligne (garantie + statuts par formule)
-4. Normalise les clés de formules en snake_case (ex: "TIERS ESSENTIEL" → "tiers_essentiel")
+4. Normalise les clés de formules en snake_case: espaces→'_', '+'→'_plus', tout en minuscules, sans accents ni caractères spéciaux. Ex: "TIERS ESSENTIEL" → "tiers_essentiel", "TIERS ESSENTIEL+" → "tiers_essentiel_plus", "TOUS RISQUES CONFORT" → "tous_risques_confort"
 5. Préserve les symboles exacts (✓, ○, -)
 6. Indique ta confiance (0-1)
 
@@ -213,9 +224,26 @@ export function tableToFacts(
     
     formulaHeaders.forEach((formulaLabel, colIndex) => {
       const formulaKey = normalizeFormulaKey(formulaLabel);
-      const symbol = row.formulas[formulaKey] || '';
+
+      // Multi-stratégie de lookup pour gérer les variantes de normalisation de Gemini
+      let symbol = '';
+      if (row.formulas[formulaKey] !== undefined) {
+        // Stratégie 1: clé exacte (notre normalisation de l'en-tête)
+        symbol = String(row.formulas[formulaKey]);
+      } else {
+        const geminiKeys = Object.keys(row.formulas);
+        // Stratégie 2: clé Gemini qui normalise vers la même valeur (ex: "tiers_essentiel_" → "tiers_essentiel")
+        const matchingKey = geminiKeys.find(gk => normalizeFormulaKey(gk) === formulaKey);
+        if (matchingKey !== undefined) {
+          symbol = String(row.formulas[matchingKey]);
+        } else if (colIndex < geminiKeys.length) {
+          // Stratégie 3: fallback positionnel (même colonne)
+          symbol = String(row.formulas[geminiKeys[colIndex]]);
+        }
+      }
+
       const coverageStatus = parseStatus(symbol);
-      
+
       facts.push({
         guarantee_key: guaranteeKey,
         guarantee_label: guaranteeLabel,

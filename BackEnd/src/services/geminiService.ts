@@ -45,10 +45,12 @@ const generateSystemInstruction = (policies: Policy[] = []) => {
 
 /**
  * Normalise un libellé en clé snake_case sans accents (identique à la normalisation DB coverage_facts)
+ * '+' est converti en '_plus' pour cohérence avec tableExtractionService.normalizeFormulaKey
  */
 function normalizeKey(label: string): string {
   return label
     .toLowerCase()
+    .replace(/\+/g, '_plus')  // "TIERS ESSENTIEL+" → "tiers_essentiel_plus"
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
@@ -528,29 +530,49 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
         const formulaKeys = policies
           .map(p => normalizeKey((p as any).formula || ''))
           .filter((k: string) => k.length > 2);
-        let factsResult: any;
-        if (formulaKeys.length > 0) {
-          factsResult = await storage.query(
-            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+        const coverageFactsBase = `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
                     cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
                     cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
              FROM coverage_facts cf
              JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             LEFT JOIN insurers i ON cg.insurer_code = i.code`;
+        let factsResult: any;
+        if (formulaKeys.length > 0) {
+          // Niveau 1: match exact de la formule (ex: "tous_risques_leasing")
+          factsResult = await storage.query(
+            `${coverageFactsBase}
              WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
              ORDER BY cf.guarantee_key`,
             [cgIdsForFacts, formulaKeys]
           );
+          // Niveau 2: si vide, match partiel LIKE (ex: "tous_risques_leasing" → "tous_risques%")
+          if (factsResult.rows.length === 0) {
+            const baseKeys = [...new Set(formulaKeys.map((k: string) => k.split('_').slice(0, 2).join('_')))] as string[];
+            const likeConditions = baseKeys.map((_: string, i: number) => `cf.formula_key LIKE $${i + 2}`).join(' OR ');
+            const likeParams: any[] = [cgIdsForFacts, ...baseKeys.map((k: string) => `${k}%`)];
+            factsResult = await storage.query(
+              `${coverageFactsBase}
+               WHERE cf.central_cg_id = ANY($1) AND (${likeConditions})
+               ORDER BY cf.guarantee_key`,
+              likeParams
+            );
+            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts LIKE (${baseKeys.join(',')}): ${factsResult.rows.length} faits`);
+          }
+          // Niveau 3 (fallback total): toutes les formules du document CG
+          if (factsResult.rows.length === 0) {
+            factsResult = await storage.query(
+              `${coverageFactsBase}
+               WHERE cf.central_cg_id = ANY($1)
+               ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
+              [cgIdsForFacts]
+            );
+            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts fallback (toutes formules): ${factsResult.rows.length} faits`);
+          }
         } else {
           factsResult = await storage.query(
-            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
-                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
-                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM coverage_facts cf
-             JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
+            `${coverageFactsBase}
              WHERE cf.central_cg_id = ANY($1)
-             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 100`,
+             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
             [cgIdsForFacts]
           );
         }
@@ -559,6 +581,57 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       }
     } catch (cfErr) {
       console.warn('⚠️ Échec coverage_facts:', cfErr);
+    }
+
+    // Niveau 4 (table_json fallback): si coverage_facts vide, lire directement central_cg_pages.table_json
+    if (coverageFacts.length === 0) {
+      try {
+        const cgIdsForTableFallback = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+        if (cgIdsForTableFallback.length > 0) {
+          const tableResult = await storage.query(
+            `SELECT p.table_json, p.page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM central_cg_pages p
+             JOIN central_cg cg ON p.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE p.central_cg_id = ANY($1) AND p.has_table = true AND p.table_json IS NOT NULL
+             ORDER BY p.page_number`,
+            [cgIdsForTableFallback]
+          );
+          tableResult.rows.forEach((row: any) => {
+            const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
+            if (table && Array.isArray(table.rows)) {
+              const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
+              table.rows.forEach((tableRow: any) => {
+                Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
+                  const fKey = normalizeKey(geminiKey);
+                  const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
+                  const s = String(sym).trim().toLowerCase();
+                  const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
+                    : /○|option/.test(s) ? 'optional'
+                    : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
+                    : s.length > 0 ? 'included' : 'not_applicable';
+                  coverageFacts.push({
+                    guarantee_label: tableRow.guarantee || '',
+                    guarantee_key: normalizeKey(tableRow.guarantee || ''),
+                    formula_label: fLabel,
+                    formula_key: fKey,
+                    coverage_status: status,
+                    coverage_amount: null,
+                    franchise: null,
+                    coverage_notes: null,
+                    insurer_label: row.insurer_label,
+                    source_page_number: row.page_number,
+                    pdf_url: row.pdf_url
+                  });
+                });
+              });
+            }
+          });
+          if (coverageFacts.length > 0) console.log(`✅ coverage_facts depuis table_json: ${coverageFacts.length} faits`);
+        }
+      } catch (tjErr) {
+        console.warn('⚠️ Échec table_json fallback:', tjErr);
+      }
     }
 
     // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
@@ -617,10 +690,16 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
         const productName = cg.product_name || cg.type_label || 'Produit';
         
         // Extraction intelligente : chercher les mots-clés de la question dans le document
+        // Exclure les mots purement numériques (ex: modèle véhicule "5008") et les surnoms de contrats
+        const policyNicknames = new Set(policies.map((p: any) => (p.name || '').toLowerCase()));
         const keywords = message.toLowerCase()
           .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
           .split(/\s+/)
-          .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment', 'moi', 'mes', 'mon', 'les', 'des', 'une'].includes(w));
+          .filter(w => w.length > 3
+            && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment', 'moi', 'mes', 'mon', 'les', 'des', 'une', 'est', 'que', 'couverte', 'couverts', 'couvert', 'contrat'].includes(w)
+            && !/^\d+$/.test(w) // exclure les mots purement numériques (ex: modèle véhicule "5008")
+            && !policyNicknames.has(w) // exclure les surnoms de contrats
+          );
         
         // Ajouter les formules des policies comme mots-clés
         policies.forEach(p => {
@@ -772,6 +851,12 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 CONTEXTE DISPONIBLE:
 
 ${enrichedContext}
+
+IDENTIFICATION DES CONTRATS:
+- Dans "📋 VOS CONTRATS", le premier champ (avant ":") est un SURNOM donné par l'utilisateur (peut être un modèle de véhicule ex: "5008", "308", "Clio", ou un nom de bien)
+- Quand l'utilisateur mentionne un modèle de véhicule ("ma 5008", "mon SUV", "ma Clio"...), identifie le contrat Automobile dont le surnom correspond
+- Identifie toujours le contrat par son TYPE + ASSUREUR + FORMULE, pas uniquement par son surnom
+- Si le tableau 📊 affiche plusieurs formules (mode fallback), repère la formule de l'utilisateur dans "📋 VOS CONTRATS" et concentre ta réponse sur CETTE formule uniquement
 
 RÈGLES ABSOLUES:
 - Tu AS accès aux documents contractuels via le contexte ci-dessus
@@ -931,29 +1016,49 @@ export const sendMessageToAssistantStream = async (
         const formulaKeys = policies
           .map(p => normalizeKey((p as any).formula || ''))
           .filter((k: string) => k.length > 2);
-        let factsResult: any;
-        if (formulaKeys.length > 0) {
-          factsResult = await storage.query(
-            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
+        const coverageFactsBase = `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
                     cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
                     cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
              FROM coverage_facts cf
              JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             LEFT JOIN insurers i ON cg.insurer_code = i.code`;
+        let factsResult: any;
+        if (formulaKeys.length > 0) {
+          // Niveau 1: match exact de la formule
+          factsResult = await storage.query(
+            `${coverageFactsBase}
              WHERE cf.central_cg_id = ANY($1) AND cf.formula_key = ANY($2)
              ORDER BY cf.guarantee_key`,
             [cgIdsForFacts, formulaKeys]
           );
+          // Niveau 2: si vide, match partiel LIKE (ex: "tous_risques_leasing" → "tous_risques%")
+          if (factsResult.rows.length === 0) {
+            const baseKeys = [...new Set(formulaKeys.map((k: string) => k.split('_').slice(0, 2).join('_')))] as string[];
+            const likeConditions = baseKeys.map((_: string, i: number) => `cf.formula_key LIKE $${i + 2}`).join(' OR ');
+            const likeParams: any[] = [cgIdsForFacts, ...baseKeys.map((k: string) => `${k}%`)];
+            factsResult = await storage.query(
+              `${coverageFactsBase}
+               WHERE cf.central_cg_id = ANY($1) AND (${likeConditions})
+               ORDER BY cf.guarantee_key`,
+              likeParams
+            );
+            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts LIKE stream (${baseKeys.join(',')}): ${factsResult.rows.length} faits`);
+          }
+          // Niveau 3 (fallback total): toutes les formules du document CG
+          if (factsResult.rows.length === 0) {
+            factsResult = await storage.query(
+              `${coverageFactsBase}
+               WHERE cf.central_cg_id = ANY($1)
+               ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
+              [cgIdsForFacts]
+            );
+            if (factsResult.rows.length > 0) console.log(`✅ coverage_facts fallback stream (toutes formules): ${factsResult.rows.length} faits`);
+          }
         } else {
           factsResult = await storage.query(
-            `SELECT cf.guarantee_label, cf.guarantee_key, cf.formula_label, cf.formula_key,
-                    cf.coverage_status, cf.coverage_amount, cf.franchise, cf.coverage_notes,
-                    cf.source_page_number, cg.url as pdf_url, i.label as insurer_label
-             FROM coverage_facts cf
-             JOIN central_cg cg ON cf.central_cg_id = cg.id
-             LEFT JOIN insurers i ON cg.insurer_code = i.code
+            `${coverageFactsBase}
              WHERE cf.central_cg_id = ANY($1)
-             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 100`,
+             ORDER BY cf.formula_key, cf.guarantee_key LIMIT 200`,
             [cgIdsForFacts]
           );
         }
@@ -962,6 +1067,57 @@ export const sendMessageToAssistantStream = async (
       }
     } catch (cfErr) {
       console.warn('⚠️ Échec coverage_facts (stream):', cfErr);
+    }
+
+    // Niveau 4 (table_json fallback stream): si coverage_facts vide, lire directement central_cg_pages.table_json
+    if (coverageFacts.length === 0) {
+      try {
+        const cgIdsForTableFallback = policies.map(p => (p as any).centralCgId).filter((id: any) => id != null);
+        if (cgIdsForTableFallback.length > 0) {
+          const tableResult = await storage.query(
+            `SELECT p.table_json, p.page_number, cg.url as pdf_url, i.label as insurer_label
+             FROM central_cg_pages p
+             JOIN central_cg cg ON p.central_cg_id = cg.id
+             LEFT JOIN insurers i ON cg.insurer_code = i.code
+             WHERE p.central_cg_id = ANY($1) AND p.has_table = true AND p.table_json IS NOT NULL
+             ORDER BY p.page_number`,
+            [cgIdsForTableFallback]
+          );
+          tableResult.rows.forEach((row: any) => {
+            const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
+            if (table && Array.isArray(table.rows)) {
+              const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
+              table.rows.forEach((tableRow: any) => {
+                Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
+                  const fKey = normalizeKey(geminiKey);
+                  const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
+                  const s = String(sym).trim().toLowerCase();
+                  const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
+                    : /○|option/.test(s) ? 'optional'
+                    : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
+                    : s.length > 0 ? 'included' : 'not_applicable';
+                  coverageFacts.push({
+                    guarantee_label: tableRow.guarantee || '',
+                    guarantee_key: normalizeKey(tableRow.guarantee || ''),
+                    formula_label: fLabel,
+                    formula_key: fKey,
+                    coverage_status: status,
+                    coverage_amount: null,
+                    franchise: null,
+                    coverage_notes: null,
+                    insurer_label: row.insurer_label,
+                    source_page_number: row.page_number,
+                    pdf_url: row.pdf_url
+                  });
+                });
+              });
+            }
+          });
+          if (coverageFacts.length > 0) console.log(`✅ coverage_facts depuis table_json (stream): ${coverageFacts.length} faits`);
+        }
+      } catch (tjErr) {
+        console.warn('⚠️ Échec table_json fallback (stream):', tjErr);
+      }
     }
 
     // Étape 3c: Pages CG ciblées par le type de garantie détecté dans la question
@@ -1012,10 +1168,16 @@ export const sendMessageToAssistantStream = async (
         const insurerName = cg.insurer_label || 'Assureur inconnu';
         const productName = cg.product_name || cg.type_label || 'Produit';
         
+        // Exclure les mots purement numériques (ex: modèle véhicule "5008") et les surnoms de contrats
+        const policyNicknames = new Set(policies.map((p: any) => (p.name || '').toLowerCase()));
         const keywords = message.toLowerCase()
           .replace(/[^\w\séàèùäöüâêîôû]/g, ' ')
           .split(/\s+/)
-          .filter(w => w.length > 3 && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment'].includes(w));
+          .filter(w => w.length > 3
+            && !['pour', 'avec', 'dans', 'donne', 'quelle', 'comment', 'moi', 'mes', 'mon', 'les', 'des', 'une', 'est', 'que', 'couverte', 'couverts', 'couvert', 'contrat'].includes(w)
+            && !/^\d+$/.test(w) // exclure les mots purement numériques (ex: modèle véhicule "5008")
+            && !policyNicknames.has(w) // exclure les surnoms de contrats
+          );
         
         policies.forEach(p => {
           const formula = (p as any).formula;
@@ -1144,6 +1306,12 @@ export const sendMessageToAssistantStream = async (
 CONTEXTE DISPONIBLE:
 
 ${enrichedContext}
+
+IDENTIFICATION DES CONTRATS:
+- Dans "📋 VOS CONTRATS", le premier champ (avant ":") est un SURNOM donné par l'utilisateur (peut être un modèle de véhicule ex: "5008", "308", "Clio", ou un nom de bien)
+- Quand l'utilisateur mentionne un modèle de véhicule ("ma 5008", "mon SUV", "ma Clio"...), identifie le contrat Automobile dont le surnom correspond
+- Identifie toujours le contrat par son TYPE + ASSUREUR + FORMULE, pas uniquement par son surnom
+- Si le tableau 📊 affiche plusieurs formules (mode fallback), repère la formule de l'utilisateur dans "📋 VOS CONTRATS" et concentre ta réponse sur CETTE formule uniquement
 
 RÈGLES ABSOLUES:
 - Tu AS accès aux documents contractuels via le contexte ci-dessus
