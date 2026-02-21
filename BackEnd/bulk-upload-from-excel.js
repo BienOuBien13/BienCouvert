@@ -1,6 +1,45 @@
 /**
  * Script de chargement en masse depuis un fichier Excel
  * Lit liste_pdf.xlsx, traite les PDFs et met à jour les statuts
+ *
+ * ─────────────────────────────────────────────────────────────
+ * STRUCTURE DU FICHIER EXCEL ATTENDU (liste_pdf.xlsx)
+ * ─────────────────────────────────────────────────────────────
+ * Le fichier Excel doit comporter UN onglet (feuille 1) avec
+ * les colonnes suivantes (noms exacts, sensibles à la casse) :
+ *
+ * Colonne              | Exemple             | Description
+ * ---------------------|---------------------|------------------------------------------
+ * Insurer              | AXA                 | Code assureur (doit exister dans DB)
+ * Insurer_name         | AXA France          | Nom complet de l'assureur
+ * Insurance_type       | SAN                 | Code type d'assurance (doit exister dans DB)
+ * Insurance_type_name  | Santé               | Libellé du type d'assurance
+ * nom fichier cible    | AXA_SAN_001.pdf     | Nom du fichier PDF (dans PDF_FOLDER)
+ * Type                 | CG                  | (optionnel) Type de document – défaut : CG
+ * Détail               | Formule Confort     | (optionnel) Détail / sous-formule
+ * URL                  | https://...         | (optionnel) Lien vers le document en ligne
+ * Status               | téléchargé          | État de la ligne :
+ *                      |                     |   téléchargé → sera traité par ce script
+ *                      |                     |   vectorisé  → déjà traité (ignoré)
+ *                      |                     |   erreur vectorisation → échec à relancer
+ *                      |                     |   fichier manquant → PDF absent sur disque
+ * Date de chargement   | 25/06/2025 14:30    | (auto) Horodatage mis à jour par le script
+ *
+ * Notes :
+ *  - Seules les lignes avec Status = "téléchargé" sont traitées.
+ *  - Le script lit le PDF depuis PDF_FOLDER/nom_fichier_cible.
+ *  - Après traitement, Status passe à "vectorisé" et la date est mise à jour.
+ *  - La version est extraite du nom du fichier (ex: _001.pdf → version "001").
+ *  - Les codes Insurer / Insurance_type doivent correspondre aux codes dans
+ *    les tables `insurers` et `insurance_types` de la base de données.
+ * ─────────────────────────────────────────────────────────────
+ *
+ * Usage :
+ *   node bulk-upload-from-excel.js
+ *
+ * Chemins configurables en haut du fichier :
+ *   EXCEL_FILE  : chemin absolu vers liste_pdf.xlsx
+ *   PDF_FOLDER  : chemin absolu vers le dossier contenant les PDFs
  */
 
 import fs from 'fs';

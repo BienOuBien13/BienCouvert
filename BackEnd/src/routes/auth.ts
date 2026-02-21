@@ -40,33 +40,36 @@ function signToken(user: User) {
  */
 function authMiddleware(req: any, res: any, next: any) {
   // 🔒 Priorité 1: Cookie httpOnly (sécurisé)
-  let token = req.cookies?.token;
+  const cookieToken = req.cookies?.token;
   
   // 🔓 Fallback: Header Authorization (compatibilité ancienne version)
-  if (!token) {
-    const auth = req.headers.authorization;
-    if (auth) {
-      const parts = auth.split(' ');
-      if (parts.length === 2 && parts[0] === 'Bearer') {
-        token = parts[1];
-      }
+  let bearerToken: string | undefined;
+  const auth = req.headers.authorization;
+  if (auth) {
+    const parts = auth.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      bearerToken = parts[1];
     }
   }
-  
-  if (!token) {
+
+  // Try cookie token first, fallback to bearer
+  const tokensToTry = [cookieToken, bearerToken].filter(Boolean) as string[];
+
+  if (tokensToTry.length === 0) {
     return res.status(401).json({ message: 'Missing authentication token' });
   }
-  
-  try {
-    // Vérification de la signature du JWT et extraction du payload
-    const payload = jwt.verify(token, JWT_SECRET) as any;
-    // Injection des données utilisateur dans la requête pour les routes suivantes
-    req.user = payload;
-    next();
-  } catch (e) {
-    // Token invalide ou expiré
-    return res.status(401).json({ message: 'Invalid token' });
+
+  for (const token of tokensToTry) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET) as any;
+      req.user = payload;
+      return next();
+    } catch {
+      // Try next token
+    }
   }
+
+  return res.status(401).json({ message: 'Invalid token' });
 }
 
 /**

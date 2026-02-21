@@ -30,6 +30,40 @@ const STEPS: { id: StepId, label: string, icon: any }[] = [
   { id: 'history', label: 'Antécédents', icon: History },
 ];
 
+const TYPE_CONFIG = {
+  duplicate: { bg: 'bg-amber-50', text: 'text-amber-500', icon: Zap },
+  gap: { bg: 'bg-red-50', text: 'text-red-500', icon: ShieldAlert },
+  saving: { bg: 'bg-emerald-50', text: 'text-emerald-500', icon: Zap },
+};
+
+const FindingCard: React.FC<{ f: OptimizationFinding }> = ({ f }) => {
+  const cfg = TYPE_CONFIG[f.type] ?? TYPE_CONFIG.saving;
+  const IconComponent = cfg.icon;
+  return (
+    <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 space-y-6 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col">
+      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${cfg.bg} ${cfg.text}`}>
+        <IconComponent className="w-7 h-7" />
+      </div>
+      <div className="flex-grow space-y-3">
+        <h4 className="font-black text-slate-900 tracking-tight leading-snug text-xl">{f.title}</h4>
+        <p className="text-xs text-slate-500 font-medium leading-relaxed">{f.description}</p>
+        {f.estimatedSaving != null && f.estimatedSaving > 0 && (
+          <p className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full inline-block">
+            Économie estimée : {f.estimatedSaving} €/an
+          </p>
+        )}
+      </div>
+      <div className="pt-6 border-t border-slate-50">
+        <p className="text-[10px] font-black uppercase text-primary-600 tracking-[0.2em] mb-2 flex items-center gap-2">
+          <Sparkles className="w-3 h-3" /> Recommandation IA
+        </p>
+        <p className="text-sm font-bold text-slate-900 leading-snug bg-slate-50 p-4 rounded-2xl border border-slate-100">{f.recommendation}</p>
+      </div>
+      {f.severity === 'high' && <div className="absolute top-8 right-8 w-2 h-2 rounded-full bg-red-500 animate-ping" />}
+    </div>
+  );
+};
+
 export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfile, user, onFinishSimulation }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [findings, setFindings] = useState<OptimizationFinding[]>([]);
@@ -409,12 +443,13 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
       {/* Results Display */}
       {hasAnalyzed && !isAnalyzing && (
         <div className="space-y-8 animate-slideUp">
+          {/* Header */}
           <div className="flex items-center justify-between px-2 pt-10">
              <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-emerald-500 text-white rounded-[1.2rem] flex items-center justify-center shadow-lg shadow-emerald-200"><CheckCircle className="w-6 h-6" /></div>
                 <div>
                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Votre Bilan Stratégique</h3>
-                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{findings.length} optimisations détectées</p>
+                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{findings.length} point{findings.length > 1 ? 's' : ''} analysé{findings.length > 1 ? 's' : ''}</p>
                 </div>
              </div>
              <button 
@@ -427,29 +462,74 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
              </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-             {findings.map((f, i) => (
-               <div key={i} className="bg-white rounded-[2.5rem] p-8 border border-slate-200 space-y-6 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                    f.type === 'gap' ? 'bg-red-50 text-red-500' : 
-                    f.type === 'duplicate' ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'
-                  }`}>
-                    {f.type === 'gap' ? <ShieldAlert className="w-7 h-7" /> : <Zap className="w-7 h-7" />}
-                  </div>
-                  <div className="flex-grow space-y-3">
-                    <h4 className="font-black text-slate-900 tracking-tight leading-snug text-xl">{f.title}</h4>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed">{f.description}</p>
-                  </div>
-                  <div className="pt-6 border-t border-slate-50">
-                     <p className="text-[10px] font-black uppercase text-primary-600 tracking-[0.2em] mb-2 flex items-center gap-2">
-                       <Sparkles className="w-3 h-3" /> Recommandation IA
-                     </p>
-                     <p className="text-sm font-bold text-slate-900 leading-snug bg-slate-50 p-4 rounded-2xl border border-slate-100">{f.recommendation}</p>
-                  </div>
-                  {f.severity === 'high' && <div className="absolute top-8 right-8 w-2 h-2 rounded-full bg-red-500 animate-ping" />}
-               </div>
-             ))}
+          {/* Summary stats bar */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Doublons', count: findings.filter(f => f.type === 'duplicate').length, color: 'bg-amber-50 border-amber-100 text-amber-700' },
+              { label: 'Manques', count: findings.filter(f => f.type === 'gap').length, color: 'bg-red-50 border-red-100 text-red-700' },
+              { label: 'Économies', count: findings.filter(f => f.type === 'saving').length, color: 'bg-emerald-50 border-emerald-100 text-emerald-700' },
+            ].map(stat => (
+              <div key={stat.label} className={`p-4 rounded-2xl border text-center ${stat.color}`}>
+                <div className="text-2xl font-black">{stat.count}</div>
+                <div className="text-[10px] font-black uppercase tracking-widest mt-1 opacity-70">{stat.label}</div>
+              </div>
+            ))}
           </div>
+
+          {/* Section: Doublons */}
+          {findings.filter(f => f.type === 'duplicate').length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 px-1">
+                <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center"><Zap className="w-4 h-4 text-amber-600" /></div>
+                <h4 className="font-black text-slate-900 uppercase tracking-tight text-sm">Doublons détectés — {findings.filter(f => f.type === 'duplicate').length}</h4>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {findings.filter(f => f.type === 'duplicate').map((f, i) => (
+                  <FindingCard key={`dup-${i}`} f={f} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Section: Garanties manquantes */}
+          {findings.filter(f => f.type === 'gap').length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 px-1">
+                <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center"><ShieldAlert className="w-4 h-4 text-red-600" /></div>
+                <h4 className="font-black text-slate-900 uppercase tracking-tight text-sm">Garanties manquantes — {findings.filter(f => f.type === 'gap').length}</h4>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {findings.filter(f => f.type === 'gap').map((f, i) => (
+                  <FindingCard key={`gap-${i}`} f={f} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Section: Économies & Propositions */}
+          {findings.filter(f => f.type === 'saving').length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 px-1">
+                <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center"><Sparkles className="w-4 h-4 text-emerald-600" /></div>
+                <h4 className="font-black text-slate-900 uppercase tracking-tight text-sm">Propositions d'optimisation — {findings.filter(f => f.type === 'saving').length}</h4>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {findings.filter(f => f.type === 'saving').map((f, i) => (
+                  <FindingCard key={`sav-${i}`} f={f} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* No findings */}
+          {findings.length === 0 && (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-[2rem] p-12 text-center">
+              <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+              <h4 className="text-xl font-black text-slate-900">Portefeuille optimal</h4>
+              <p className="text-sm text-slate-500 mt-2">Aucun doublon ou manque critique détecté.</p>
+            </div>
+          )}
+
 
           <div className="bg-slate-900 rounded-[3rem] p-12 text-white text-center space-y-10 shadow-3xl mt-12 relative overflow-hidden group">
              <div className="space-y-4 relative z-10">
