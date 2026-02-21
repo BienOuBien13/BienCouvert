@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle } from 'lucide-react';
+import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -49,7 +49,7 @@ interface AddPolicyPageProps {
 
 const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
-  const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'configure'>('selectType');
+  const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'customConfig' | 'configure'>('selectType');
   
   // Master data
   const [insuranceTypes, setInsuranceTypes] = useState<InsuranceType[]>([]);
@@ -66,6 +66,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   // Formulaire personnalisé
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [contractVersion, setContractVersion] = useState('001');
+  const [docType, setDocType] = useState('CG');
+  const [contractUrl, setContractUrl] = useState('');
   
   // État général
   const [loading, setLoading] = useState(false);
@@ -124,7 +127,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     if (mode === 'standard') {
       await searchCG(selectedType!.code, insurer.code, insurer);
     } else {
-      setStep('configure');
+      // Custom mode → formulaire de détails de la CG
+      setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
+      setStep('customConfig');
     }
   };
 
@@ -171,6 +176,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       setError('Veuillez sélectionner un fichier PDF');
       return;
     }
+    if (!policyName.trim()) {
+      setError('Veuillez saisir un nom de contrat');
+      return;
+    }
 
     setIsUploading(true);
     setError('');
@@ -184,6 +193,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       formData.append('insurance_type_code', selectedType.code);
       formData.append('insurer_code', selectedInsurer.code);
       formData.append('user_email', userEmail);
+      formData.append('contract_name', policyName.trim());
+      formData.append('contract_version', contractVersion || '001');
+      formData.append('doc_type', docType || 'CG');
+      if (contractUrl.trim()) formData.append('contract_url', contractUrl.trim());
 
       const response = await fetch(`${API_URL}/api/cg/user/upload`, {
         method: 'POST',
@@ -207,7 +220,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         insurance_type_name: data.insurance_type_name
       });
 
-      setPolicyName(`${data.insurance_type_name} - ${data.insurer_name}`);
+      // Avancer vers la sélection de formule
+      setStep('configure');
       
     } catch (err: any) {
       console.error('Erreur upload:', err);
@@ -302,6 +316,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           <p className="text-sm text-gray-600 mt-1">
             {step === 'selectType' && 'Choisissez le type d\'assurance'}
             {step === 'selectInsurer' && 'Sélectionnez votre assureur'}
+            {step === 'customConfig' && 'Renseignez les informations du document'}
             {step === 'configure' && 'Configurez votre contrat'}
           </p>
         </div>
@@ -346,9 +361,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         </div>
       )}
 
-      {/* Étape 1: Sélection du type d'assurance — liste compacte */}
+      {/* Étape 1: Sélection du type d'assurance — grille d'icônes */}
       {step === 'selectType' && (
-        <div className="space-y-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {insuranceTypes.map(type => {
             const IconComponent = getIcon(type.code);
             const isSelected = selectedType?.code === type.code;
@@ -356,22 +371,23 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               <button
                 key={type.code}
                 onClick={() => handleSelectType(type)}
-                className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all group ${
+                className={`flex flex-col items-center gap-2 p-5 rounded-xl border-2 transition-all ${
                   isSelected
-                    ? 'border-blue-500 bg-blue-50 shadow'
-                    : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm'
+                    ? 'border-blue-500 bg-blue-50 shadow-md'
+                    : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm hover:bg-gray-50'
                 }`}
               >
                 <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-white"
                   style={{ backgroundColor: type.color }}
                 >
-                  <IconComponent className="w-5 h-5" />
+                  <IconComponent className="w-6 h-6" />
                 </div>
-                <span className={`font-semibold text-sm flex-grow ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                <span className={`text-xs font-medium text-center leading-tight ${
+                  isSelected ? 'text-blue-700' : 'text-gray-700'
+                }`}>
                   {type.labelFr}
                 </span>
-                <svg className={`w-4 h-4 flex-shrink-0 transition-transform ${isSelected ? 'text-blue-500 translate-x-0.5' : 'text-gray-300 group-hover:text-blue-400 group-hover:translate-x-0.5'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </button>
             );
           })}
@@ -387,26 +403,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           >
             ← Changer le type d'assurance
           </button>
-          
-          {mode === 'custom' && !cgData && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-              <label className="block text-sm font-medium mb-2">Document PDF des conditions générales</label>
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              />
-            </div>
-          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {availableInsurers.map(insurer => (
               <button
                 key={insurer.code}
                 onClick={() => handleSelectInsurer(insurer)}
-                disabled={mode === 'custom' && !pdfFile}
-                className="p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white"
                 style={{ borderColor: selectedInsurer?.code === insurer.code ? insurer.color : undefined }}
               >
                 <div className="flex items-center gap-3">
@@ -424,22 +427,108 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               </button>
             ))}
           </div>
+        </div>
+      )}
 
-          {mode === 'custom' && pdfFile && !cgData && (
-            <button
-              onClick={uploadCustomCG}
-              disabled={isUploading}
-              className="w-full mt-4 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
-            >
-              {isUploading ? (
-                <>⏳ Analyse en cours...</>
-              ) : (
-                <>
-                  <Upload className="w-5 h-5" />
-                  Analyser le document
-                </>
-              )}
-            </button>
+      {/* Étape 2b (custom seulement): Informations du document CG */}
+      {step === 'customConfig' && mode === 'custom' && (
+        <div className="space-y-5">
+          <button
+            onClick={() => setStep('selectInsurer')}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            ← Changer l'assureur
+          </button>
+
+          {/* Nom du contrat */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Nom du contrat *
+            </label>
+            <input
+              type="text"
+              value={policyName}
+              onChange={(e) => setPolicyName(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Ex: Assurance auto MAAF Tous Risques"
+            />
+          </div>
+
+          {/* Version + Type */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Version</label>
+              <input
+                type="text"
+                value={contractVersion}
+                onChange={(e) => setContractVersion(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="001"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Type de document</label>
+              <select
+                value={docType}
+                onChange={(e) => setDocType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="CG">Conditions Générales</option>
+                <option value="CP">Conditions Particulières</option>
+                <option value="IPID">IPID</option>
+                <option value="OTHER">Autre</option>
+              </select>
+            </div>
+          </div>
+
+          {/* URL optionnel */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <LinkIcon className="w-4 h-4 inline mr-1" />
+              URL du document (optionnel)
+            </label>
+            <input
+              type="url"
+              value={contractUrl}
+              onChange={(e) => setContractUrl(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="https://..."
+            />
+          </div>
+
+          {/* PDF */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <FileText className="w-4 h-4 inline mr-1" />
+              Fichier PDF *
+            </label>
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+            {pdfFile && (
+              <p className="text-xs text-gray-500 mt-1">📎 {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} Mo)</p>
+            )}
+          </div>
+
+          <button
+            onClick={uploadCustomCG}
+            disabled={isUploading || !pdfFile || !policyName.trim()}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isUploading ? (
+              <><span className="animate-spin">⏳</span> Analyse et vectorisation en cours...</>
+            ) : (
+              <><Upload className="w-5 h-5" /> Analyser et vectoriser</>  
+            )}
+          </button>
+
+          {isUploading && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+              Le document est en cours d'analyse. Les formules et garanties seront extraites automatiquement. Cela peut prendre quelques instants.
+            </div>
           )}
         </div>
       )}
@@ -449,7 +538,11 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         <div className="space-y-6">
           <button
             onClick={() => {
-              setStep('selectInsurer');
+              if (mode === 'custom') {
+                setStep('customConfig');
+              } else {
+                setStep('selectInsurer');
+              }
               setCgData(null);
               setSelectedFormule('');
               setSelectedOptions([]);
@@ -458,12 +551,6 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           >
             ← Changer l'assureur
           </button>
-
-          {cgData.resume_court && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-900">{cgData.resume_court}</p>
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-medium mb-2">Nom du contrat</label>

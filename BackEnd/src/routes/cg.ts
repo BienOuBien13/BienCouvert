@@ -110,7 +110,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
 // -----------------------------------------------------------------------------
 router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
-    const { insurance_type_code, insurer_code, user_email } = req.body;
+    const { insurance_type_code, insurer_code, user_email, contract_name, contract_version, doc_type, contract_url } = req.body;
     const file = req.file;
 
     if (!insurance_type_code || !insurer_code || !user_email) {
@@ -154,6 +154,8 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         insurance_type_code,
         version,
         type,
+        detail,
+        url,
         owner,
         target_filename,
         status,
@@ -161,13 +163,15 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         embedding,
         metadata,
         pdf_base64
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING id`,
       [
         insurer_code,
         insurance_type_code,
-        '001',
-        'CG',
+        contract_version || '001',
+        doc_type || 'CG',
+        contract_name || null,
+        contract_url || null,
         user_email,
         file.originalname,
         'active',
