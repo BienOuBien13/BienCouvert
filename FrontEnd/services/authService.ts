@@ -27,16 +27,29 @@ export const fetchCsrfToken = async () => {
   }
 };
 
+// Helpers to emit/listen session-expired event (for App.tsx to react)
+export const onSessionExpired = (handler: () => void) => {
+  window.addEventListener('auth:session-expired', handler, { once: true });
+};
+const emitSessionExpired = () => {
+  window.dispatchEvent(new Event('auth:session-expired'));
+};
+
 /**
- * Effectue une requête authentifiée vers le backend
+ * Effectue une requête authentifiée vers le backend.
+ * - Rafraîchit toujours le CSRF token avant les requêtes mutantes
+ * - En cas de 401, tente un renouvellement JWT automatique (une seule fois)
+ * - En cas d'échec du renouvellement, nettoie la session et émet 'auth:session-expired'
  */
-const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+const apiFetch = async (endpoint: string, options: RequestInit = {}, isRetry = false): Promise<any> => {
   const token = localStorage.getItem(TOKEN_KEY);
   const isMutating = options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase());
-  // If mutating and no CSRF token, fetch it
-  if (isMutating && !csrfToken) {
+
+  // Toujours rafraîchir le CSRF pour les requêtes mutantes (cookie + header en sync)
+  if (isMutating) {
     await fetchCsrfToken();
   }
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(token && { Authorization: `Bearer ${token}` }),
@@ -47,8 +60,43 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
   const response = await fetch(`${API_URL}/api${endpoint}`, {
     ...options,
     headers,
-    credentials: 'include', // Always send cookies (for CSRF)
+    credentials: 'include',
   });
+
+  if (response.status === 401 && !isRetry) {
+    // Tentative de renouvellement automatique du JWT
+    try {
+      const renewHeaders: HeadersInit = {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      };
+      // CSRF frais pour le POST /renew
+      await fetchCsrfToken();
+      if (csrfToken) (renewHeaders as any)['X-CSRF-Token'] = csrfToken;
+
+      const renewRes = await fetch(`${API_URL}/api/auth/renew`, {
+        method: 'POST',
+        headers: renewHeaders,
+        credentials: 'include',
+      });
+
+      if (renewRes.ok) {
+        const renewData = await renewRes.json();
+        localStorage.setItem(TOKEN_KEY, renewData.token);
+        if (renewData.user) localStorage.setItem(USER_KEY, JSON.stringify(renewData.user));
+        // Réessayer la requête originale avec le nouveau token
+        return apiFetch(endpoint, options, true);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Renouvellement échoué → session expirée
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    emitSessionExpired();
+    throw new Error('Session expirée. Veuillez vous reconnecter.');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Network error' }));
@@ -172,5 +220,70 @@ export const authService = {
    */
   getToken: (): string | null => {
     return localStorage.getItem(TOKEN_KEY);
+  },
+
+  /**
+   * Renouvelle le JWT auprès du backend (token expiré mais utilisateur connu)
+   * Retourne l'utilisateur mis à jour ou null si renouvellement impossible
+   */
+  renewToken: async (): Promise<User | null> => {
+    try {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return null;
+
+      await fetchCsrfToken();
+      const res = await fetch(`${API_URL}/api/auth/renew`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        },
+      });
+
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      if (data.token && data.user) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+        return data.user;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Valide la session courante : tente GET /me, si 401 tente un renouvellement.
+   * Retourne true si la session est valide (ou réparée), false si l'utilisateur doit se reconnecter.
+   */
+  validateSession: async (): Promise<boolean> => {
+    try {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return false;
+
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        credentials: 'include',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+        return true;
+      }
+
+      if (res.status === 401) {
+        const renewed = await authService.renewToken();
+        return renewed !== null;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
   },
 };

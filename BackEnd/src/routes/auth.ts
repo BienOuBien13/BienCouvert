@@ -491,6 +491,48 @@ router.put('/me', authMiddleware, async (req: any, res) => {
 });
 
 /**
+ * Route POST /api/auth/renew
+ * Renouvelle le token JWT sans re-saisir les identifiants.
+ * Accepte l'ancien token depuis le cookie httpOnly OU le header Authorization.
+ * Retourne un nouveau token (cookie + body) signé avec le JWT_SECRET actuel.
+ * Utile quand le secret a été changé ou que le token approche de l'expiration.
+ */
+router.post('/renew', authMiddleware, async (req: any, res: any) => {
+  try {
+    const users = await storage.readUsers();
+    const user = users.find((x: any) => x.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const newToken = signToken(user);
+
+    // Renouveler le cookie httpOnly
+    res.cookie('token', newToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+
+    res.json({
+      token: newToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profile: user.profile || {},
+        isAdmin: user.isAdmin || false,
+        geminiAiConsent: user.geminiAiConsent || false
+      }
+    });
+  } catch (err) {
+    console.error('POST /renew error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
  * Route GET /api/auth/me/analysis-profile (protégée)
  * Retourne le profil de profilage détaillé de l'utilisateur (questionnaire AnalysisView).
  */

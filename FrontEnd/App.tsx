@@ -53,6 +53,23 @@ function App() {
     setIsLoading(false);
   }, []);
 
+  // Session expirée : déconnecter proprement et afficher un message
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      authService.logout();
+      setUser(null);
+      setPolicies([]);
+      setMessages([]);
+      setShowAuth(false);
+      alert('Votre session a expiré. Veuillez vous reconnecter.');
+    };
+    // Listener permanent (pas once:true) car App.tsx ne se démonte pas
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener('auth:session-expired', handleSessionExpired);
+    };
+  }, []);
+
   // Scroll to top when view changes
   useEffect(() => {
     window.scrollTo(0, 0);
