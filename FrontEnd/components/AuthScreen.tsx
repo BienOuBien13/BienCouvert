@@ -51,12 +51,11 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
         const user = await authService.register(email, password);
         onLogin(user);
       } else if (mode === 'forgot') {
-        try {
-          await authService.resetPassword(email, "temp_check"); 
-          setMode('email-sent');
-        } catch (e) {
+        const result = await authService.forgotPassword(email);
+        if (!result.exists) {
           throw new Error("Aucun compte trouvé avec cet email.");
         }
+        setMode('email-sent');
       } else if (mode === 'reset') {
         if (password !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas.");
         const pwdWarn = validatePassword(password);

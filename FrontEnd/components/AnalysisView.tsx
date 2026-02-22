@@ -680,9 +680,9 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
         <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/10 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/2" />
       </div>
 
-      </>}
+      </>)}
 
-      {/* Results Display */}
+      {/* Results Display */
       {phase === 'results' && (
         <div className="space-y-8 animate-slideUp">
           {/* Header */}

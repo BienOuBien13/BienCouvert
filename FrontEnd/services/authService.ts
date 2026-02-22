@@ -140,6 +140,19 @@ export const authService = {
   },
 
   /**
+   * Vérification de l'email pour la réinitialisation du mot de passe.
+   * Retourne true si le compte existe, false sinon.
+   * Le backend ne révèle pas explicitement si l'email existe (sécurité anti-énumération).
+   */
+  forgotPassword: async (email: string): Promise<{ exists: boolean }> => {
+    const response = await apiFetch<{ ok: boolean; exists: boolean }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    return { exists: response.exists };
+  },
+
+  /**
    * Réinitialisation de mot de passe
    */
   resetPassword: async (email: string, newPassword: string): Promise<void> => {

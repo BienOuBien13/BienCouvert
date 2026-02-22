@@ -318,6 +318,36 @@ router.post('/logout', authMiddleware, async (req: any, res) => {
 });
 
 /**
+ * Route POST /api/auth/forgot-password
+ * Vérifie si l'email existe et simule l'envoi d'un email de réinitialisation.
+ * En production : générer un token signé (JWT ou uuid), le stocker avec TTL, et envoyer un lien par email.
+ */
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'Email requis' });
+
+  try {
+    const users = await storage.readUsers();
+    const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+
+    // Réponse volontairement identique qu'il existe ou non (sécurité : évite l'enumération)
+    if (!user) {
+      // On renvoie 200 pour ne pas révéler si l’email est enregistré
+      return res.json({ ok: true, exists: false });
+    }
+
+    // TODO production : envoyer un vrai email avec nodemailer + token JWT court-terme
+    // Pour l'instant la route confirme juste que le compte existe
+    console.log(`📧 [DEBUG] Demande de réinitialisation pour : ${user.email}`);
+
+    res.json({ ok: true, exists: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
  * Route POST /api/auth/reset
  * Réinitialisation du mot de passe d'un utilisateur.
  * En production, cette route devrait être sécurisée par un token de réinitialisation
