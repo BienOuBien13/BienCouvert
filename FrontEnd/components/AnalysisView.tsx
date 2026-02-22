@@ -682,7 +682,7 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
 
       </>)}
 
-      {/* Results Display */
+      {/* Results Display */}
       {phase === 'results' && (
         <div className="space-y-8 animate-slideUp">
           {/* Header */}

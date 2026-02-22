@@ -20,7 +20,6 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [acceptedAiDisclaimer, setAcceptedAiDisclaimer] = useState(false);
   const [passwordWarning, setPasswordWarning] = useState('');
 
   // Validation mot de passe : min 6, 1 majuscule, 1 spécial
@@ -45,7 +44,6 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
         onLogin(user);
       } else if (mode === 'register') {
         if (!acceptedTerms) throw new Error("Veuillez accepter les CGU et la politique de confidentialité.");
-        if (!acceptedAiDisclaimer) throw new Error("Veuillez accepter le disclaimer IA.");
         const pwdWarn = validatePassword(password);
         if (pwdWarn) throw new Error("Mot de passe invalide : " + pwdWarn);
         const user = await authService.register(email, password);
@@ -205,22 +203,11 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
                   </label>
                 </div>
                 
-                <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 p-3 rounded-lg">
-                  <input 
-                    type="checkbox" 
-                    id="ai-disclaimer"
-                    checked={acceptedAiDisclaimer}
-                    onChange={(e) => setAcceptedAiDisclaimer(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 text-primary-600 border-orange-300 rounded focus:ring-primary-500"
-                  />
-                  <label htmlFor="ai-disclaimer" className="text-xs text-orange-900 leading-relaxed">
-                    <strong>⚠️ Important :</strong> Je comprends que les analyses et recommandations générées par l'intelligence artificielle sont fournies à titre informatif uniquement et ne constituent pas des conseils professionnels en assurance. Ces résultats ne sont pas vérifiés par un expert et peuvent contenir des erreurs. Je consulterai un professionnel agréé pour toute décision importante.
-                  </label>
-                </div>
+
               </div>
             )}
             
-            <button type="submit" disabled={isLoading || (mode === 'register' && (!acceptedTerms || !acceptedAiDisclaimer))} className="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-lg text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-lg shadow-primary-900/10">
+            <button type="submit" disabled={isLoading || (mode === 'register' && !acceptedTerms)} className="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-lg text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-lg shadow-primary-900/10">
               {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : <>{mode === 'login' ? 'Se connecter' : "S'inscrire"} <ArrowRight className="h-4 w-4" /></>}
             </button>
           </div>
