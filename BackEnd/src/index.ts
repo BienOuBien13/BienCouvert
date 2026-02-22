@@ -25,6 +25,19 @@ import { initAuditTable } from './services/auditService';
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv.config();
 
+// -----------------------------------------------------------------------------
+// Vérification des variables d'environnement critiques
+// Le serveur s'arrête immédiatement si une variable obligatoire est manquante.
+// -----------------------------------------------------------------------------
+const REQUIRED_ENV = ['JWT_SECRET', 'CSRF_SECRET'];
+REQUIRED_ENV.forEach(key => {
+  if (!process.env[key]) {
+    console.error(`❌ Variable d'environnement obligatoire manquante : ${key}`);
+    console.error('   Définissez-la dans le fichier .env ou dans les variables de votre environnement.');
+    process.exit(1);
+  }
+});
+
 const app = express();
 
 // Correction proxy pour express-rate-limit derrière nginx/docker
@@ -151,7 +164,27 @@ const apiLimiter = rateLimit({
   // Exclure les endpoints de polling de statut et les endpoints de profil utilisateur
   skip: (req) =>
     /\/api\/cg\/user\/status\//.test(req.originalUrl) ||
-    /\/api\/auth\/me/.test(req.originalUrl)
+    /\/api\/auth\/me/.test(req.originalUrl) ||
+    /\/api\/policies\/central-cg\/[^/]+\/vectorization-status/.test(req.originalUrl) ||
+    /\/api\/masterdata\//.test(req.originalUrl)
+});
+
+// Limiter strict pour les routes IA (prévention des coûts API Gemini incontrôlés)
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,  // 1 minute
+  max: 10,              // Max 10 requêtes IA par minute par IP
+  message: 'Limite d\'analyse IA atteinte, veuillez réessayer dans 1 minute.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Limiter dédié pour masterdata (données de référence, appelées fréquemment)
+const masterdataLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500,                  // 500 req/15min par IP (données statiques)
+  message: 'Trop de requêtes masterdata, veuillez réessayer plus tard.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Application des middlewares
@@ -190,8 +223,8 @@ app.get('/api/csrf-token', (req, res) => {
 // 🔒 authLimiter est appliqué directement sur les routes /login et /register (dans auth.ts)
 app.use('/api/auth', doubleCsrfProtection, authRoutes);                     // 🔒 Auth avec CSRF
 app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // 🔒 Policies avec CSRF
-app.use('/api/ai', doubleCsrfProtection, aiRoutes);                         // 🔒 AI avec CSRF
-app.use('/api/masterdata', masterDataRoutes);                               // 📊 Master Data (lecture seule, pas de CSRF)
+app.use('/api/ai', aiLimiter, doubleCsrfProtection, aiRoutes);              // 🔒 AI avec CSRF + rate limit strict
+app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                // 📊 Master Data (lecture seule, pas de CSRF)
 app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // 📄 Conditions Générales avec CSRF
 
 // -----------------------------------------------------------------------------

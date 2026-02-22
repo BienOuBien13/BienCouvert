@@ -22,6 +22,24 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isSearchingLink, setIsSearchingLink] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [inlineEditId, setInlineEditId] = useState<string | null>(null);
+  const [inlineEditSummary, setInlineEditSummary] = useState('');
+  const [inlineEditFormula, setInlineEditFormula] = useState('');
+
+  const openInlineEdit = (policy: Policy) => {
+    setInlineEditId(policy.id);
+    setInlineEditSummary(policy.summary || '');
+    setInlineEditFormula(policy.formula || '');
+  };
+
+  const closeInlineEdit = () => setInlineEditId(null);
+
+  const saveInlineEdit = (policy: Policy) => {
+    if (onUpdatePolicy) {
+      onUpdatePolicy({ ...policy, summary: inlineEditSummary, formula: inlineEditFormula });
+    }
+    closeInlineEdit();
+  };
 
   const getPolicyStyle = (type: PolicyType) => {
     switch (type) {
@@ -199,9 +217,54 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                          </button>
                        )}
                        <div className="flex gap-2">
-                         <button onClick={() => onEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>
+                         <button onClick={() => openInlineEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>
                          <button onClick={() => onDelete(policy.id)} className="flex-1 py-4 bg-white border border-red-100 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all">Supprimer</button>
                        </div>
+                       {inlineEditId === policy.id && (
+                         <div className="bg-slate-50 border border-slate-200 rounded-[2rem] p-6 space-y-4 animate-fadeIn">
+                           <div className="flex items-center justify-between">
+                             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-700">Modification rapide</h4>
+                             <button onClick={closeInlineEdit} className="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+                               <X className="w-4 h-4 text-slate-500" />
+                             </button>
+                           </div>
+                           <div className="space-y-3">
+                             <div>
+                               <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Formule souscrite</label>
+                               <input
+                                 value={inlineEditFormula}
+                                 onChange={e => setInlineEditFormula(e.target.value)}
+                                 placeholder="Ex : Formule Tout Risque"
+                                 className="w-full mt-1.5 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-300"
+                               />
+                             </div>
+                             <div>
+                               <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Description / Résumé</label>
+                               <textarea
+                                 value={inlineEditSummary}
+                                 onChange={e => setInlineEditSummary(e.target.value)}
+                                 rows={3}
+                                 placeholder="Description courte du contrat..."
+                                 className="w-full mt-1.5 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+                               />
+                             </div>
+                           </div>
+                           <div className="flex gap-2">
+                             <button
+                               onClick={() => saveInlineEdit(policy)}
+                               className="flex-1 py-3.5 bg-primary-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-700 transition-all"
+                             >
+                               Enregistrer
+                             </button>
+                             <button
+                               onClick={closeInlineEdit}
+                               className="px-6 py-3.5 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                             >
+                               Annuler
+                             </button>
+                           </div>
+                         </div>
+                       )}
                     </div>
                   </div>
                 </div>

@@ -3,13 +3,33 @@ import { masterDataService } from '../services/masterDataService';
 
 const router = Router();
 
+// Cache en mémoire pour les données statiques (5 minutes TTL)
+const cache: Record<string, { data: any; expiresAt: number }> = {};
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCached(key: string) {
+  const entry = cache[key];
+  if (entry && Date.now() < entry.expiresAt) return entry.data;
+  return null;
+}
+function setCached(key: string, data: any) {
+  cache[key] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+}
+
 /**
  * Route GET /api/masterdata/insurance-types
  * Récupère la liste de tous les types d'assurances disponibles
  */
 router.get('/insurance-types', async (req, res) => {
   try {
+    const cached = getCached('insurance-types');
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached);
+    }
     const types = await masterDataService.getInsuranceTypes();
+    setCached('insurance-types', types);
+    res.setHeader('X-Cache', 'MISS');
     res.json(types);
   } catch (err) {
     console.error('Erreur GET /insurance-types:', err);
@@ -40,7 +60,14 @@ router.get('/insurance-types/:code', async (req, res) => {
  */
 router.get('/insurers', async (req, res) => {
   try {
+    const cached = getCached('insurers');
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached);
+    }
     const insurers = await masterDataService.getInsurers();
+    setCached('insurers', insurers);
+    res.setHeader('X-Cache', 'MISS');
     res.json(insurers);
   } catch (err) {
     console.error('Erreur GET /insurers:', err);

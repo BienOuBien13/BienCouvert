@@ -13,7 +13,17 @@ import { vectorizeCgByPages, requestStopVectorization } from '../services/pageVe
 //   de `fileData` encodé en base64 (utile pour l'API depuis le client).
 // -----------------------------------------------------------------------------
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers PDF sont acceptés (MIME: application/pdf)'));
+    }
+  }
+});
 const router = Router();
 
 /**

@@ -23,6 +23,23 @@ const SLOTS = [
 
 export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies }) => {
   const [submitted, setSubmitted] = useState(false);
+
+  // Bannière réseau en construction — toujours visible en haut
+  const NetworkBanner = () => (
+    <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 flex items-start gap-4 animate-fadeIn">
+      <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+        <Headset className="w-5 h-5 text-amber-600" />
+      </div>
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-widest text-amber-700 mb-1">Réseau d'experts en cours de construction</p>
+        <p className="text-sm text-amber-800 font-medium leading-relaxed">
+          Notre réseau de courtiers indépendants certifiés se déploie progressivement.
+          Vous pouvez dès maintenant enregistrer une demande de rappel — un expert vous contactera
+          dès la mise en service complète du réseau dans votre zone.
+        </p>
+      </div>
+    </div>
+  );
   const [phone, setPhone] = useState('');
   const [selectedDay, setSelectedDay] = useState('today');
   const [selectedSlot, setSelectedSlot] = useState('afternoon');
@@ -66,6 +83,9 @@ export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies 
 
   return (
     <div className="max-w-5xl mx-auto space-y-12 pb-24 px-4 animate-fadeIn">
+      {/* Bannière réseau en cours de construction */}
+      <NetworkBanner />
+
       {/* Hero Header */}
       <div className="bg-slate-900 rounded-[3rem] p-10 md:p-16 text-white relative overflow-hidden shadow-2xl">
         <div className="relative z-10 max-w-2xl">

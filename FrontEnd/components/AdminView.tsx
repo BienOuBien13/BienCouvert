@@ -171,7 +171,7 @@ export const AdminView: React.FC = () => {
           } catch (e) {
             console.warn('⚠️ Erreur polling statut vectorisation:', e);
           }
-        }, 3000);
+        }, 8000); // poll toutes les 8s pour éviter le rate-limiting
       }
 
       const data = await storageService.getCentralCgRepo();

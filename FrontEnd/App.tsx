@@ -416,6 +416,7 @@ function App() {
           <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">BienCouvert</span>
         </div>
         <div className="flex items-center gap-2">
+           {user?.isAdmin && (
            <button 
              onClick={() => setActiveView('admin')} 
              className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'admin' ? 'bg-primary-600 text-white border-primary-600 shadow-primary-200' : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300 hover:text-primary-600'}`}
@@ -424,6 +425,7 @@ function App() {
              <Database className="w-4 h-4" />
              <span className="text-sm font-bold hidden sm:inline">Admin</span>
            </button>
+           )}
            <button onClick={() => setActiveView('profile')} className={`p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
              <Settings className="w-5 h-5" />
            </button>
