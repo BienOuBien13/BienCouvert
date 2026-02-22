@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts } from '../services/geminiService';
+import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts, getCoverageAnalysis } from '../services/geminiService';
 import { storage } from '../storage';
 import { query as dbQuery } from '../db';
 
@@ -154,6 +154,19 @@ router.post('/generate-report', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Report generation error' });
+  }
+});
+
+// Endpoint analyse détaillée des garanties d'une police spécifique
+router.post('/coverage-details', async (req, res) => {
+  const { policy } = req.body;
+  if (!policy) return res.status(400).json({ message: 'Missing policy' });
+  try {
+    const result = await getCoverageAnalysis(policy);
+    res.json(result);
+  } catch (e) {
+    console.error('coverage-details error:', e);
+    res.status(500).json({ message: 'Coverage analysis error' });
   }
 });
 

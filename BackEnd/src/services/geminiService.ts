@@ -220,25 +220,50 @@ export const detectDuplicates = async (policies: Policy[], profile: any = {}): P
     enrichedPolicies.push(enrichedContext);
   }
 
-  const prompt = `Analyse ces contrats d'assurance en fonction du profil utilisateur et identifie les optimisations possibles (doublons, gaps de couverture, économies potentielles).
+  const contractList = policies.map(p => `- ID ${p.id}: "${p.name}" chez ${p.provider || (p as any).insurer}, type ${p.type}, formule: ${p.coverageDetail || (p as any).formula || 'Non spécifiée'}, prime annuelle: ${p.annualPremium ? p.annualPremium + '€' : 'inconnue'}`).join('\n');
 
-PROFIL UTILISATEUR : ${JSON.stringify(profile)}
+  const prompt = `Tu es un expert en optimisation de portefeuilles d'assurance. Analyse ces ${policies.length} contrats d'assurance et le profil détaillé de l'utilisateur.
 
-CRITÈRES D'ANALYSE PRIORITAIRES :
-1. ADÉQUATION FAMILLE : Vérifie si les âges des membres justifient des garanties santé spécifiques.
-2. HABITAT & RISQUES : Analyse la présence de piscine, jardin ou l'année de construction.
-3. LOCALISATION : Utilise le code postal pour évaluer les risques géographiques.
-4. ANIMAUX : Vérifie si une mutuelle santé animale ou RC adaptée existe.
-5. DOUBLONS & MANQUES : Détecte les chevauchements et manques critiques en analysant les clauses exactes.
+CONTRATS ANALYSÉS :
+${contractList}
 
-Retourne un tableau JSON d'optimisations avec les champs:
-- title: titre court
-- description: explication détaillée avec citations des clauses
+PROFIL UTILISATEUR COMPLET : ${JSON.stringify(profile)}
+
+EFFECTUE UNE ANALYSE APPROFONDIE sur 3 axes :
+
+## AXE 1 — DOUBLONS DE GARANTIES (type: 'duplicate')
+- Identifie les garanties présentes dans plusieurs contrats (RC, protection juridique, assistance, vol, etc.)
+- Nomme précisément les contrats et garanties qui se chevauchent
+- Calcule l'économie si l'une des couvertures était supprimée/réduite
+- Exemple: RC auto déjà couverte par la carte bancaire Visa Premier
+
+## AXE 2 — GARANTIES MANQUANTES (type: 'gap')
+- Identifie les risques non couverts au regard du profil (piscine, jardin, animaux, revenu, âge, sport, télétravail)
+- Prioritise par criticité : décès sans prévoyance, logement sans assurance, etc.
+- Propose un contrat spécifique à ajouter ou une formule à monter en gamme
+- Nomme l'assureur et la formule recommandée si possible
+
+## AXE 3 — ÉCONOMIES & OPTIMISATIONS (type: 'saving')
+- Propose des changements de formule (montée/descente) avec gain estimé
+- Identifie les regroupements multi-contrats chez le même assureur (remise fidélité)
+- Suggère des options inutiles à supprimer selon le profil
+- Calcule un gain annuel réaliste basé sur les primes connues
+
+RÈGLES IMPORTANTES :
+- Chaque finding doit être ACTIONNABLE et SPÉCIFIQUE (pas générique)
+- Les estimatedSaving doivent être des nombres réalistes (fourchette 50-2000€/an)
+- Pour chaque gap, indique si on doit AJOUTER un contrat ou MODIFIER une formule existante
+- Minimum 3 findings, maximum 12
+
+Retourne UNIQUEMENT un tableau JSON valide d'optimisations avec les champs:
+- title: titre court et percutant (ex: "Double protection juridique détectée")
+- description: explication précise avec noms des contrats concernés et justification
 - type: 'duplicate' | 'gap' | 'saving'
 - severity: 'low' | 'medium' | 'high'
-- involvedPolicies: tableau d'IDs de polices concernées
-- savingsPotential: montant économisé estimé (nombre)
-- recommendation: recommandation d'action`;
+- involvedPolicies: tableau d'IDs (strings) des polices concernées
+- estimatedSaving: gain annuel estimé en euros (nombre entier, 0 si pas applicable)
+- recommendation: action concrète à faire ("Supprimer l'option X du contrat Y", "Ajouter une assurance Z", "Changer la formule de ... vers ...")
+- action: 'remove_duplicate' | 'add_contract' | 'change_formula' | 'remove_option' | 'group_contracts' | 'info'`;
 
   const parts: any[] = [{ text: prompt }];
   enrichedPolicies.forEach(enrichedText => {
@@ -263,6 +288,126 @@ Retourne un tableau JSON d'optimisations avec les champs:
     return [];
   }
 };
+
+/**
+ * Analyse une police d'assurance et retourne une structure détaillée des garanties,
+ * exclusions, forces/faiblesses, et formules alternatives.
+ */
+export const getCoverageAnalysis = async (policy: any): Promise<any> => {
+  const ai = getAiClient();
+  const formulaName = policy.coverageDetail || policy.formula || policy.coverage || 'Formule souscrite';
+  const insurer = policy.provider || policy.insurer || 'Assureur';
+  const type = policy.type || 'Assurance';
+  const summary = policy.summary || '';
+
+  // Fallback sans IA
+  if (!ai) {
+    return buildFallbackCoverage(formulaName, type, summary);
+  }
+
+  // Tenter de récupérer du contexte RAG
+  let ragContext = '';
+  try {
+    const storage = require('../storage').storage;
+    const questionEmbedding = await generateEmbedding(
+      `Garanties incluses formule ${formulaName} assurance ${type} ${insurer}`
+    );
+    if (questionEmbedding) {
+      const chunks = await storage.searchCentralCg(questionEmbedding, [insurer], 4);
+      if (chunks.length > 0) {
+        ragContext = chunks.map((c: any) => c.content_text?.substring(0, 800)).join('\n\n---\n\n');
+        console.log(`✅ RAG: ${chunks.length} chunks pour analyse couverture`);
+      }
+    }
+  } catch (e: any) {
+    console.warn('⚠️ RAG coverage indisponible:', e.message);
+  }
+
+  const contextSection = ragContext
+    ? `\nEXTRAITS DES CONDITIONS GÉNÉRALES :\n${ragContext.substring(0, 4000)}`
+    : (summary ? `\nRÉSUMÉ CONTRAT : ${summary}` : '');
+
+  const prompt = `Tu es un expert en assurances. Analyse ce contrat d'assurance et génère une fiche détaillée des garanties.
+
+CONTRAT :
+- Assureur : ${insurer}
+- Type : ${type}
+- Formule souscrite : ${formulaName}
+- Prime annuelle : ${policy.annualPremium ? policy.annualPremium + '€' : 'non connue'}${contextSection}
+
+Génère une analyse structurée et realiste. Réponds UNIQUEMENT en JSON valide :
+{
+  "formulaName": "Nom exact de la formule",
+  "formulaLevel": "basic" | "intermediate" | "premium",
+  "formulaDescription": "Description courte du niveau de couverture en 1-2 phrases",
+  "coverages": [
+    {
+      "category": "Catégorie (ex: Responsabilité Civile, Dommages, Assistance, Vol)",
+      "guarantee": "Nom de la garantie",
+      "included": true|false,
+      "limit": "Plafond si connu (ex: 500 000€, 30€/jour)",
+      "note": "Note additionnelle si pertinente",
+      "importance": "key" | "standard" | "optional"
+    }
+  ],
+  "exclusions": [
+    "Exclusion 1 importante",
+    "Exclusion 2 importante"
+  ],
+  "keyStrengths": [
+    "Point fort 1",
+    "Point fort 2"
+  ],
+  "keyWeaknesses": [
+    "Point faible 1",
+    "Point faible 2"
+  ],
+  "recommendation": "Conseil personnalisé sur cette formule (max 2 phrases)",
+  "alternativeFormulas": [
+    {
+      "name": "Nom formule alternative",
+      "priceVariation": "+X€/mois ou -X€/mois",
+      "mainDifference": "Ce que cette formule apporte en plus/moins",
+      "recommended": true|false
+    }
+  ]
+}
+
+CONSIGNES :
+- Inclure 6 à 14 garanties couvrant les risques principaux du type d'assurance
+- Marquer "included: false" les garanties importantes NON incluses dans cette formule
+- Les exclusions doivent être les plus importantes (4-8 maximum)
+- Les priceVariation des alternatives doivent être réalistes au marché français
+- La recommendation doit être personnalisée et actionnable`;
+
+  try {
+    const model = ai.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const result = await model.generateContent([{ text: prompt }]);
+    const text = result.response.text();
+    const parsed = JSON.parse(text);
+    return parsed;
+  } catch (err) {
+    console.error('getCoverageAnalysis error:', err);
+    return buildFallbackCoverage(formulaName, type, summary);
+  }
+};
+
+function buildFallbackCoverage(formulaName: string, type: string, summary: string): any {
+  return {
+    formulaName,
+    formulaLevel: 'intermediate',
+    formulaDescription: summary || `Couverture ${type} — formule ${formulaName}`,
+    coverages: [],
+    exclusions: ['Analyse IA non disponible — consultez les conditions générales'],
+    keyStrengths: summary ? [summary.substring(0, 120)] : [],
+    keyWeaknesses: [],
+    recommendation: 'Ajoutez le document PDF de vos conditions générales pour une analyse complète.',
+    alternativeFormulas: []
+  };
+}
 
 /**
  * Génère un embedding pour un texte donné via l'API REST Gemini.

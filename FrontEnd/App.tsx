@@ -15,6 +15,7 @@ import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
 import { PolicyStats } from './components/PolicyStats';
+import CoverageDetailPage from './components/CoverageDetailPage';
 import Footer from './components/Footer';
 import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
@@ -38,6 +39,7 @@ function App() {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [coveragePolicy, setCoveragePolicy] = useState<Policy | null>(null);
   
   const [userProfile, setUserProfile] = useState<UserProfileData>({
     adultsCount: 1,
@@ -345,6 +347,7 @@ function App() {
               onEdit={handleEditPolicy}
               user={user} 
               onUpdatePolicy={handleUpdatePolicy}
+              onViewCoverage={(policy) => setCoveragePolicy(policy)}
             />
           </div>
         );
@@ -433,6 +436,14 @@ function App() {
       <main className="p-4 md:p-8 flex-1">
         <div className="max-w-xl mx-auto">{renderContent()}</div>
       </main>
+
+      {/* Overlay détail des garanties d'une formule */}
+      {coveragePolicy && (
+        <CoverageDetailPage
+          policy={coveragePolicy}
+          onClose={() => setCoveragePolicy(null)}
+        />
+      )}
 
       <Footer 
         onNavigateToTerms={() => setShowTerms(true)}

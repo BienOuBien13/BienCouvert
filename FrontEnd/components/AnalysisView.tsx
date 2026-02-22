@@ -37,26 +37,43 @@ const TYPE_CONFIG = {
   saving: { bg: 'bg-emerald-50', text: 'text-emerald-500', icon: Zap },
 };
 
+const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  remove_duplicate:  { label: 'Supprimer doublon',    color: 'bg-amber-100 text-amber-700 border-amber-200' },
+  add_contract:      { label: 'Ajouter un contrat',   color: 'bg-red-100 text-red-700 border-red-200' },
+  change_formula:    { label: 'Changer de formule',   color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  remove_option:     { label: 'Supprimer une option', color: 'bg-orange-100 text-orange-700 border-orange-200' },
+  group_contracts:   { label: 'Regrouper les contrats', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  info:              { label: 'Information',           color: 'bg-slate-100 text-slate-600 border-slate-200' },
+};
+
 const FindingCard: React.FC<{ f: OptimizationFinding }> = ({ f }) => {
   const cfg = TYPE_CONFIG[f.type] ?? TYPE_CONFIG.saving;
   const IconComponent = cfg.icon;
+  const actionInfo = f.action ? (ACTION_LABELS[f.action] ?? ACTION_LABELS.info) : null;
   return (
     <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 space-y-6 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col">
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${cfg.bg} ${cfg.text}`}>
-        <IconComponent className="w-7 h-7" />
+      <div className="flex items-start justify-between gap-3">
+        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${cfg.bg} ${cfg.text}`}>
+          <IconComponent className="w-7 h-7" />
+        </div>
+        {actionInfo && (
+          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border whitespace-nowrap ${actionInfo.color}`}>
+            {actionInfo.label}
+          </span>
+        )}
       </div>
       <div className="flex-grow space-y-3">
         <h4 className="font-black text-slate-900 tracking-tight leading-snug text-xl">{f.title}</h4>
         <p className="text-xs text-slate-500 font-medium leading-relaxed">{f.description}</p>
         {f.estimatedSaving != null && f.estimatedSaving > 0 && (
-          <p className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full inline-block">
-            Économie estimée : {f.estimatedSaving} €/an
+          <p className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full inline-flex items-center gap-1 border border-emerald-100">
+            💡 Économie estimée : <span>{f.estimatedSaving} €/an</span>
           </p>
         )}
       </div>
       <div className="pt-6 border-t border-slate-50">
         <p className="text-[10px] font-black uppercase text-primary-600 tracking-[0.2em] mb-2 flex items-center gap-2">
-          <Sparkles className="w-3 h-3" /> Recommandation IA
+          <Sparkles className="w-3 h-3" /> Action recommandée
         </p>
         <p className="text-sm font-bold text-slate-900 leading-snug bg-slate-50 p-4 rounded-2xl border border-slate-100">{f.recommendation}</p>
       </div>
@@ -278,6 +295,57 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
                   </div>
                 </div>
 
+                {/* Statut de résidence */}
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Statut de résidence</label>
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      { id: 'owner', label: 'Propriétaire' },
+                      { id: 'tenant', label: 'Locataire' },
+                      { id: 'landlord', label: 'Bailleur / Investisseur' }
+                    ].map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => onUpdateProfile({...profile, housingStatus: s.id as any})}
+                        className={`flex-1 min-w-[120px] p-4 rounded-[1.5rem] border-2 font-black text-[11px] uppercase tracking-widest transition-all ${profile.housingStatus === s.id ? 'bg-primary-600 text-white border-primary-600 shadow-xl' : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-slate-300'}`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Type de résidence + Surface */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Résidence</label>
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'principal', label: 'Principale' },
+                        { id: 'secondary', label: 'Secondaire' }
+                      ].map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => onUpdateProfile({...profile, residenceType: s.id as any})}
+                          className={`flex-1 p-3 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all ${profile.residenceType === s.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-slate-300'}`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Surface (m²)</label>
+                    <input
+                      type="number"
+                      className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-center text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                      value={profile.housingSurface || ''}
+                      onChange={e => onUpdateProfile({...profile, housingSurface: parseInt(e.target.value) || 0})}
+                      placeholder="80"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <button 
                     onClick={() => onUpdateProfile({...profile, hasPool: !profile.hasPool})} 
@@ -354,48 +422,155 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
                     </div>
                   </div>
                 </div>
+
+                {/* Statut professionnel */}
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Situation professionnelle</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: 'salarié', label: 'Salarié' },
+                      { id: 'indépendant', label: 'Indépendant / TNS' },
+                      { id: 'fonctionnaire', label: 'Fonctionnaire' },
+                      { id: 'retraité', label: 'Retraité' },
+                      { id: 'sans-emploi', label: 'Sans emploi' },
+                    ].map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => onUpdateProfile({...profile, workStatus: s.id as any})}
+                        className={`px-5 py-3 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all ${profile.workStatus === s.id ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-slate-300'}`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sports à risque */}
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Sports à risque pratiqués</label>
+                  <div className="flex flex-wrap gap-2">
+                    {['Ski alpin', 'Moto', 'Escalade', 'Plongée', 'Parachutisme', 'VTT', 'Motonautisme', 'Arts martiaux'].map(sport => (
+                      <button
+                        key={sport}
+                        onClick={() => {
+                          const cur = profile.riskySports || [];
+                          onUpdateProfile({...profile, riskySports: cur.includes(sport) ? cur.filter(s => s !== sport) : [...cur, sport]});
+                        }}
+                        className={`px-4 py-2.5 rounded-2xl border-2 font-black text-[10px] uppercase tracking-wide transition-all ${
+                          (profile.riskySports || []).includes(sport)
+                            ? 'bg-rose-600 text-white border-rose-600 shadow-lg'
+                            : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        {sport}
+                      </button>
+                    ))}
+                  </div>
+                  {(profile.riskySports || []).length === 0 && (
+                    <p className="text-[10px] text-slate-400 font-bold ml-1">Aucun sport à risque — couvertures standard applicables</p>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
           {currentStep.id === 'finance' && (
             <div className="space-y-8 animate-fadeIn">
-              <div className="space-y-6 text-center">
-                 <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100 shadow-inner">
-                   <Wallet className="w-10 h-10" />
+              <div className="space-y-6">
+                {/* Revenus */}
+                <div className="space-y-3 text-center">
+                 <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto border border-emerald-100 shadow-inner">
+                   <Wallet className="w-8 h-8" />
                  </div>
-                 <div className="space-y-2">
-                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Budget mensuel</h3>
-                    <p className="text-xs text-slate-400 font-bold max-w-xs mx-auto">Ces revenus nous permettent d'évaluer vos besoins de prévoyance en cas d'arrêt de travail.</p>
+                 <div className="space-y-1">
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter">Budget mensuel</h3>
+                    <p className="text-xs text-slate-400 font-bold max-w-xs mx-auto">Pour évaluer vos besoins de prévoyance.</p>
                  </div>
                  <div className="relative group max-w-xs mx-auto">
                     <input 
                       type="number" 
-                      className="w-full p-8 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] text-4xl font-black text-center text-slate-900 outline-none focus:ring-4 focus:ring-emerald-50 focus:border-emerald-500 transition-all shadow-xl" 
+                      className="w-full p-7 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] text-4xl font-black text-center text-slate-900 outline-none focus:ring-4 focus:ring-emerald-50 focus:border-emerald-500 transition-all shadow-xl" 
                       value={profile.monthlyIncome || ''} 
                       onChange={e => onUpdateProfile({...profile, monthlyIncome: parseInt(e.target.value) || 0})}
                       placeholder="0"
                     />
                     <div className="absolute top-1/2 -translate-y-1/2 right-6 font-black text-slate-300 text-2xl group-focus-within:text-emerald-500 transition-colors">€</div>
                  </div>
+                </div>
+
+                {/* Valeur du patrimoine */}
+                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 space-y-4">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Valeur du patrimoine assuré (€)</p>
+                  <p className="text-xs text-slate-400">Capit aux à couvrir en cas de sinistre total — essentiel pour calibrer votre assurance habitation.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400">Valeur reconstruction logement</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          className="w-full p-4 pr-10 bg-white border border-slate-100 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                          value={profile.reconstructionValue || ''}
+                          onChange={e => onUpdateProfile({...profile, reconstructionValue: parseInt(e.target.value) || 0})}
+                          placeholder="150 000"
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-black text-sm">€</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400">High-tech & informatique</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          className="w-full p-4 pr-10 bg-white border border-slate-100 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                          value={profile.highTechValue || ''}
+                          onChange={e => onUpdateProfile({...profile, highTechValue: parseInt(e.target.value) || 0})}
+                          placeholder="3 000"
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-black text-sm">€</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {currentStep.id === 'health' && (
             <div className="space-y-8 animate-fadeIn">
-              <div className="space-y-4">
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Priorités de soins</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {['Optique', 'Dentaire', 'Hospitalisation', 'Médecine douce'].map(need => (
-                    <button key={need} onClick={() => {
-                      const cur = profile.healthNeeds || [];
-                      onUpdateProfile({...profile, healthNeeds: cur.includes(need) ? cur.filter(n => n !== need) : [...cur, need]});
-                    }} className={`p-8 rounded-[2rem] border-2 transition-all flex flex-col items-center gap-4 ${ (profile.healthNeeds || []).includes(need) ? 'bg-primary-600 text-white border-primary-600 shadow-xl ring-4 ring-primary-50' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${ (profile.healthNeeds || []).includes(need) ? 'bg-white/20' : 'bg-white shadow-sm'}`}><Activity className="w-6 h-6" /></div>
-                      <span className="text-[10px] font-black uppercase tracking-widest">{need}</span>
-                    </button>
-                  ))}
+              <div className="space-y-5">
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Priorités de soins</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: 'Optique', icon: '👁' },
+                      { label: 'Dentaire', icon: '🦷' },
+                      { label: 'Hospitalisation', icon: '🏥' },
+                      { label: 'Médecine douce', icon: '🌿' },
+                      { label: 'Audition', icon: '👂' },
+                      { label: 'Maternité', icon: '👶' },
+                    ].map(({ label, icon }) => (
+                      <button key={label} onClick={() => {
+                        const cur = profile.healthNeeds || [];
+                        onUpdateProfile({...profile, healthNeeds: cur.includes(label) ? cur.filter(n => n !== label) : [...cur, label]});
+                      }} className={`p-6 rounded-[2rem] border-2 transition-all flex flex-col items-center gap-3 ${ (profile.healthNeeds || []).includes(label) ? 'bg-primary-600 text-white border-primary-600 shadow-xl ring-4 ring-primary-50' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300'}`}>
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${ (profile.healthNeeds || []).includes(label) ? 'bg-white/20' : 'bg-white shadow-sm'}`}>{icon}</div>
+                        <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Précisions santé */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Situation particulière (optionnel)</label>
+                  <textarea
+                    rows={3}
+                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-3xl font-medium text-slate-900 text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all resize-none"
+                    value={profile.healthSpecifics || ''}
+                    onChange={e => onUpdateProfile({...profile, healthSpecifics: e.target.value})}
+                    placeholder="Ex: traitement au long cours, ALD, grossesse prévue, enfant avec besoins spécifiques..."
+                  />
+                  <p className="text-[10px] text-slate-400 ml-1">Ces informations restent confidentielles et servent uniquement à personnaliser l'analyse.</p>
                 </div>
               </div>
             </div>
@@ -414,6 +589,43 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
                     <button onClick={() => updateNumericField('claimsLast5Years', 1)} className="w-16 h-16 rounded-[1.5rem] border border-white/20 text-3xl font-black flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all">+</button>
                  </div>
                  <div className="absolute -left-10 -bottom-10 opacity-10"><History className="w-48 h-48" /></div>
+              </div>
+
+              {/* Tolérance au risque */}
+              <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">Tolérance au risque</h4>
+                  <p className="text-xs text-slate-400 font-bold">Comment gérez-vous l'incertitude financière ?</p>
+                </div>
+                <div className="flex gap-2">
+                  {[
+                    { val: 1, label: 'Sécurité max', color: 'bg-emerald-600' },
+                    { val: 2, label: 'Prudent', color: 'bg-teal-500' },
+                    { val: 3, label: 'Equilibré', color: 'bg-primary-600' },
+                    { val: 4, label: 'Dynamique', color: 'bg-amber-500' },
+                    { val: 5, label: 'Risqué', color: 'bg-rose-600' },
+                  ].map(({ val, label, color }) => (
+                    <button
+                      key={val}
+                      onClick={() => onUpdateProfile({...profile, riskTolerance: val})}
+                      className={`flex-1 py-5 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 ${
+                        profile.riskTolerance === val
+                          ? `${color} text-white border-transparent shadow-xl scale-105`
+                          : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-xl font-black">{val}</span>
+                      <span className="text-[8px] font-black uppercase tracking-widest leading-tight text-center">{label}</span>
+                    </button>
+                  ))}
+                </div>
+                {profile.riskTolerance && (
+                  <p className="text-[11px] text-slate-500 font-bold text-center">
+                    {profile.riskTolerance <= 2 && 'Couvertures maximales recommandées. L’IA favorisera les formules complètes.'}
+                    {profile.riskTolerance === 3 && 'Couverture équilibrée recommandée — rapport garanties/coût optimal.'}
+                    {profile.riskTolerance >= 4 && 'Profil dynamique — l’IA identifiera les garanties vraiment indispensables.'}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -491,6 +703,25 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
               </div>
             ))}
           </div>
+
+          {/* Potentiel total */}
+          {findings.reduce((acc, f) => acc + (f.estimatedSaving ?? 0), 0) > 0 && (
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-[2rem] p-6 flex items-center justify-between text-white shadow-lg shadow-emerald-200">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+                  <Zap className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Potentiel d'économie global</p>
+                  <p className="text-2xl font-black tracking-tight">{findings.reduce((acc, f) => acc + (f.estimatedSaving ?? 0), 0)} €/an</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black opacity-70 uppercase tracking-widest">soit</p>
+                <p className="text-xl font-black">{Math.round(findings.reduce((acc, f) => acc + (f.estimatedSaving ?? 0), 0) / 12)} €/mois</p>
+              </div>
+            </div>
+          )}
 
           {/* Section: Doublons */}
           {findings.filter(f => f.type === 'duplicate').length > 0 && (

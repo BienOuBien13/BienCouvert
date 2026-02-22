@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { 
   Trash2, Pencil, Shield, ChevronDown, Car, Home, Heart, Scale, 
   Briefcase, CreditCard, Banknote, Smartphone, Share2, 
-  ChevronRight, Filter, SortAsc, SortDesc, Calendar, Euro, Building2, Info, CheckCircle, Zap, ExternalLink, Globe, Search, Loader2, AlertCircle, FileWarning, Link2, X, Check, FileText, Download
+  ChevronRight, Filter, SortAsc, SortDesc, Calendar, Euro, Building2, Info, CheckCircle, Zap, ExternalLink, Globe, Search, Loader2, AlertCircle, FileWarning, Link2, X, Check, FileText, Download, LayoutList
 } from 'lucide-react';
 import { Policy, PolicyType, User } from '../types';
 import { searchPolicyInfo } from '../services/geminiService';
@@ -14,10 +14,11 @@ interface Props {
   onDelete: (id: string) => void;
   onEdit: (policy: Policy) => void;
   onUpdatePolicy?: (policy: Policy) => void;
+  onViewCoverage?: (policy: Policy) => void;
   user: User;
 }
 
-export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpdatePolicy, user }) => {
+export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpdatePolicy, onViewCoverage, user }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isSearchingLink, setIsSearchingLink] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -186,9 +187,21 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                       </div>
                     )}
 
-                    <div className="flex gap-2 pt-4">
-                       <button onClick={() => onEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>
-                       <button onClick={() => onDelete(policy.id)} className="flex-1 py-4 bg-white border border-red-100 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all">Supprimer</button>
+                    <div className="space-y-3 pt-4">
+                       {/* Bouton Garanties */}
+                       {onViewCoverage && (
+                         <button
+                           onClick={() => onViewCoverage(policy)}
+                           className="w-full py-4 bg-gradient-to-r from-primary-600 to-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-200 active:scale-95"
+                         >
+                           <LayoutList className="w-4 h-4" />
+                           Voir les garanties de cette formule
+                         </button>
+                       )}
+                       <div className="flex gap-2">
+                         <button onClick={() => onEdit(policy)} className="flex-1 py-4 bg-primary-50 text-primary-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-100 transition-all">Modifier</button>
+                         <button onClick={() => onDelete(policy.id)} className="flex-1 py-4 bg-white border border-red-100 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all">Supprimer</button>
+                       </div>
                     </div>
                   </div>
                 </div>

@@ -5,6 +5,7 @@
 
 import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData, PolicyType, CentralCgEntry } from "../types";
 import { fetchCsrfToken } from './authService';
+import type { CoverageData } from '../components/CoverageDetailPage';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -190,6 +191,31 @@ export const sendMessageToAssistantStream = async (
 };
 
 /**
+ * Analyse détaillée des garanties d'une police spécifique
+ */
+export const getCoverageDetails = async (policy: Policy): Promise<CoverageData> => {
+  try {
+    const result = await apiFetch('/ai/coverage-details', {
+      body: JSON.stringify({ policy })
+    });
+    return result as CoverageData;
+  } catch (e) {
+    console.error('Erreur getCoverageDetails:', e);
+    return {
+      formulaName: policy.coverageDetail ?? policy.coverage ?? 'Formule souscrite',
+      formulaLevel: 'intermediate',
+      formulaDescription: policy.summary ?? '',
+      coverages: [],
+      exclusions: ['Service IA temporairement indisponible'],
+      keyStrengths: [],
+      keyWeaknesses: [],
+      recommendation: 'Vérifiez vos conditions générales directement auprès de votre assureur.',
+      alternativeFormulas: []
+    };
+  }
+};
+
+/**
  * Détecte les optimisations possibles via le backend
  */
 export const detectOptimizations = async (policies: Policy[], profile: UserProfileData): Promise<OptimizationFinding[]> => {
@@ -200,7 +226,7 @@ export const detectOptimizations = async (policies: Policy[], profile: UserProfi
     return result;
   } catch (e) {
     console.error('Erreur detectOptimizations:', e);
-    return [{ title: "Service IA non disponible", severity: "medium", description: "Impossible de contacter le serveur.", savingsPotential: 0 }];
+    return [{ title: "Service IA non disponible", severity: "medium", type: 'gap', description: "Impossible de contacter le serveur.", involvedPolicies: [], estimatedSaving: 0, recommendation: 'Vérifiez votre connexion et réessayez.', action: 'info' }];
   }
 };
 

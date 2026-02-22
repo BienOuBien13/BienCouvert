@@ -138,6 +138,7 @@ export interface OptimizationFinding {
   involvedPolicies: string[];
   estimatedSaving?: number;
   recommendation: string;
+  action?: 'remove_duplicate' | 'add_contract' | 'change_formula' | 'remove_option' | 'group_contracts' | 'info';
   comparisonDetails?: {
     policyA: string;
     policyB: string;
