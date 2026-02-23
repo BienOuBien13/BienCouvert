@@ -11,9 +11,11 @@ import policyRoutes from './routes/policies';
 import aiRoutes from './routes/ai';
 import masterDataRoutes from './routes/masterdata';
 import cgRoutes from './routes/cg';
+import contactRoutes from './routes/contact';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initAuditTable } from './services/auditService';
+import { verifySmtpConnection } from './services/emailService';
 
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
@@ -226,6 +228,7 @@ app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // �
 app.use('/api/ai', aiLimiter, doubleCsrfProtection, aiRoutes);              // 🔒 AI avec CSRF + rate limit strict
 app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                // 📊 Master Data (lecture seule, pas de CSRF)
 app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // 📄 Conditions Générales avec CSRF
+app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // 📧 Prise de RDV avec CSRF
 
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
@@ -235,6 +238,8 @@ const PORT = parseInt(process.env.PORT || '4000', 10);  // Port configurable via
 
 // Initialisation de la table d'audit au démarrage
 initAuditTable().then(() => {
+  // Vérification connexion SMTP (non bloquante)
+  verifySmtpConnection();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
   });

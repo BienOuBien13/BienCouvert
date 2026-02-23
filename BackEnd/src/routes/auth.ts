@@ -7,6 +7,7 @@ import { body, validationResult } from 'express-validator';
 import { User, UserProfileData } from '../types';
 import { validatePassword, getPasswordRequirements } from '../utils/passwordValidator';
 import { logAudit, AuditAction, getAuditContext } from '../services/auditService';
+import { sendPasswordResetEmail } from '../services/emailService';
 
 // -----------------------------------------------------------------------------
 // Routes d'authentification
@@ -336,9 +337,23 @@ router.post('/forgot-password', async (req, res) => {
       return res.json({ ok: true, exists: false });
     }
 
-    // TODO production : envoyer un vrai email avec nodemailer + token JWT court-terme
-    // Pour l'instant la route confirme juste que le compte existe
-    console.log(`📧 [DEBUG] Demande de réinitialisation pour : ${user.email}`);
+    // Génération d'un token JWT de réinitialisation (valide 1h)
+    const resetToken = jwt.sign(
+      { email: user.email, purpose: 'reset' },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const frontendUrl = process.env.FRONTEND_URL || 'https://biencouvert.fr';
+    const resetUrl = `${frontendUrl}?reset=${resetToken}`;
+
+    // Envoi de l'email de réinitialisation
+    try {
+      await sendPasswordResetEmail(user.email, resetUrl);
+      console.log(`📧 Email de réinitialisation envoyé à : ${user.email}`);
+    } catch (emailErr: any) {
+      console.error('❌ Erreur envoi email reset:', emailErr.message);
+      // On ne bloque pas la réponse si l'email échoue
+    }
 
     res.json({ ok: true, exists: true });
   } catch (err) {

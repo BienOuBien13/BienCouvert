@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { BottomNav } from './components/BottomNav';
 import { PolicyForm } from './components/PolicyForm';
-import { ModernPolicyWizard } from './components/ModernPolicyWizard';
 import { SmartChatAssistant } from './components/SmartChatAssistant';
 import AddPolicyPage from './components/AddPolicyPage';
 import { PolicyList } from './components/PolicyList';
@@ -378,7 +377,7 @@ function App() {
       case 'analysis':
         return <div className="animate-fadeIn"><AnalysisView policies={policies} profile={userProfile} onUpdateProfile={handleUpdateProfile} user={user} onFinishSimulation={() => setIsClearModalOpen(true)} /></div>;
       case 'experts':
-        return <div className="animate-fadeIn"><ExpertContact policies={policies} /></div>;
+        return <div className="animate-fadeIn"><ExpertContact policies={policies} user={user} /></div>;
       case 'profile':
         return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} /></div>;
       case 'admin':

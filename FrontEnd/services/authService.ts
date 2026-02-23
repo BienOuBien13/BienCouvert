@@ -270,6 +270,16 @@ export const authService = {
   },
 
   /**
+   * Prise de rendez-vous avec un expert (envoie une notification email)
+   */
+  submitRdv: async (data: { phone: string; day: string; slot: string; policies: string[]; userEmail?: string }): Promise<void> => {
+    await apiFetch('/contact/rdv', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
    * Valide la session courante : tente GET /me, si 401 tente un renouvellement.
    * Retourne true si la session est valide (ou réparée), false si l'utilisateur doit se reconnecter.
    */

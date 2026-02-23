@@ -1,11 +1,13 @@
 
 import React, { useState } from 'react';
 import { Users, Phone, Clock, ShieldCheck, CheckCircle, ArrowRight, Calendar, Smartphone, Headset, MessageSquare, Zap, ChevronRight } from 'lucide-react';
-import { Policy } from '../types';
+import { Policy, User } from '../types';
+import { authService } from '../services/authService';
 
 interface Props {
   policies: Policy[];
   onNavigateToPolicies?: () => void;
+  user?: User;
 }
 
 const DAYS = [
@@ -21,7 +23,7 @@ const SLOTS = [
   { id: 'evening', label: 'Soir', time: '17h - 19h' }
 ];
 
-export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies }) => {
+export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies, user }) => {
   const [submitted, setSubmitted] = useState(false);
 
   // Bannière réseau en construction — toujours visible en haut
@@ -45,8 +47,22 @@ export const ExpertContact: React.FC<Props> = ({ policies, onNavigateToPolicies 
   const [selectedSlot, setSelectedSlot] = useState('afternoon');
   const [selectedPolicies, setSelectedPolicies] = useState<string[]>([]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      const dayLabel = DAYS.find(d => d.id === selectedDay)?.label || selectedDay;
+      const slotLabel = SLOTS.find(s => s.id === selectedSlot)?.label || selectedSlot;
+      const policyNames = policies.filter(p => selectedPolicies.includes(p.id)).map(p => p.name);
+      await authService.submitRdv({
+        phone,
+        day: dayLabel,
+        slot: slotLabel,
+        policies: policyNames,
+        userEmail: user?.email,
+      });
+    } catch {
+      // Non-bloquant : on confirme quand même la demande à l'utilisateur
+    }
     setSubmitted(true);
   };
 
