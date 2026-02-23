@@ -40,14 +40,18 @@ export interface CentralCgEntry {
     indexedFormulas?: string[];     // Formules indexées
     indexedOptions?: Record<string, string[]>;  // Options par formule
     description?: string;           // Description en quelques lignes
+    type?: string;                  // Type de formule/couverture
   };
   createdAt?: number;
   updatedAt?: number;
   vectorizedAt?: string | null;     // Date de vectorisation
-  // Compatibilité avec anciens champs (pour affichage)
+  // Champs de compatibilité et affichage
   insurer?: string;                 // Label assureur (pour affichage)
   insuranceTypeLabel?: string;      // Label type d'assurance (pour affichage)
   productName?: string;             // Nom du produit (pour affichage)
+  provider?: string;                // Alias insurer pour compatibilité geminiService
+  pdfUrl?: string;                  // URL directe vers le PDF
+  semanticSummary?: string;         // Résumé sémantique généré par l'IA
   indexedFormulas?: string[];       // Pour compatibilité
   indexedOptions?: string[];        // Pour compatibilité
 }
@@ -101,6 +105,7 @@ export interface Policy {
   type: PolicyType;
   typeCode?: string;
   coverage?: string; // Formule d'assurance (ex: "Plénitude", "Tous Risques")
+  formula?: string; // Alias formule pour compatibilité inline edit
   coverageDetail?: string;
   options?: string[];
   fileData: string | null;

@@ -1,7 +1,9 @@
 import nodemailer from 'nodemailer';
+import https from 'https';
 
 // -----------------------------------------------------------------------------
 // Service d'envoi d'emails — SMTP Zoho (contact@biencouvert.fr)
+// Fallback webhook Slack/Teams si SMTP indisponible (SLACK_WEBHOOK_URL)
 // -----------------------------------------------------------------------------
 
 const SMTP_FROM = 'BienCouvert <contact@biencouvert.fr>';
@@ -13,14 +15,41 @@ function createTransporter() {
     port: 465,
     secure: true, // SSL
     auth: {
-      user: process.env.SMTP_USER || 'contact@biencouvert.fr',
-      pass: process.env.SMTP_PASS || '',
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
     },
   });
 }
 
+/** Envoie une notification webhook (Slack/Teams) en fallback SMTP */
+async function notifyWebhook(subject: string, body: string): Promise<void> {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  if (!webhookUrl) return;
+  try {
+    const payload = JSON.stringify({ text: `*${subject}*\n${body}` });
+    await new Promise<void>((resolve, reject) => {
+      const url = new URL(webhookUrl);
+      const req = https.request(
+        { hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
+        (res) => { res.resume(); resolve(); }
+      );
+      req.on('error', reject);
+      req.write(payload);
+      req.end();
+    });
+    console.log('📣 Notification webhook envoyée');
+  } catch (e: any) {
+    console.warn('⚠️  Webhook échoué:', e.message);
+  }
+}
+
 /** Vérifie la connexion SMTP au démarrage */
 export async function verifySmtpConnection(): Promise<void> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.warn('⚠️  SMTP non configuré (SMTP_USER/SMTP_PASS manquants) — emails désactivés');
+    return;
+  }
   try {
     const transporter = createTransporter();
     await transporter.verify();
@@ -31,14 +60,51 @@ export async function verifySmtpConnection(): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
+// E-mail : vérification d'adresse email à l'inscription
+// -----------------------------------------------------------------------------
+export async function sendVerificationEmail(
+  toEmail: string,
+  verifyUrl: string,
+  firstName: string
+): Promise<void> {
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: toEmail,
+    subject: '✉️ Confirmez votre adresse email BienCouvert',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; background: #f8fafc; padding: 32px; border-radius: 16px;">
+        <div style="background: #2563eb; padding: 24px; border-radius: 12px; text-align: center; margin-bottom: 24px;">
+          <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 900;">BienCouvert</h1>
+          <p style="color: rgba(255,255,255,0.7); margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Votre assistant assurance</p>
+        </div>
+        <h2 style="color: #0f172a; font-size: 18px; font-weight: 800; margin: 0 0 8px;">Bienvenue ${firstName} ! Confirmez votre email</h2>
+        <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+          Pour finaliser votre inscription et sécuriser votre compte, cliquez sur le bouton ci-dessous.<br>
+          <strong>Ce lien est valable 24 heures.</strong>
+        </p>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 14px 32px; border-radius: 10px; text-decoration: none; font-weight: 800; font-size: 14px; letter-spacing: 0.5px; display: inline-block;">Confirmer mon email</a>
+        </div>
+        <p style="color: #94a3b8; font-size: 12px; text-align: center; margin: 24px 0 0;">
+          Si vous n'avez pas créé de compte sur BienCouvert, ignorez cet email.<br><br>
+          <strong>BienCouvert</strong> — <a href="https://biencouvert.fr" style="color: #2563eb;">biencouvert.fr</a>
+        </p>
+      </div>
+    `,
+  });
+}
+
+// -----------------------------------------------------------------------------
 // E-mail : réinitialisation de mot de passe
 // -----------------------------------------------------------------------------
 export async function sendPasswordResetEmail(
   toEmail: string,
   resetUrl: string
 ): Promise<void> {
-  const transporter = createTransporter();
-  await transporter.sendMail({
+  try {
+    const transporter = createTransporter();
+    await transporter.sendMail({
     from: SMTP_FROM,
     to: toEmail,
     subject: '🔑 Réinitialisation de votre mot de passe BienCouvert',
@@ -75,7 +141,15 @@ export async function sendPasswordResetEmail(
         </p>
       </div>
     `,
-  });
+    });
+  } catch (err: any) {
+    console.error('❌ SMTP sendPasswordResetEmail:', err.message);
+    await notifyWebhook(
+      '❌ Échec email reset mot de passe',
+      `Email: ${toEmail}\nLien: ${resetUrl}\nErreur: ${err.message}`
+    );
+    throw err; // Propager pour que la route loggue correctement
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -98,7 +172,8 @@ export async function sendRdvNotificationEmail(params: {
       : '<p style="color:#94a3b8;font-size:13px;">Aucun contrat précisé</p>';
 
   // Notif interne vers l'équipe
-  await transporter.sendMail({
+  try {
+    await transporter.sendMail({
     from: SMTP_FROM,
     to: 'contact@biencouvert.fr',
     subject: `📞 Nouveau rappel expert — ${phone}`,
@@ -121,7 +196,17 @@ export async function sendRdvNotificationEmail(params: {
         </div>
       </div>
     `,
-  });
+    });
+  } catch (err: any) {
+    console.error('❌ SMTP notif RDV interne:', err.message);
+    // Fallback webhook
+    const lines = [
+      `Tél: ${phone}`, `Jour: ${day}`, `Créneau: ${slot}`,
+      `Compte: ${userEmail || 'N/A'}`,
+      `Contrats: ${policies.join(', ') || 'Aucun'}`
+    ].join('\n');
+    await notifyWebhook('📞 Nouvelle demande de rappel expert', lines);
+  }
 
   // Confirmation au client si email disponible
   if (userEmail) {

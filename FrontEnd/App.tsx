@@ -35,6 +35,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [resetTokenFromUrl, setResetTokenFromUrl] = useState<string>('');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
@@ -51,6 +52,30 @@ function App() {
   useEffect(() => {
     const currentUser = authService.getCurrentUser();
     if (currentUser) handleLogin(currentUser);
+
+    // Détection des paramètres URL spéciaux
+    const params = new URLSearchParams(window.location.search);
+    const resetToken = params.get('reset');
+    const verifyToken = params.get('verify');
+
+    if (resetToken) {
+      // Lien de réinitialisation de mot de passe reçu par email
+      setResetTokenFromUrl(resetToken);
+      setShowAuth(true);
+      window.history.replaceState(null, '', window.location.pathname);
+    } else if (verifyToken) {
+      // Lien de vérification d'email reçu par email
+      authService.verifyEmail(verifyToken)
+        .then(() => {
+          alert('✅ Votre adresse email a bien été vérifiée !');
+          window.history.replaceState(null, '', window.location.pathname);
+        })
+        .catch(() => {
+          alert('❌ Lien de vérification invalide ou expiré.');
+          window.history.replaceState(null, '', window.location.pathname);
+        });
+    }
+
     setIsLoading(false);
   }, []);
 
@@ -388,7 +413,7 @@ function App() {
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center text-primary-600 font-black uppercase tracking-[0.4em] animate-pulse">BienCouvert</div>;
   if (!user) {
-    if (showAuth) return <AuthScreen onLogin={handleLogin} onBack={() => setShowAuth(false)} />;
+    if (showAuth) return <AuthScreen onLogin={handleLogin} onBack={() => setShowAuth(false)} resetToken={resetTokenFromUrl || undefined} />;
     return <LandingPage onStart={() => setShowAuth(true)} />;
   }
 

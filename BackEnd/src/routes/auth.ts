@@ -3,11 +3,13 @@ import rateLimit from 'express-rate-limit';
 import { storage } from '../storage';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { body, validationResult } from 'express-validator';
 import { User, UserProfileData } from '../types';
 import { validatePassword, getPasswordRequirements } from '../utils/passwordValidator';
 import { logAudit, AuditAction, getAuditContext } from '../services/auditService';
-import { sendPasswordResetEmail } from '../services/emailService';
+import { sendPasswordResetEmail, sendVerificationEmail } from '../services/emailService';
+import { query } from '../db';
 
 // -----------------------------------------------------------------------------
 // Routes d'authentification
@@ -93,7 +95,8 @@ router.post('/register', authLimiter, [
   // 🔒 Validation des inputs avec express-validator
   body('email')
     .isEmail().withMessage('Email invalide')
-    .normalizeEmail(),
+    // gmail_remove_dots: false → garde les points (remi.jolivalt@gmail.com ne devient pas remijolivalt@gmail.com)
+    .normalizeEmail({ gmail_remove_dots: false }),
   body('password')
     .notEmpty().withMessage('Mot de passe requis'),
   body('firstName')
@@ -160,6 +163,24 @@ router.post('/register', authLimiter, [
     const userId = await storage.writeUser(newUser);
     newUser.id = userId;
 
+    // 📧 Envoi de l'email de vérification (non bloquant)
+    const frontendBaseUrl = process.env.FRONTEND_URL || 'https://biencouvert.fr';
+    try {
+      const verifResult = await query(
+        `INSERT INTO email_verifications (email, user_id) VALUES ($1, $2) RETURNING token`,
+        [newUser.email, userId]
+      );
+      const verifToken = verifResult.rows[0]?.token;
+      if (verifToken) {
+        const verifUrl = `${frontendBaseUrl}?verify=${verifToken}`;
+        await sendVerificationEmail(newUser.email, verifUrl, newUser.firstName);
+        console.log(`📧 Email de vérification envoyé à ${newUser.email}`);
+      }
+    } catch (verifErr: any) {
+      console.warn('⚠️ Email vérification non envoyé:', verifErr.message);
+      // Non bloquant
+    }
+
     // 📝 Audit: Enregistrement nouveau compte
     await logAudit({
       action: AuditAction.USER_REGISTER,
@@ -208,7 +229,7 @@ router.post('/login', authLimiter, [
   // 🔒 Validation des inputs
   body('email')
     .isEmail().withMessage('Email invalide')
-    .normalizeEmail(),
+    .normalizeEmail({ gmail_remove_dots: false }),
   body('password')
     .notEmpty().withMessage('Mot de passe requis')
 ], async (req: any, res: any) => {
@@ -333,16 +354,21 @@ router.post('/forgot-password', async (req, res) => {
 
     // Réponse volontairement identique qu'il existe ou non (sécurité : évite l'enumération)
     if (!user) {
-      // On renvoie 200 pour ne pas révéler si l’email est enregistré
       return res.json({ ok: true, exists: false });
     }
 
-    // Génération d'un token JWT de réinitialisation (valide 1h)
-    const resetToken = jwt.sign(
-      { email: user.email, purpose: 'reset' },
-      JWT_SECRET,
-      { expiresIn: '1h' }
+    // Supprimer les anciens tokens non utilisés pour cet email
+    await query(
+      `DELETE FROM password_resets WHERE email = $1 AND used = FALSE`,
+      [user.email]
     );
+
+    // Créer un token opaque UUID en base (TTL 1h)
+    const result = await query(
+      `INSERT INTO password_resets (email) VALUES ($1) RETURNING token`,
+      [user.email]
+    );
+    const resetToken: string = result.rows[0].token;
     const frontendUrl = process.env.FRONTEND_URL || 'https://biencouvert.fr';
     const resetUrl = `${frontendUrl}?reset=${resetToken}`;
 
@@ -364,14 +390,14 @@ router.post('/forgot-password', async (req, res) => {
 
 /**
  * Route POST /api/auth/reset
- * Réinitialisation du mot de passe d'un utilisateur.
- * En production, cette route devrait être sécurisée par un token de réinitialisation
- * envoyé par email. Ici, version simplifiée pour démonstration.
+ * Réinitialisation du mot de passe via token opaque (UUID) envoyé par email.
+ * Le token est vérifié en base (table password_resets), consommé une seule fois,
+ * et expire après 1h.
  */
 router.post('/reset', async (req, res) => {
-  const { email, newPassword } = req.body;
+  const { token, newPassword } = req.body;
   // Validation des champs requis
-  if (!email || !newPassword) return res.status(400).json({ message: 'Invalid' });
+  if (!token || !newPassword) return res.status(400).json({ message: 'Token et nouveau mot de passe requis' });
   
   // 🔒 Validation de la politique de mot de passe (ANSSI)
   const passwordCheck = validatePassword(newPassword);
@@ -384,10 +410,24 @@ router.post('/reset', async (req, res) => {
   }
   
   try {
+    // Vérifier le token en base
+    const result = await query(
+      `SELECT email FROM password_resets 
+       WHERE token = $1 AND used = FALSE AND expires_at > NOW()`,
+      [token]
+    );
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: 'Lien de réinitialisation invalide ou expiré' });
+    }
+    const email = result.rows[0].email;
+
+    // Marquer le token comme utilisé (consommation unique)
+    await query(`UPDATE password_resets SET used = TRUE WHERE token = $1`, [token]);
+
     // Recherche de l'utilisateur par email
     const users = await storage.readUsers();
     const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
     
     // Hachage du nouveau mot de passe et mise à jour
     user.password = await bcrypt.hash(newPassword, 10);
@@ -402,6 +442,39 @@ router.post('/reset', async (req, res) => {
     });
     
     res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route GET /api/auth/verify-email?token=UUID
+ * Valide le token de vérification email envoyé lors de l'inscription.
+ * Marque l'utilisateur comme vérifié dans la DB.
+ */
+router.get('/verify-email', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ message: 'Token manquant' });
+  
+  try {
+    const result = await query(
+      `UPDATE email_verifications 
+       SET verified_at = NOW() 
+       WHERE token = $1 AND verified_at IS NULL AND expires_at > NOW()
+       RETURNING user_id, email`,
+      [token]
+    );
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: 'Lien invalide ou déjà utilisé' });
+    }
+    const { user_id, email } = result.rows[0];
+    
+    // Marquer l'utilisateur comme vérifié
+    await query(`UPDATE users SET email_verified = TRUE WHERE id = $1`, [user_id]);
+    console.log(`✅ Email vérifié : ${email}`);
+    
+    res.json({ ok: true, email });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

@@ -16,6 +16,7 @@ import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initAuditTable } from './services/auditService';
 import { verifySmtpConnection } from './services/emailService';
+import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, purgeExpiredTokens } from './services/dbInitService';
 
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
@@ -237,9 +238,16 @@ app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // �
 const PORT = parseInt(process.env.PORT || '4000', 10);  // Port configurable via variable d'environnement
 
 // Initialisation de la table d'audit au démarrage
-initAuditTable().then(() => {
+initAuditTable().then(async () => {
+  // Tables authentification et contact
+  await initPasswordResetsTable();
+  await initEmailVerificationsTable();
+  await initRdvRequestsTable();
   // Vérification connexion SMTP (non bloquante)
   verifySmtpConnection();
+  // Purge quotidienne des tokens expirés
+  purgeExpiredTokens();
+  setInterval(purgeExpiredTokens, 24 * 60 * 60 * 1000);
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
   });

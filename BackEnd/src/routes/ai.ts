@@ -2,6 +2,7 @@
 import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts, getCoverageAnalysis } from '../services/geminiService';
 import { storage } from '../storage';
 import { query as dbQuery } from '../db';
+import { cacheGet, cacheSet, makeCacheKey } from '../services/cacheService';
 
 const router = Router();
 
@@ -25,23 +26,24 @@ router.post('/chat', async (req, res) => {
         // Filtrer pour ne garder que celles demandées
         enrichedPolicies = allPolicies.filter((p: any) => policyIds.includes(String(p.id)));
         console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
-        
-        // Debug: afficher les metadata de la première policy
-        if (enrichedPolicies.length > 0) {
-          console.log('🔍 Exemple policy rechargée:', {
-            id: enrichedPolicies[0].id,
-            name: enrichedPolicies[0].name,
-            metadata: enrichedPolicies[0].metadata,
-            coverage: enrichedPolicies[0].coverage,
-            coverageDetail: enrichedPolicies[0].coverageDetail
-          });
-        }
       } else {
         console.warn('⚠️ Impossible de recharger policies : userId non trouvé');
       }
     }
+
+    // 🚀 Cache Redis : évite les appels Gemini répétés pour la même question/contexte
+    const cacheKey = makeCacheKey('chat', message, policyIds.sort().join(','));
+    const cached = await cacheGet<string>(cacheKey);
+    if (cached) {
+      console.log('🎯 Cache hit — chat');
+      return res.json({ response: cached });
+    }
     
     const response = await sendMessageToAssistant(message, enrichedPolicies, history || []);
+
+    // Mettre en cache 30 min (TTL configurable via CACHE_TTL env)
+    await cacheSet(cacheKey, response);
+
     res.json({ response });
   } catch (e) {
     console.error(e);

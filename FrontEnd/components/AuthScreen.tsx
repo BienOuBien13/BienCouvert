@@ -7,12 +7,13 @@ import { User } from '../types';
 interface Props {
   onLogin: (user: User) => void;
   onBack: () => void;
+  resetToken?: string;   // Token UUID reçu via URL ?reset=
 }
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'email-sent' | 'reset';
 
-export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
-  const [mode, setMode] = useState<AuthMode>('login');
+export const AuthScreen: React.FC<Props> = ({ onLogin, onBack, resetToken }) => {
+  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -58,8 +59,13 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
         if (password !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas.");
         const pwdWarn = validatePassword(password);
         if (pwdWarn) throw new Error("Mot de passe invalide : " + pwdWarn);
-        await authService.resetPassword(email, password);
+        // Utiliser le token UUID de l'URL (?reset=UUID) ou fallback vide
+        const token = resetToken || '';
+        if (!token) throw new Error('Lien de réinitialisation manquant.');
+        await authService.resetPassword(token, password);
         setSuccess("Mot de passe réinitialisé ! Connectez-vous avec votre nouveau mot de passe.");
+        // Nettoyer le param URL
+        window.history.replaceState(null, '', window.location.pathname);
         setMode('login');
         setPassword('');
       }
@@ -118,7 +124,11 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack }) => {
       case 'reset':
         return (
           <div className="space-y-6 animate-fadeIn">
-            <p className="text-sm text-slate-600">Saisissez votre nouveau mot de passe pour <strong>{email}</strong>.</p>
+            <p className="text-sm text-slate-600">
+              {resetToken
+                ? 'Choisissez un nouveau mot de passe pour votre compte.'
+                : `Saisissez votre nouveau mot de passe pour <strong>${email}</strong>.`}
+            </p>
             <div>
               <label className="block text-sm font-medium text-slate-700">Nouveau mot de passe</label>
               <div className="mt-1 relative shadow-sm"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-slate-400" /></div>

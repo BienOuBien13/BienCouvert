@@ -41,7 +41,7 @@ const emitSessionExpired = () => {
  * - En cas de 401, tente un renouvellement JWT automatique (une seule fois)
  * - En cas d'échec du renouvellement, nettoie la session et émet 'auth:session-expired'
  */
-const apiFetch = async (endpoint: string, options: RequestInit = {}, isRetry = false): Promise<any> => {
+const apiFetch = async <T = any>(endpoint: string, options: RequestInit = {}, isRetry = false): Promise<T> => {
   const token = localStorage.getItem(TOKEN_KEY);
   const isMutating = options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase());
 
@@ -153,12 +153,12 @@ export const authService = {
   },
 
   /**
-   * Réinitialisation de mot de passe
+   * Réinitialisation de mot de passe via token opaque UUID (reçu par email)
    */
-  resetPassword: async (email: string, newPassword: string): Promise<void> => {
+  resetPassword: async (token: string, newPassword: string): Promise<void> => {
     await apiFetch('/auth/reset', {
       method: 'POST',
-      body: JSON.stringify({ email, newPassword }),
+      body: JSON.stringify({ token, newPassword }),
     });
   },
 
@@ -277,6 +277,16 @@ export const authService = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+
+  /**
+   * Vérifie l'adresse email via token envoyé à l'inscription
+   */
+  verifyEmail: async (token: string): Promise<{ ok: boolean; email: string }> => {
+    const API_URL = (import.meta as any).env?.VITE_API_URL || '';
+    const res = await fetch(`${API_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Lien de vérification invalide ou expiré');
+    return res.json();
   },
 
   /**
