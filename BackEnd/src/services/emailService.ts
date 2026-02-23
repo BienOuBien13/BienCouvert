@@ -8,12 +8,21 @@ import https from 'https';
 
 const SMTP_FROM = 'BienCouvert <contact@biencouvert.fr>';
 
-/** Transporter Zoho SSL (port 465) */
+/**
+ * Transporter Zoho.
+ * Configurable via env :
+ *   SMTP_HOST — défaut : smtp.zoho.com  (EU : smtp.zoho.eu)
+ *   SMTP_PORT — défaut : 465
+ *   SMTP_SECURE — défaut : true (SSL).  Mettre false pour STARTTLS (587)
+ */
 function createTransporter() {
+  const host   = process.env.SMTP_HOST   || 'smtp.zoho.com';
+  const port   = parseInt(process.env.SMTP_PORT   || '465', 10);
+  const secure = process.env.SMTP_SECURE !== 'false'; // true par défaut
   return nodemailer.createTransport({
-    host: 'smtp.zoho.com',
-    port: 465,
-    secure: true, // SSL
+    host,
+    port,
+    secure,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,

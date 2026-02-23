@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLeft, Send, MailCheck, ExternalLink, ChevronLeft } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, User as UserIcon, ArrowRight, Loader2, ArrowLeft, Send, MailCheck, ChevronLeft } from 'lucide-react';
 import { authService } from '../services/authService';
 import { User } from '../types';
 
@@ -106,18 +106,6 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack, resetToken }) => 
               Un email contenant un lien de réinitialisation a été envoyé à <strong>{email}</strong>.
             </p>
             
-            <div className="bg-primary-50 border border-primary-100 p-4 rounded-xl text-left">
-              <p className="text-xs text-primary-800 font-semibold uppercase tracking-wider mb-2">Simulation (Démo)</p>
-              <button 
-                type="button"
-                onClick={() => setMode('reset')}
-                className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-white border border-primary-200 text-primary-700 rounded-lg hover:bg-primary-100 transition-colors text-sm font-medium"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Simuler l'ouverture du mail
-              </button>
-            </div>
-
             <button type="button" onClick={() => setMode('forgot')} className="text-sm text-slate-500 hover:text-primary-600">Email non reçu ? Renvoyer</button>
           </div>
         );
