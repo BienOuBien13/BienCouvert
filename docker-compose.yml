@@ -8,8 +8,7 @@ services:
       context: ./BackEnd
       dockerfile: Dockerfile
     env_file:
-      - ./BackEnd/.env.production   # Config publique (commitée)
-      - ./BackEnd/.env.secrets      # Secrets (gitignorée, à créer manuellement sur la VM)
+      - ./BackEnd/.env              # Fichier secrets sur la VM (gitignore)
     environment:
       - REDIS_URL=redis://redis:6379  # Cache IA (container Redis interne)
     ports:
