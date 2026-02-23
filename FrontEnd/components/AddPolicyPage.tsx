@@ -20,6 +20,7 @@ interface Insurer {
   label: string;
   fullName: string;
   color: string;
+  logoUrl?: string;   // URL du logo depuis la table insurers.logo_url
 }
 
 interface CGData {
@@ -483,10 +484,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               >
                 <div className="flex items-center gap-3">
                   <div 
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg"
-                    style={{ backgroundColor: insurer.color }}
+                    className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden bg-white border border-gray-100 shadow-sm"
+                    style={{ backgroundColor: insurer.logoUrl ? 'white' : insurer.color }}
                   >
-                    {insurer.label.substring(0, 2)}
+                    {insurer.logoUrl ? (
+                      <img src={insurer.logoUrl} alt={insurer.label} className="w-10 h-10 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                    ) : (
+                      <span className="text-white font-bold text-lg">{insurer.label.substring(0, 2)}</span>
+                    )}
                   </div>
                   <div>
                     <h3 className="font-bold text-gray-900">{insurer.label}</h3>

@@ -13,6 +13,7 @@ import { ClearDataModal } from './components/ClearDataModal';
 import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
+import PartnerDashboard from './components/PartnerDashboard';
 import { PolicyStats } from './components/PolicyStats';
 import CoverageDetailPage from './components/CoverageDetailPage';
 import Footer from './components/Footer';
@@ -24,7 +25,7 @@ import { storageService } from './services/storageService';
 import { 
   ShieldCheck, Database, LogOut, Sparkles, 
   ArrowRight, CheckCircle2, Search, Zap, MessageSquare,
-  Rocket, Target, Flag, Info, Settings
+  Rocket, Target, Flag, Info, Settings, Briefcase
 } from 'lucide-react';
 
 function App() {
@@ -407,6 +408,8 @@ function App() {
         return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} /></div>;
       case 'admin':
         return <AdminView />;
+      case 'partner':
+        return <div className="animate-fadeIn"><PartnerDashboard /></div>;
       default: return null;
     }
   };
@@ -448,6 +451,16 @@ function App() {
            >
              <Database className="w-4 h-4" />
              <span className="text-sm font-bold hidden sm:inline">Admin</span>
+           </button>
+           )}
+           {user?.isPartner && (
+           <button
+             onClick={() => setActiveView('partner')}
+             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'partner' ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
+             title="Espace Partenaire"
+           >
+             <Briefcase className="w-4 h-4" />
+             <span className="text-sm font-bold hidden sm:inline">Partenaire</span>
            </button>
            )}
            <button onClick={() => setActiveView('profile')} className={`p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">

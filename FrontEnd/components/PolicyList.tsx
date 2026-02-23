@@ -1,5 +1,7 @@
 
 import React, { useState } from 'react';
+
+const API_URL = (import.meta as any).env?.VITE_API_URL || '';
 import { 
   Trash2, Pencil, Shield, ChevronDown, Car, Home, Heart, Scale, 
   Briefcase, CreditCard, Banknote, Smartphone, Share2, 
@@ -25,11 +27,32 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
   const [inlineEditSummary, setInlineEditSummary] = useState('');
   const [inlineEditFormula, setInlineEditFormula] = useState('');
+  const [availableFormulas, setAvailableFormulas] = useState<string[]>([]);
+  const [isLoadingFormulas, setIsLoadingFormulas] = useState(false);
 
-  const openInlineEdit = (policy: Policy) => {
+  const openInlineEdit = async (policy: Policy) => {
     setInlineEditId(policy.id);
     setInlineEditSummary(policy.summary || '');
-    setInlineEditFormula(policy.formula || '');
+    setInlineEditFormula(policy.formula || policy.coverageDetail || '');
+    setAvailableFormulas([]);
+
+    const insurerCode = (policy as any).insurerCode;
+    const typeCode = (policy as any).typeCode;
+    if (insurerCode && typeCode) {
+      setIsLoadingFormulas(true);
+      try {
+        const r = await fetch(
+          `${API_URL}/api/cg/central/by-type-and-insurer?insurance_type_code=${encodeURIComponent(typeCode)}&insurer_code=${encodeURIComponent(insurerCode)}`,
+          { credentials: 'include' }
+        );
+        if (r.ok) {
+          const data = await r.json();
+          if (data?.formules?.length) setAvailableFormulas(data.formules);
+        }
+      } catch { /* ignore */ } finally {
+        setIsLoadingFormulas(false);
+      }
+    }
   };
 
   const closeInlineEdit = () => setInlineEditId(null);
@@ -128,16 +151,35 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
               {isExpanded && (
                 <div className="px-8 pb-8 animate-fadeIn">
                   <div className="pt-6 border-t border-slate-100 space-y-6">
-                    
+
+                    {/* Header assureur + infos clés */}
+                    <div className="flex items-center gap-4 pb-2">
+                      {(policy as any).insurerLogo && (
+                        <img src={(policy as any).insurerLogo} alt={policy.insurer} className="h-9 object-contain" />
+                      )}
+                      <div className="flex-1 space-y-1">
+                        {policy.annualPremium && (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest rounded-full">
+                            <Euro className="w-3 h-3" />{policy.annualPremium.toLocaleString('fr-FR')} / an
+                          </span>
+                        )}
+                        {policy.addedAt && (
+                          <p className="text-[9px] text-slate-400 font-medium">
+                            Ajouté le {new Date(policy.addedAt).toLocaleDateString('fr-FR')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Formule et options */}
-                    {(policy.formula || (policy.options && policy.options.length > 0)) && (
+                    {(policy.formula || policy.coverageDetail || (policy.options && policy.options.length > 0)) && (
                       <div className="bg-gradient-to-br from-primary-50 to-blue-50 p-6 rounded-[2rem] border border-primary-100 space-y-4">
-                        {policy.formula && (
+                        {(policy.formula || policy.coverageDetail) && (
                           <div>
                             <label className="text-[10px] font-black text-primary-700 uppercase tracking-widest flex items-center gap-2">
                               <Zap className="w-3 h-3" /> Formule souscrite
                             </label>
-                            <p className="text-lg font-black text-primary-900 mt-2">{policy.formula}</p>
+                            <p className="text-lg font-black text-primary-900 mt-2">{policy.formula || policy.coverageDetail}</p>
                           </div>
                         )}
                         
@@ -230,11 +272,34 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                            </div>
                            <div className="space-y-3">
                              <div>
-                               <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Formule souscrite</label>
+                               <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1">
+                                 Formule souscrite {isLoadingFormulas && <Loader2 className="w-3 h-3 animate-spin" />}
+                               </label>
+                               {availableFormulas.length > 0 ? (
+                                 <div className="flex flex-wrap gap-2 mt-2">
+                                   {availableFormulas.map(f => (
+                                     <button
+                                       key={f}
+                                       type="button"
+                                       onClick={() => setInlineEditFormula(f)}
+                                       className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border-2 transition-all ${
+                                         inlineEditFormula === f
+                                           ? 'bg-primary-600 text-white border-primary-600'
+                                           : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300'
+                                       }`}
+                                     >{f}</button>
+                                   ))}
+                                   <button
+                                     type="button"
+                                     onClick={() => setInlineEditFormula('')}
+                                     className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border-2 border-dashed border-slate-200 text-slate-400 hover:border-primary-300"
+                                   >Autre</button>
+                                 </div>
+                               ) : null}
                                <input
                                  value={inlineEditFormula}
                                  onChange={e => setInlineEditFormula(e.target.value)}
-                                 placeholder="Ex : Formule Tout Risque"
+                                 placeholder={availableFormulas.length > 0 ? 'Ou saisir librement…' : 'Ex : Formule Tout Risque'}
                                  className="w-full mt-1.5 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-300"
                                />
                              </div>

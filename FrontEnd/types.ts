@@ -11,7 +11,7 @@ export enum PolicyType {
   OTHER = 'Autre'
 }
 
-export type AppView = 'home' | 'add' | 'policies' | 'chat' | 'analysis' | 'experts' | 'profile' | 'admin' | 'sync' | 'contact';
+export type AppView = 'home' | 'add' | 'policies' | 'chat' | 'analysis' | 'experts' | 'profile' | 'admin' | 'sync' | 'contact' | 'partner';
 
 export interface User {
   id: string;
@@ -20,6 +20,7 @@ export interface User {
   lastName: string;
   profile?: UserProfileData;
   isAdmin?: boolean;
+  isPartner?: boolean;           // Accès à la vue partenaire (courtier)
   geminiAiConsent?: boolean;  // Consentement pour traitement par Google Gemini AI
 }
 

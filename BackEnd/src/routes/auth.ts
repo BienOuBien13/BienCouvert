@@ -211,6 +211,7 @@ router.post('/register', authLimiter, [
         lastName: newUser.lastName,
         profile: newUser.profile,
         isAdmin: newUser.isAdmin,
+        isPartner: newUser.isPartner || false,
         geminiAiConsent: newUser.geminiAiConsent || false
       } 
     });
@@ -301,6 +302,7 @@ router.post('/login', authLimiter, [
         lastName: found.lastName,
         profile: found.profile || {},       // Retourne un objet vide si pas de profil
         isAdmin: found.isAdmin || false,    // Retourne false si pas défini
+        isPartner: found.isPartner || false,
         geminiAiConsent: found.geminiAiConsent || false
       } 
     });

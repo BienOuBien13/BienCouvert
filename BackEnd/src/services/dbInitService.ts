@@ -72,6 +72,33 @@ export async function initRdvRequestsTable(): Promise<void> {
   }
 }
 
+/** Initialise les tables partenaire (migration 015) */
+export async function initPartnerTables(): Promise<void> {
+  try {
+    // Colonne is_partner sur users
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_partner BOOLEAN NOT NULL DEFAULT FALSE`);
+
+    // Table partner_assignments : un partenaire prend en charge un dossier RDV
+    await query(`
+      CREATE TABLE IF NOT EXISTS partner_assignments (
+        id            SERIAL PRIMARY KEY,
+        partner_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        rdv_id        INTEGER NOT NULL UNIQUE REFERENCES rdv_requests(id) ON DELETE CASCADE,
+        client_email  VARCHAR(320),
+        assigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        status        VARCHAR(50)  NOT NULL DEFAULT 'assigned',
+        notes         TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_partner_assignments_partner ON partner_assignments(partner_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_partner_assignments_rdv     ON partner_assignments(rdv_id)`);
+    console.log('✅ Tables partenaire prêtes');
+  } catch (err: any) {
+    console.error('❌ initPartnerTables:', err.message);
+  }
+}
+
 /** Purge automatique des tokens expirés (à appeler périodiquement) */
 export async function purgeExpiredTokens(): Promise<void> {
   try {

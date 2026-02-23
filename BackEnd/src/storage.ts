@@ -21,6 +21,7 @@ export const storage = {
       password: row.password,
       profile: row.profile ? JSON.parse(row.profile) : null,
       isAdmin: row.is_admin,
+      isPartner: row.is_partner || false,
       geminiAiConsent: row.gemini_ai_consent || false
     })) as T[];
   },
@@ -30,7 +31,7 @@ export const storage = {
    * @param data - Objet utilisateur à sauvegarder
    */
   writeUser: async (data: any) => {
-    let { id, email, firstName, lastName, password, profile, isAdmin, geminiAiConsent } = data;
+    let { id, email, firstName, lastName, password, profile, isAdmin, isPartner, geminiAiConsent } = data;
     // Ajout de valeurs par défaut pour firstName et lastName
     if (!firstName) firstName = 'Utilisateur';
     if (!lastName) lastName = 'Inconnu';
@@ -46,10 +47,10 @@ export const storage = {
       // Mise à jour
       const result = await query(
         `UPDATE users 
-         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, gemini_ai_consent = $7, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $8
+         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, gemini_ai_consent = $7, is_partner = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9
          RETURNING id`,
-        [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, id]
+        [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, isPartner || false, id]
       );
       
       if (result.rows.length === 0) {
@@ -60,10 +61,10 @@ export const storage = {
     } else {
       // Insertion
       const result = await query(
-        `INSERT INTO users (email, first_name, last_name, password, profile, is_admin, gemini_ai_consent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO users (email, first_name, last_name, password, profile, is_admin, gemini_ai_consent, is_partner)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
-        [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false]
+        [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, isPartner || false]
       );
       return result.rows[0].id;
     }

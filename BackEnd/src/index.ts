@@ -12,11 +12,12 @@ import aiRoutes from './routes/ai';
 import masterDataRoutes from './routes/masterdata';
 import cgRoutes from './routes/cg';
 import contactRoutes from './routes/contact';
+import partnerRoutes from './routes/partner';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initAuditTable } from './services/auditService';
 import { verifySmtpConnection } from './services/emailService';
-import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, purgeExpiredTokens } from './services/dbInitService';
+import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, initPartnerTables, purgeExpiredTokens } from './services/dbInitService';
 
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
@@ -230,6 +231,7 @@ app.use('/api/ai', aiLimiter, doubleCsrfProtection, aiRoutes);              // �
 app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                // 📊 Master Data (lecture seule, pas de CSRF)
 app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // 📄 Conditions Générales avec CSRF
 app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // 📧 Prise de RDV avec CSRF
+app.use('/api/partner', doubleCsrfProtection, partnerRoutes);               // 🤝 Vue partenaire
 
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
@@ -243,6 +245,7 @@ initAuditTable().then(async () => {
   await initPasswordResetsTable();
   await initEmailVerificationsTable();
   await initRdvRequestsTable();
+  await initPartnerTables();
   // Vérification connexion SMTP (non bloquante)
   verifySmtpConnection();
   // Purge quotidienne des tokens expirés
