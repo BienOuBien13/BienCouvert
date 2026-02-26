@@ -330,30 +330,41 @@ async function generateEmbedding(text) {
 
   for (const modelName of modelsToTry) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`;
-    try {
-      const res = await _nodeFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
-        agent: _insecureAgent
-      });
-      if (res.status === 404 || res.status === 400) continue;
-      if (!res.ok) {
-        const b = await res.text();
-        console.error(`❌ ${modelName}: ${res.status} ${b.slice(0, 120)}`);
-        continue;
-      }
-      const data = await res.json();
-      const values = data.embedding?.values;
-      if (values && values.length > 0) {
-        if (_workingEmbedModel === undefined) {
-          console.log(`  ✅ Embedding via ${modelName} (${values.length} dims)`);
-          _workingEmbedModel = modelName;
+    // Retry jusqu'à 5 fois sur rate limit (429)
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const res = await _nodeFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
+          agent: _insecureAgent
+        });
+        if (res.status === 404 || res.status === 400) break; // passer au modèle suivant
+        if (res.status === 429) {
+          const waitSec = attempt * 15;
+          log(`  ⏳ Embedding rate limit, attente ${waitSec}s (tentative ${attempt}/5)...`);
+          await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
+          continue; // réessayer
         }
-        return values;
+        if (!res.ok) {
+          const b = await res.text();
+          console.error(`❌ ${modelName}: ${res.status} ${b.slice(0, 120)}`);
+          break; // passer au modèle suivant
+        }
+        const data = await res.json();
+        const values = data.embedding?.values;
+        if (values && values.length > 0) {
+          if (_workingEmbedModel === undefined) {
+            console.log(`  ✅ Embedding via ${modelName} (${values.length} dims)`);
+            _workingEmbedModel = modelName;
+          }
+          return values;
+        }
+        break;
+      } catch (err) {
+        console.error(`❌ ${modelName} network error:`, err.message);
+        break;
       }
-    } catch (err) {
-      console.error(`❌ ${modelName} network error:`, err.message);
     }
   }
   throw new Error('❌ Aucun modèle embedding disponible');
@@ -612,7 +623,8 @@ async function processDocument(row, index, total) {
       try {
         const pageData = allPages[pageNum - 1] || { text: '' };
         
-        // Générer embedding de la page
+        // Générer embedding de la page (pause 1s pour éviter rate limit)
+        await new Promise(resolve => setTimeout(resolve, 1000));
         const pageEmbedding = await generateEmbedding(pageData.text);
         
         // Détecter si la page contient un tableau
@@ -757,10 +769,14 @@ async function main() {
         errorCount++;
       }
 
-      // Pause entre documents
+      // Pause entre documents + CHECKPOINT pour libérer la mémoire PostgreSQL
       if (i < rowsToProcess.length - 1) {
-        log(`\n  ⏳ Pause de 3 secondes...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        try {
+          await pool.query('CHECKPOINT');
+          log(`  🧹 CHECKPOINT effectué`);
+        } catch (e) { /* ignore */ }
+        log(`\n  ⏳ Pause de 15 secondes...`);
+        await new Promise(resolve => setTimeout(resolve, 15000));
       }
     }
 
