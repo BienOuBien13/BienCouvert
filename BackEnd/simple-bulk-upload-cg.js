@@ -56,15 +56,42 @@ async function extractTextFromPdf(pdfPath) {
   return text;
 }
 
+const _EMBED_MODELS = ['text-embedding-004', 'text-multilingual-embedding-002', 'gemini-embedding-exp-03-07'];
+let _workingEmbedModel = undefined;
+
 async function generateEmbedding(text) {
   console.log('  🔮 Génération de l\'embedding...');
-  
-  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-  const result = await model.embedContent(text.substring(0, 20000));
-  
-  const embedding = result.embedding.values;
-  console.log(`  ✅ Embedding généré`);
-  return embedding;
+  const apiKey = process.env.GEMINI_API_KEY;
+  const modelsToTry = _workingEmbedModel ? [_workingEmbedModel] : _EMBED_MODELS;
+
+  for (const modelName of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:embedContent?key=${apiKey}`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } })
+      });
+      if (res.status === 404 || res.status === 400) continue;
+      if (!res.ok) {
+        const b = await res.text();
+        console.error(`  ⚠️  ${modelName}: ${res.status} ${b.slice(0, 120)}`);
+        continue;
+      }
+      const data = await res.json();
+      const values = data.embedding?.values;
+      if (values && values.length > 0) {
+        if (_workingEmbedModel === undefined) {
+          console.log(`  ✅ Embedding via ${modelName} (${values.length} dims)`);
+          _workingEmbedModel = modelName;
+        }
+        return values;
+      }
+    } catch (err) {
+      console.error(`  ⚠️  ${modelName} network error:`, err.message);
+    }
+  }
+  throw new Error('❌ Aucun modèle embedding disponible');
 }
 
 function parseFilename(filename) {

@@ -170,17 +170,43 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 }
 
 /**
- * Génère un embedding à partir du texte
+ * Génère un embedding à partir du texte via l'API REST Gemini (fallback multi-modèles)
  */
+const _EMBED_MODELS = ['text-embedding-004', 'text-multilingual-embedding-002', 'gemini-embedding-exp-03-07'];
+let _workingEmbedModel = undefined;
+
 async function generateEmbedding(text) {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-    const result = await model.embedContent(text);
-    return result.embedding.values;
-  } catch (error) {
-    console.error('❌ Erreur lors de la génération de l\'embedding:', error.message);
-    throw error;
+  const apiKey = process.env.GEMINI_API_KEY;
+  const modelsToTry = _workingEmbedModel ? [_workingEmbedModel] : _EMBED_MODELS;
+
+  for (const modelName of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:embedContent?key=${apiKey}`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } })
+      });
+      if (res.status === 404 || res.status === 400) continue;
+      if (!res.ok) {
+        const b = await res.text();
+        console.error(`  ⚠️  ${modelName}: ${res.status} ${b.slice(0, 120)}`);
+        continue;
+      }
+      const data = await res.json();
+      const values = data.embedding?.values;
+      if (values && values.length > 0) {
+        if (_workingEmbedModel === undefined) {
+          console.log(`  ✅ Embedding via ${modelName} (${values.length} dims)`);
+          _workingEmbedModel = modelName;
+        }
+        return values;
+      }
+    } catch (err) {
+      console.error(`  ⚠️  ${modelName} network error:`, err.message);
+    }
   }
+  throw new Error('❌ Aucun modèle embedding disponible');
 }
 
 /**
