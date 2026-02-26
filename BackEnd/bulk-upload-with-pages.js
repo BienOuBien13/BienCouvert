@@ -51,7 +51,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 /**
  * Réessaie une opération DB si la base est en mode recovery (redémarrage en cours)
  */
-async function retryDbOperation(fn, retries = 8, delayMs = 20000) {
+async function retryDbOperation(fn, retries = 12, delayMs = 60000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
@@ -70,6 +70,24 @@ async function retryDbOperation(fn, retries = 8, delayMs = 20000) {
       }
     }
   }
+}
+
+/**
+ * Attend que la base de données ne soit plus en mode recovery
+ */
+async function waitForDbReady() {
+  const maxWait = 30; // max 30 minutes
+  for (let i = 0; i < maxWait; i++) {
+    try {
+      const res = await pool.query('SELECT pg_is_in_recovery() AS recovery');
+      if (res.rows[0].recovery === false) return; // DB prête
+      log(`  ⏳ DB en recovery, attente 60s... (${i + 1}/${maxWait})`);
+    } catch (err) {
+      log(`  ⏳ DB inaccessible (${err.message.slice(0, 60)}), attente 60s... (${i + 1}/${maxWait})`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 60000));
+  }
+  throw new Error('DB toujours en recovery apres 30 minutes');
 }
 
 // Chemins
@@ -726,6 +744,8 @@ async function main() {
     // Traiter chaque document
     for (let i = 0; i < rowsToProcess.length; i++) {
       const row = rowsToProcess[i];
+      // Vérifier que la DB est prête avant chaque document
+      await waitForDbReady();
       const result = await processDocument(row, i, rowsToProcess.length);
 
       if (result.success) {
