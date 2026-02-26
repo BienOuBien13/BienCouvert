@@ -18,8 +18,6 @@ const { Pool } = pkg;
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import xlsx from 'xlsx';
 import { PDFDocument } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { createCanvas } from 'canvas';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,45 +84,32 @@ async function extractFullTextFromPdf(base64Pdf) {
 }
 
 /**
- * Extrait une page spécifique d'un PDF en texte et image PNG
+ * Extrait le texte de toutes les pages via Gemini (remplace pdfjs-dist)
+ * Retourne un tableau [{pageNumber, text}]
  */
-async function extractPage(pdfBuffer, pageNumber) {
-  try {
-    // Charger le PDF avec pdf.js
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
-    const pdfDoc = await loadingTask.promise;
-    
-    // Obtenir la page
-    const page = await pdfDoc.getPage(pageNumber);
-    
-    // Extraire le texte
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items.map(item => item.str).join(' ');
-    
-    // Rendre la page en image
-    const viewport = page.getViewport({ scale: 2.0 });
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext('2d');
-    
-    await page.render({
-      canvasContext: context,
-      viewport: viewport
-    }).promise;
-    
-    // Convertir le canvas en PNG base64
-    const pngBuffer = canvas.toBuffer('image/png');
-    const base64Image = pngBuffer.toString('base64');
-    
-    return {
-      text: pageText,
-      image: base64Image,
-      width: viewport.width,
-      height: viewport.height
-    };
-  } catch (error) {
-    console.error(`❌ Erreur extraction page ${pageNumber}:`, error.message);
-    throw error;
+async function extractAllPagesByGemini(base64Pdf, pageCount) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const result = await model.generateContent([
+    { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
+    { text: `Extract the text of this PDF document page by page.\nFor each page use EXACTLY this format:\n===PAGE_START_N===\n[text]\n===PAGE_END_N===\nwhere N is the page number (1 to ${pageCount}).\nReturn only the structured output, no extra text.` }
+  ]);
+  const responseText = result.response.text();
+  const pages = [];
+  for (let i = 1; i <= pageCount; i++) {
+    const match = responseText.match(new RegExp(`===PAGE_START_${i}===[\\s\\S]*?([\\s\\S]*?)===PAGE_END_${i}===`));
+    pages.push({ pageNumber: i, text: match ? match[1].trim() : '' });
   }
+  // Fallback: si Gemini n'a pas respecté le format, découper le texte en chunks égaux
+  const hasContent = pages.some(p => p.text.length > 0);
+  if (!hasContent) {
+    const fullText = responseText;
+    const chunkSize = Math.ceil(fullText.length / pageCount);
+    return Array.from({ length: pageCount }, (_, i) => ({
+      pageNumber: i + 1,
+      text: fullText.slice(i * chunkSize, (i + 1) * chunkSize)
+    }));
+  }
+  return pages;
 }
 
 /**
@@ -153,55 +138,17 @@ function detectTableInPage(pageText) {
 }
 
 /**
- * Extrait la structure d'un tableau depuis une image avec Gemini Vision
+ * Extrait la structure d'un tableau depuis le texte d'une page via Gemini
  */
-async function extractTableFromPageImage(base64Image, insurerCode, insuranceTypeCode) {
+async function extractTableFromPageText(pageText, insurerCode, insuranceTypeCode) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    
-    const prompt = `Analyse ce tableau de garanties d'assurance et extrais les informations structurées.
-
-Réponds UNIQUEMENT avec un JSON au format suivant (pas de markdown, juste le JSON) :
-
-{
-  "headers": ["colonne1", "colonne2", ...],
-  "rows": [
-    ["valeur1", "valeur2", ...],
-    ["valeur3", "valeur4", ...]
-  ],
-  "confidence": 0.0-1.0
-}
-
-Instructions :
-- Les headers sont généralement les noms de formules (ex: "Tiers", "Intermédiaire", "Tous Risques")
-- Chaque ligne représente une garantie (ex: "Responsabilité civile", "Bris de glaces")
-- Pour les valeurs des cellules, utilise :
-  * "✓" ou "included" pour garantie incluse
-  * "○" ou "optional" pour option payante
-  * "-" ou "excluded" pour non couvert
-  * Un montant si présent (ex: "5000€", "illimité")
-- Si tu ne trouves pas de tableau de garanties, retourne confidence: 0.0`;
-
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: base64Image
-        }
-      },
-      { text: prompt }
-    ]);
-
+    const prompt = `Voici le texte d'une page d'un document d'assurance (assureur: ${insurerCode}, type: ${insuranceTypeCode}).\nAnalyse ce texte et extrais le tableau de garanties/formules si présent.\n\nTexte:\n${pageText.slice(0, 4000)}\n\nRéponds UNIQUEMENT avec un JSON (pas de markdown) :\n{"headers":["formule1","formule2",...],"rows":[["garantie","valeur1","valeur2",...],...]},"confidence":0.0-1.0}\n- Si aucun tableau de garanties n'est présent, retourne {"headers":[],"rows":[],"confidence":0.0}`;
+    const result = await model.generateContent(prompt);
     const responseText = result.response.text().trim();
     const jsonText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
     const tableData = JSON.parse(jsonText);
-    
-    // Si confidence trop faible, on ignore
-    if (tableData.confidence < 0.5) {
-      return null;
-    }
-    
+    if (tableData.confidence < 0.5) return null;
     return tableData;
   } catch (error) {
     log(`  ⚠️  Erreur extraction tableau: ${error.message}`);
@@ -426,7 +373,7 @@ async function insertCgPage(pageData) {
       page_image_base64,
       has_table,
       table_json,
-      confidence,
+      table_extraction_confidence,
       created_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     RETURNING id
@@ -608,6 +555,10 @@ async function processDocument(row, index, total) {
     const pageCount = pdfDoc.getPageCount();
     log(`  📄 ${pageCount} pages à traiter`);
 
+    // Extraire toutes les pages en un seul appel Gemini (remplace pdfjs-dist)
+    log(`  📄 Extraction du texte page par page via Gemini...`);
+    const allPages = await extractAllPagesByGemini(base64Pdf, pageCount);
+
     let pagesProcessed = 0;
     let tablesFound = 0;
     let factsCreated = 0;
@@ -617,8 +568,7 @@ async function processDocument(row, index, total) {
       log(`    Page ${pageNum}/${pageCount}...`);
       
       try {
-        // Extraire la page (texte + image)
-        const pageData = await extractPage(pdfBuffer, pageNum);
+        const pageData = allPages[pageNum - 1] || { text: '' };
         
         // Générer embedding de la page
         const pageEmbedding = await generateEmbedding(pageData.text);
@@ -630,11 +580,11 @@ async function processDocument(row, index, total) {
         let confidence = 0.0;
         let pageId = null;
         
-        // Si tableau détecté, extraire avec Vision
+        // Si tableau détecté, extraire via texte (sans image)
         if (hasTable) {
-          log(`      🔍 Tableau détecté, extraction Vision...`);
-          tableJson = await extractTableFromPageImage(
-            pageData.image,
+          log(`      🔍 Tableau détecté, extraction texte...`);
+          tableJson = await extractTableFromPageText(
+            pageData.text,
             row.Insurer,
             row.Insurance_type
           );
@@ -652,7 +602,7 @@ async function processDocument(row, index, total) {
           page_number: pageNum,
           content_text: pageData.text,
           embedding: pageEmbedding,
-          page_image_base64: pageData.image,
+          page_image_base64: null,
           has_table: hasTable && tableJson !== null,
           table_json: tableJson,
           confidence: confidence
