@@ -476,9 +476,9 @@ async function insertCoverageFacts(facts) {
       source_page_id,
       source_page_number,
       extraction_confidence,
-      created_at
+      extracted_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
-    ON CONFLICT (central_cg_id, guarantee_key, formula_key) 
+    ON CONFLICT (insurer_code, insurance_type_code, central_cg_id, guarantee_key, formula_key) 
     DO UPDATE SET
       guarantee_label = EXCLUDED.guarantee_label,
       formula_label = EXCLUDED.formula_label,

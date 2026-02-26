@@ -74,7 +74,7 @@ async function run() {
           insurer_code, insurance_type_code, central_cg_id,
           guarantee_key, guarantee_label, formula_key, formula_label,
           coverage_status, coverage_amount, franchise,
-          source_page_id, source_page_number, extraction_confidence, created_at
+          source_page_id, source_page_number, extraction_confidence, extracted_at
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
         RETURNING id
       `, ['TEST', 'TEST', central_cg_id, 'test_key', 'Test', 'form_key', 'Formule Test',
