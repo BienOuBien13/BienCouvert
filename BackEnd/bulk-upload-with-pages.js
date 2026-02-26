@@ -63,7 +63,7 @@ const PDF_FOLDER = process.platform === 'win32'
  */
 async function extractFullTextFromPdf(base64Pdf) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     
     const result = await model.generateContent([
       {
@@ -157,7 +157,7 @@ function detectTableInPage(pageText) {
  */
 async function extractTableFromPageImage(base64Image, insurerCode, insuranceTypeCode) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     
     const prompt = `Analyse ce tableau de garanties d'assurance et extrais les informations structurées.
 
@@ -345,7 +345,7 @@ async function generateEmbedding(text) {
       const res = await _nodeFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } }),
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
         agent: _insecureAgent
       });
       if (res.status === 404 || res.status === 400) continue;

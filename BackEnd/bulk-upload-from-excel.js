@@ -190,7 +190,7 @@ async function generateEmbedding(text) {
       const res = await _nodeFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } }),
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
         agent: _insecureAgent
       });
       if (res.status === 404 || res.status === 400) continue;
