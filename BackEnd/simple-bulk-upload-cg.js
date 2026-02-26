@@ -59,7 +59,7 @@ async function extractTextFromPdf(pdfPath) {
   return text;
 }
 
-const _EMBED_MODELS = ['text-embedding-004', 'text-multilingual-embedding-002', 'gemini-embedding-exp-03-07'];
+const _EMBED_MODELS = ['gemini-embedding-001'];
 let _workingEmbedModel = undefined;
 
 async function generateEmbedding(text) {
@@ -68,7 +68,7 @@ async function generateEmbedding(text) {
   const modelsToTry = _workingEmbedModel ? [_workingEmbedModel] : _EMBED_MODELS;
 
   for (const modelName of modelsToTry) {
-    const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:embedContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`;
     try {
       const res = await nodeFetch(url, {
         method: 'POST',
