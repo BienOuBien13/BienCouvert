@@ -61,7 +61,7 @@ const PDF_FOLDER = process.platform === 'win32'
  */
 async function extractFullTextFromPdf(base64Pdf) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const result = await model.generateContent([
       {
@@ -88,7 +88,7 @@ async function extractFullTextFromPdf(base64Pdf) {
  * Retourne un tableau [{pageNumber, text}]
  */
 async function extractAllPagesByGemini(base64Pdf, pageCount) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   const result = await model.generateContent([
     { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
     { text: `Extract the text of this PDF document page by page.\nFor each page use EXACTLY this format:\n===PAGE_START_N===\n[text]\n===PAGE_END_N===\nwhere N is the page number (1 to ${pageCount}).\nReturn only the structured output, no extra text.` }
@@ -142,7 +142,7 @@ function detectTableInPage(pageText) {
  */
 async function extractTableFromPageText(pageText, insurerCode, insuranceTypeCode) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const prompt = `Voici le texte d'une page d'un document d'assurance (assureur: ${insurerCode}, type: ${insuranceTypeCode}).\nAnalyse ce texte et extrais le tableau de garanties/formules si présent.\n\nTexte:\n${pageText.slice(0, 4000)}\n\nRéponds UNIQUEMENT avec un JSON (pas de markdown) :\n{"headers":["formule1","formule2",...],"rows":[["garantie","valeur1","valeur2",...],...]},"confidence":0.0-1.0}\n- Si aucun tableau de garanties n'est présent, retourne {"headers":[],"rows":[],"confidence":0.0}`;
     const result = await model.generateContent(prompt);
     const responseText = result.response.text().trim();
