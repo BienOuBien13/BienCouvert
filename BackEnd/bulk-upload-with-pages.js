@@ -348,7 +348,8 @@ async function generateEmbedding(text) {
 
       if (res.status === 404 || res.status === 400) {
         const b = await res.text();
-        throw new Error(`HTTP ${res.status}: ${b.slice(0, 120)}`);
+        // Erreur permanente (texte vide, modèle absent) → ne pas retenter
+        throw new Error(`PERMANENT:HTTP ${res.status}: ${b.slice(0, 120)}`);
       }
 
       if (!res.ok) {
@@ -367,7 +368,9 @@ async function generateEmbedding(text) {
       throw new Error('Réponse vide');
 
     } catch (err) {
-      if (attempt >= 8) throw new Error(`❌ Aucun modèle embedding disponible (${err.message})`);
+      if (err.message.startsWith('PERMANENT:') || attempt >= 8) {
+        throw new Error(`❌ Aucun modèle embedding disponible (${err.message})`);
+      }
       const waitSec = attempt * 20;
       log(`  ⏳ Embedding erreur (tentative ${attempt}/8), attente ${waitSec}s... [${err.message.slice(0, 80)}]`);
       await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
@@ -442,7 +445,7 @@ async function insertCgPage(pageData) {
     pageData.central_cg_id,
     pageData.page_number,
     pageData.content_text,
-    JSON.stringify(pageData.embedding),
+    pageData.embedding ? JSON.stringify(pageData.embedding) : null,
     pageData.page_image_base64,
     pageData.has_table,
     pageData.table_json ? JSON.stringify(pageData.table_json) : null,
@@ -646,7 +649,12 @@ async function processDocument(row, index, total) {
         
         // Générer embedding de la page (pause 1s pour éviter rate limit)
         await new Promise(resolve => setTimeout(resolve, 1000));
-        const pageEmbedding = await generateEmbedding(pageData.text);
+        let pageEmbedding = null;
+        if (pageData.text && pageData.text.trim().length > 10) {
+          pageEmbedding = await generateEmbedding(pageData.text);
+        } else {
+          log(`      ⚠️  Page ${pageNum} vide, embedding ignoré`);
+        }
         
         // Détecter si la page contient un tableau
         const hasTable = detectTableInPage(pageData.text);
