@@ -48,6 +48,30 @@ const pool = new Pool({
 // Configuration Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+/**
+ * Réessaie une opération DB si la base est en mode recovery (redémarrage en cours)
+ */
+async function retryDbOperation(fn, retries = 8, delayMs = 20000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isRecovery = err.message && (
+        err.message.includes('recovery mode') ||
+        err.message.includes('recovery') ||
+        err.message.includes('starting up') ||
+        err.message.includes('Connection terminated')
+      );
+      if (isRecovery && attempt < retries) {
+        log(`  ⏳ DB en recovery, attente ${delayMs / 1000}s avant tentative ${attempt + 1}/${retries}...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 // Chemins
 const EXCEL_FILE = process.platform === 'win32' 
   ? 'C:\\biencouvert\\liste_pdf.xlsx' 
@@ -433,7 +457,7 @@ async function insertCoverageFacts(facts) {
   let insertedCount = 0;
   for (const fact of facts) {
     try {
-      await pool.query(query, [
+      await retryDbOperation(() => pool.query(query, [
         fact.insurer_code,
         fact.insurance_type_code,
         fact.central_cg_id,
@@ -447,7 +471,7 @@ async function insertCoverageFacts(facts) {
         fact.source_page_id,
         fact.source_page_number,
         fact.extraction_confidence
-      ]);
+      ]));
       insertedCount++;
     } catch (error) {
       log(`  ⚠️  Erreur insertion fact ${fact.guarantee_key}×${fact.formula_key}: ${error.message}`);
@@ -547,7 +571,7 @@ async function processDocument(row, index, total) {
       }
     };
     
-    const cgId = await insertCentralCg(cgData);
+    const cgId = await retryDbOperation(() => insertCentralCg(cgData));
     log(`  ✅ Document central_cg créé avec ID ${cgId}`);
 
     // Charger le PDF pour compter les pages
@@ -608,7 +632,7 @@ async function processDocument(row, index, total) {
           confidence: confidence
         };
         
-        pageId = await insertCgPage(pageRecord);
+        pageId = await retryDbOperation(() => insertCgPage(pageRecord));
         
         // Si tableau valide, créer les coverage_facts
         if (tableJson && tableJson.confidence >= 0.5) {
