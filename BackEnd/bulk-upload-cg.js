@@ -2,6 +2,9 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
+const nodeFetch = require('node-fetch');
+const https = require('https');
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 require('dotenv').config({ path: path.join(__dirname, '.env.production') });
 
 const pool = new Pool({
@@ -66,10 +69,11 @@ async function generateEmbedding(text) {
   for (const modelName of modelsToTry) {
     const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:embedContent?key=${apiKey}`;
     try {
-      const res = await fetch(url, {
+      const res = await nodeFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } })
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } }),
+        agent: insecureAgent
       });
       if (res.status === 404 || res.status === 400) continue;
       if (!res.ok) {

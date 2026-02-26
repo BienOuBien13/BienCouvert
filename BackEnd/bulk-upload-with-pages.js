@@ -7,8 +7,13 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { createRequire } from 'module';
 import dotenv from 'dotenv';
 import pkg from 'pg';
+const _require = createRequire(import.meta.url);
+const _nodeFetch = _require('node-fetch');
+const _https = _require('https');
+const _insecureAgent = new _https.Agent({ rejectUnauthorized: false });
 const { Pool } = pkg;
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import xlsx from 'xlsx';
@@ -337,10 +342,11 @@ async function generateEmbedding(text) {
   for (const modelName of modelsToTry) {
     const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:embedContent?key=${apiKey}`;
     try {
-      const res = await fetch(url, {
+      const res = await _nodeFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } })
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] } }),
+        agent: _insecureAgent
       });
       if (res.status === 404 || res.status === 400) continue;
       if (!res.ok) {
