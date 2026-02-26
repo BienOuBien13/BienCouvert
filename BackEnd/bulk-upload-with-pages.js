@@ -330,52 +330,47 @@ function extractFranchise(text) {
 }
 
 /**
- * Génère un embedding pour un texte via l'API REST Gemini (fallback multi-modèles)
+ * Génère un embedding pour un texte via l'API REST Gemini
  */
-const _EMBED_MODELS = ['gemini-embedding-001'];
-let _workingEmbedModel = undefined;
-
 async function generateEmbedding(text) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const modelsToTry = _workingEmbedModel ? [_workingEmbedModel] : _EMBED_MODELS;
+  const modelName = 'gemini-embedding-001';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`;
 
-  for (const modelName of modelsToTry) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`;
-    // Retry jusqu'à 5 fois sur rate limit (429)
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      try {
-        const res = await _nodeFetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
-          agent: _insecureAgent
-        });
-        if (res.status === 404 || res.status === 400) break; // passer au modèle suivant
-        if (res.status === 429) {
-          const waitSec = attempt * 15;
-          log(`  ⏳ Embedding rate limit, attente ${waitSec}s (tentative ${attempt}/5)...`);
-          await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
-          continue; // réessayer
-        }
-        if (!res.ok) {
-          const b = await res.text();
-          console.error(`❌ ${modelName}: ${res.status} ${b.slice(0, 120)}`);
-          break; // passer au modèle suivant
-        }
-        const data = await res.json();
-        const values = data.embedding?.values;
-        if (values && values.length > 0) {
-          if (_workingEmbedModel === undefined) {
-            console.log(`  ✅ Embedding via ${modelName} (${values.length} dims)`);
-            _workingEmbedModel = modelName;
-          }
-          return values;
-        }
-        break;
-      } catch (err) {
-        console.error(`❌ ${modelName} network error:`, err.message);
-        break;
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    try {
+      const res = await _nodeFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { parts: [{ text: text.slice(0, 8192) }] }, outputDimensionality: 768 }),
+        agent: _insecureAgent
+      });
+
+      if (res.status === 404 || res.status === 400) {
+        const b = await res.text();
+        throw new Error(`HTTP ${res.status}: ${b.slice(0, 120)}`);
       }
+
+      if (!res.ok) {
+        const b = await res.text();
+        const waitSec = attempt * 20;
+        log(`  ⏳ Embedding HTTP ${res.status} (tentative ${attempt}/8), attente ${waitSec}s... [${b.slice(0, 80)}]`);
+        await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
+        continue;
+      }
+
+      const data = await res.json();
+      const values = data.embedding?.values;
+      if (values && values.length > 0) {
+        return values;
+      }
+      throw new Error('Réponse vide');
+
+    } catch (err) {
+      if (attempt >= 8) throw new Error(`❌ Aucun modèle embedding disponible (${err.message})`);
+      const waitSec = attempt * 20;
+      log(`  ⏳ Embedding erreur (tentative ${attempt}/8), attente ${waitSec}s... [${err.message.slice(0, 80)}]`);
+      await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
     }
   }
   throw new Error('❌ Aucun modèle embedding disponible');
