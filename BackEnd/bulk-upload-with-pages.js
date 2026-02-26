@@ -184,18 +184,21 @@ function detectTableInPage(pageText) {
  */
 async function extractTableFromPageText(pageText, insurerCode, insuranceTypeCode) {
   try {
+    log(`      📝 Texte page (${pageText.length} chars): ${pageText.slice(0, 150).replace(/\n/g, ' ')}...`);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const prompt = `Voici le texte d'une page d'un document d'assurance (assureur: ${insurerCode}, type: ${insuranceTypeCode}).\nAnalyse ce texte et extrais le tableau de garanties/formules si présent.\n\nTexte:\n${pageText.slice(0, 4000)}\n\nRéponds UNIQUEMENT avec un JSON valide (pas de markdown, pas d'explication) de cette structure exacte :\n{"headers":["Garantie","Formule1","Formule2"],"rows":[["Nom garantie","valeur1","valeur2"]],"confidence":0.8}\n- "headers" : première colonne = "Garantie", suivantes = noms des formules\n- "rows" : chaque ligne = [nom garantie, valeur formule1, valeur formule2, ...]\n- "confidence" : entre 0.0 et 1.0 selon la qualité de l'extraction\n- Si aucun tableau de garanties n'est présent, retourne : {"headers":[],"rows":[],"confidence":0.0}`;
     const result = await model.generateContent(prompt);
     const responseText = result.response.text().trim();
+    log(`      🤖 Réponse Gemini: ${responseText.slice(0, 200)}`);
     const jsonText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     let tableData;
     try {
       tableData = JSON.parse(jsonText);
     } catch (parseErr) {
-      log(`  ⚠️  JSON invalide pour tableau: ${jsonText.slice(0, 100)}`);
+      log(`  ⚠️  JSON invalide pour tableau: ${jsonText.slice(0, 200)}`);
       return null;
     }
+    log(`      📊 Table parsée: headers=${tableData.headers?.length || 0}, rows=${tableData.rows?.length || 0}, confidence=${tableData.confidence}`);
     if (!tableData.headers || tableData.headers.length === 0) return null;
     if ((tableData.confidence || 0) < 0.3) return null;
     log(`      ✅ Tableau extrait (${tableData.rows?.length || 0} lignes, confidence: ${tableData.confidence})`);
