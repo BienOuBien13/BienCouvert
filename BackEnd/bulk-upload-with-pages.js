@@ -511,7 +511,22 @@ async function insertCoverageFacts(facts) {
       ]));
       insertedCount++;
     } catch (error) {
-      log(`  ⚠️  Erreur insertion fact ${fact.guarantee_key}×${fact.formula_key}: ${error.message}`);
+      log(`  ⚠️  Erreur insertion fact [${fact.guarantee_key}×${fact.formula_key}]: ${error.message}`);
+      // Si contrainte unique manquante, tenter sans ON CONFLICT
+      if (error.message.includes('constraint') || error.message.includes('does not exist')) {
+        try {
+          const simpleQuery = query.replace(/ON CONFLICT[\s\S]*$/, '');
+          await pool.query(simpleQuery, [
+            fact.insurer_code, fact.insurance_type_code, fact.central_cg_id,
+            fact.guarantee_key, fact.guarantee_label, fact.formula_key, fact.formula_label,
+            fact.coverage_status, fact.coverage_amount, fact.franchise,
+            fact.source_page_id, fact.source_page_number, fact.extraction_confidence
+          ]);
+          insertedCount++;
+        } catch (e2) {
+          log(`  ❌ Echec fallback: ${e2.message}`);
+        }
+      }
     }
   }
   
