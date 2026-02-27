@@ -172,4 +172,4 @@ jobs:
             docker compose build frontend
             docker compose up -d frontend
             
-            echo "✅ Deployment complete — $(date)"
+            echo "✅ Deployment complete ! — $(date)"
