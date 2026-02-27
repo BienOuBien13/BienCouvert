@@ -3,7 +3,13 @@
  */
 
 import { query } from '../db';
-import { InsuranceType, InsuranceTypeCode } from '../types/masterData';
+import {
+  InsuranceType,
+  InsuranceTypeCode,
+  InsuranceSubType,
+  InsuranceSubTypeCode,
+  DocumentType,
+} from '../types/masterData';
 
 export const masterDataService = {
   /**
@@ -115,5 +121,137 @@ export const masterDataService = {
       [insuranceTypeCode]
     );
     return result.rows;
-  }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sous-types d'assurance
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Récupère tous les sous-types actifs (optionnellement filtrés par type parent)
+   */
+  getInsuranceSubTypes: async (parentTypeCode?: InsuranceTypeCode): Promise<InsuranceSubType[]> => {
+    const params: any[] = [];
+    let where = 'WHERE ist.is_active = true';
+    if (parentTypeCode) {
+      params.push(parentTypeCode);
+      where += ` AND ist.parent_type_code = $${params.length}`;
+    }
+    const result = await query(
+      `SELECT
+         ist.code,
+         ist.parent_type_code  AS "parentTypeCode",
+         ist.label_fr          AS "labelFr",
+         ist.label_en          AS "labelEn",
+         ist.description,
+         ist.icon,
+         ist.color,
+         ist.display_order     AS "displayOrder",
+         ist.is_active         AS "isActive"
+       FROM insurance_sub_types ist
+       ${where}
+       ORDER BY ist.parent_type_code, ist.display_order`,
+      params
+    );
+    return result.rows;
+  },
+
+  /**
+   * Récupère un sous-type par son code
+   */
+  getInsuranceSubTypeByCode: async (code: InsuranceSubTypeCode): Promise<InsuranceSubType | null> => {
+    const result = await query(
+      `SELECT
+         code,
+         parent_type_code  AS "parentTypeCode",
+         label_fr          AS "labelFr",
+         label_en          AS "labelEn",
+         description,
+         icon,
+         color,
+         display_order     AS "displayOrder",
+         is_active         AS "isActive"
+       FROM insurance_sub_types
+       WHERE code = $1`,
+      [code]
+    );
+    return result.rows[0] || null;
+  },
+
+  /**
+   * Crée ou met à jour un sous-type d'assurance
+   */
+  upsertInsuranceSubType: async (
+    data: Partial<InsuranceSubType> & { code: string; parentTypeCode: string }
+  ): Promise<void> => {
+    await query(
+      `INSERT INTO insurance_sub_types
+         (code, parent_type_code, label_fr, label_en, description, icon, color, display_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (code) DO UPDATE SET
+         parent_type_code = EXCLUDED.parent_type_code,
+         label_fr         = EXCLUDED.label_fr,
+         label_en         = EXCLUDED.label_en,
+         description      = EXCLUDED.description,
+         icon             = EXCLUDED.icon,
+         color            = EXCLUDED.color,
+         display_order    = EXCLUDED.display_order,
+         is_active        = EXCLUDED.is_active,
+         updated_at       = CURRENT_TIMESTAMP`,
+      [
+        data.code,
+        data.parentTypeCode,
+        data.labelFr,
+        data.labelEn     || null,
+        data.description || null,
+        data.icon        || null,
+        data.color       || null,
+        data.displayOrder ?? 0,
+        data.isActive !== undefined ? data.isActive : true,
+      ]
+    );
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Types de documents
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Récupère tous les types de documents actifs
+   */
+  getDocumentTypes: async (): Promise<DocumentType[]> => {
+    const result = await query(
+      `SELECT
+         code,
+         label_fr      AS "labelFr",
+         label_en      AS "labelEn",
+         description,
+         display_order AS "displayOrder",
+         is_active     AS "isActive"
+       FROM document_types
+       WHERE is_active = true
+       ORDER BY display_order`,
+      []
+    );
+    return result.rows;
+  },
+
+  /**
+   * Récupère un type de document par son code
+   */
+  getDocumentTypeByCode: async (code: string): Promise<DocumentType | null> => {
+    const result = await query(
+      `SELECT
+         code,
+         label_fr      AS "labelFr",
+         label_en      AS "labelEn",
+         description,
+         display_order AS "displayOrder",
+         is_active     AS "isActive"
+       FROM document_types
+       WHERE code = $1`,
+      [code]
+    );
+    return result.rows[0] || null;
+  },
 };

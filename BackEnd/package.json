@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "nodemon --watch src --exec ts-node src/index.ts"
+    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No unit tests yet — typecheck acts as smoke test' && npm run typecheck"
   },
   "keywords": [],
   "author": "",

@@ -2,7 +2,7 @@
 // Types et constantes pour les données de référence (master data)
 
 /**
- * Type d'assurance normalisé
+ * Type d'assurance normalisé (niveau 1 — ex: HABITATION, AUTO, SANTE…)
  */
 export interface InsuranceType {
   code: string;           // Code unique (PRIMARY KEY)
@@ -13,8 +13,41 @@ export interface InsuranceType {
   color: string | null;   // Classe Tailwind
   displayOrder: number;
   isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/**
+ * Sous-type d'assurance (niveau 2 — ex: HAB_PRINCIPALE, PNO, AUTO, MOTO…)
+ * Rattaché à un InsuranceType parent via parentTypeCode.
+ */
+export interface InsuranceSubType {
+  code: string;              // Code unique (PRIMARY KEY)
+  parentTypeCode: string;    // FK → insurance_types.code
+  labelFr: string;
+  labelEn: string | null;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  displayOrder: number;
+  isActive: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/**
+ * Type de document (ex: CG, NI, IPID, DIP, TABLEAU…)
+ * Normalise le champ « type » précédemment libre dans central_cg / user_cg.
+ */
+export interface DocumentType {
+  code: string;           // Code unique (PRIMARY KEY)
+  labelFr: string;
+  labelEn: string | null;
+  description: string | null;
+  displayOrder: number;
+  isActive: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 /**
@@ -32,8 +65,8 @@ export interface Insurer {
   color: string | null;   // Couleur de la marque
   displayOrder: number;
   isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 /**
@@ -41,4 +74,6 @@ export interface Insurer {
  * Les valeurs réelles viennent de la base de données
  */
 export type InsuranceTypeCode = string;
+export type InsuranceSubTypeCode = string;
 export type InsurerCode = string;
+export type DocumentTypeCode = string;

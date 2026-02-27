@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "echo 'No unit tests yet — typecheck acts as smoke test' && npm run typecheck"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",

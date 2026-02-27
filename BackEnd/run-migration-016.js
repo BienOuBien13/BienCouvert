@@ -16,15 +16,18 @@ const pool = new Pool({
 async function run() {
   const client = await pool.connect();
   try {
-    const sql = fs.readFileSync(path.join(__dirname, 'migrations', '013_revert_embedding_768.sql'), 'utf8');
-    const statements = sql.split(';').map(s => s.replace(/--.*$/gm, '').trim()).filter(s => s.length > 0);
+    const sql = fs.readFileSync(path.join(__dirname, 'migrations', '016_pdf_file_path.sql'), 'utf8');
+    const statements = sql
+      .split(';')
+      .map(s => s.replace(/--.*$/gm, '').trim())
+      .filter(s => s.length > 0);
     console.log(`🔄 Exécution de ${statements.length} statements...`);
     for (const stmt of statements) {
       console.log(`  ▶ ${stmt.slice(0, 80).replace(/\s+/g, ' ')}...`);
       await client.query(stmt);
       console.log(`  ✅ OK`);
     }
-    console.log('\n✅ Migration 013 terminée — central_cg.embedding revenu à vector(768)');
+    console.log('\n✅ Migration 016 terminée — pdf_file_path ajouté dans central_cg et user_cg');
   } catch (err) {
     console.error('❌ Erreur migration:', err.message);
     process.exit(1);

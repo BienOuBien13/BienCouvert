@@ -119,6 +119,8 @@ export interface Policy {
   isInternalSource?: boolean;
   centralCgId?: number;
   metadata?: any; // JSON pour stocker formule, options, etc.
+  subTypeCode?: string;   // Code du sous-type d'assurance (ex: HAB_PRINCIPALE, PNO, AUTO, MOTO…)
+  subTypeLabel?: string;  // Label lisible du sous-type
 }
 
 export interface WebSearchResult {

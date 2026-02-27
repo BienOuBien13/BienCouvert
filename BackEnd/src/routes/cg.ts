@@ -6,6 +6,8 @@
 
 import express, { Request, Response } from 'express';
 import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from '../db';
 import pool from '../db';
@@ -14,6 +16,29 @@ import { vectorizeUserCgByPages } from '../services/pageVectorizationService';
 
 const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+// ─── Répertoire de stockage des PDFs sur le disque ───────────────────────────
+// Configure via PDF_STORAGE_DIR env-var (ex: /data/assur-clair/pdfs)
+// En dev, défaut à <projet>/BackEnd/pdf-storage
+const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR || path.join(__dirname, '..', '..', 'pdf-storage');
+
+/**
+ * Sauvegarde un Buffer PDF sur le disque et retourne le chemin relatif.
+ * @param buffer   Contenu binaire du PDF
+ * @param subDir   Sous-répertoire (ex: 'central/MAA01' ou 'user/alice@example.com')
+ * @param filename Nom de fichier original
+ * @returns chemin relatif stocké en DB (ex: central/MAA01/1710000000000_auto-zen.pdf)
+ */
+async function savePdfToDisk(buffer: Buffer, subDir: string, filename: string): Promise<string> {
+  const safeDir = subDir.replace(/[^a-zA-Z0-9_\-/]/g, '_');
+  const dir = path.join(PDF_STORAGE_DIR, safeDir);
+  fs.mkdirSync(dir, { recursive: true });
+  const safeFilename = filename.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+  const uniqueName = `${Date.now()}_${safeFilename}`;
+  const fullPath = path.join(dir, uniqueName);
+  fs.writeFileSync(fullPath, buffer);
+  return path.join(safeDir, uniqueName).replace(/\\/g, '/'); // toujours slash POSIX en BD
+}
 
 // Configuration multer pour l'upload de fichiers PDF
 const upload = multer({
@@ -30,12 +55,13 @@ const upload = multer({
 
 // -----------------------------------------------------------------------------
 // GET /api/cg/central/by-type-and-insurer
-// Récupère les CG disponibles depuis central_cg pour un type et un assureur
+// Récupère la CG principale (document_type_code = 'CG') depuis central_cg
+// pour un type, un assureur, et optionnellement un sous-type.
 // -----------------------------------------------------------------------------
 router.get('/central/by-type-and-insurer', async (req: Request, res: Response) => {
   try {
     console.log('[CG] GET request:', req.query);
-    const { insurance_type_code, insurer_code } = req.query;
+    const { insurance_type_code, insurer_code, insurance_sub_type_code } = req.query;
 
     if (!insurance_type_code || !insurer_code) {
       console.log('[CG] Missing parameters');
@@ -44,12 +70,29 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       });
     }
 
-    console.log('[CG] Querying database for:', { insurance_type_code, insurer_code });
+    // Construction dynamique : si un sous-type est précisé on l'utilise, sinon on
+    // accepte aussi les lignes sans sous-type (IS NULL) pour rester rétro-compat.
+    const params: any[] = [insurance_type_code, insurer_code];
+    let subTypeClause = '';
+    if (insurance_sub_type_code) {
+      params.push(insurance_sub_type_code);
+      subTypeClause = `AND (insurance_sub_type_code = $${params.length} OR insurance_sub_type_code IS NULL)`;
+    }
+
+    console.log('[CG] Querying database for:', { insurance_type_code, insurer_code, insurance_sub_type_code });
+
+    // Clause ORDER BY : si un sous-type est demandé, on préfère la correspondance exacte
+    const orderBySubType = insurance_sub_type_code
+      ? `CASE WHEN insurance_sub_type_code = $${params.length} THEN 0 ELSE 1 END,`
+      : '';
+
     const result = await query(
       `SELECT 
         id,
         insurer_code,
         insurance_type_code,
+        insurance_sub_type_code,
+        document_type_code,
         version,
         type,
         detail,
@@ -60,11 +103,15 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
         created_at
       FROM central_cg
       WHERE insurance_type_code = $1 
-        AND insurer_code = $2 
+        AND insurer_code = $2
+        AND (document_type_code = 'CG' OR document_type_code IS NULL)
+        ${subTypeClause}
         AND status = 'active'
-      ORDER BY version DESC
+      ORDER BY
+        ${orderBySubType}
+        version DESC
       LIMIT 1`,
-      [insurance_type_code, insurer_code]
+      params
     );
 
     console.log('[CG] Query result:', result.rows.length, 'rows');
@@ -83,10 +130,11 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       id: cg.id,
       insurer_code: cg.insurer_code,
       insurance_type_code: cg.insurance_type_code,
+      insurance_sub_type_code: cg.insurance_sub_type_code || null,
+      document_type_code: cg.document_type_code || 'CG',
       version: cg.version,
       detail: cg.detail,
       url: cg.url,
-      // Compatibilité : les CG admin stockent indexedFormulas, les user_cg stockent formules
       formules: cg.metadata?.formules || cg.metadata?.indexedFormulas || [],
       options: cg.metadata?.options || cg.metadata?.indexedOptions || { toutes_formules: [] },
       resume_court: cg.metadata?.resume_court || cg.metadata?.description || '',
@@ -105,12 +153,98 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
 });
 
 // -----------------------------------------------------------------------------
+// GET /api/cg/central/documents
+// Retourne TOUS les documents disponibles pour un assureur + type + sous-type.
+// Utile pour lister CG, NI, IPID, DIP etc. sur la même page de contrat.
+// Paramètres query : insurance_type_code (requis), insurer_code (requis),
+//                    insurance_sub_type_code (optionnel), document_type_code (optionnel)
+// -----------------------------------------------------------------------------
+router.get('/central/documents', async (req: Request, res: Response) => {
+  try {
+    const { insurance_type_code, insurer_code, insurance_sub_type_code, document_type_code } = req.query;
+
+    if (!insurance_type_code || !insurer_code) {
+      return res.status(400).json({
+        error: 'Les paramètres insurance_type_code et insurer_code sont requis'
+      });
+    }
+
+    const params: any[] = [insurance_type_code, insurer_code];
+    const conditions: string[] = [
+      'insurance_type_code = $1',
+      'insurer_code = $2',
+      "status = 'active'"
+    ];
+
+    if (insurance_sub_type_code) {
+      params.push(insurance_sub_type_code);
+      conditions.push(`(insurance_sub_type_code = $${params.length} OR insurance_sub_type_code IS NULL)`);
+    }
+    if (document_type_code) {
+      params.push(document_type_code);
+      conditions.push(`document_type_code = $${params.length}`);
+    }
+
+    const result = await query(
+      `SELECT
+         id,
+         insurer_code,
+         insurance_type_code,
+         insurance_sub_type_code,
+         document_type_code,
+         version,
+         detail,
+         url,
+         target_filename,
+         status,
+         metadata,
+         created_at
+       FROM central_cg
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY document_type_code, version DESC`,
+      params
+    );
+
+    const documents = result.rows.map(row => ({
+      id: row.id,
+      insurer_code: row.insurer_code,
+      insurance_type_code: row.insurance_type_code,
+      insurance_sub_type_code: row.insurance_sub_type_code || null,
+      document_type_code: row.document_type_code || 'CG',
+      version: row.version,
+      detail: row.detail,
+      url: row.url,
+      target_filename: row.target_filename,
+      formules: row.metadata?.formules || row.metadata?.indexedFormulas || [],
+      resume_court: row.metadata?.resume_court || row.metadata?.description || '',
+      insurer_name: row.metadata?.insurer_name || '',
+      insurance_type_name: row.metadata?.insurance_type_name || ''
+    }));
+
+    res.json(documents);
+  } catch (error: any) {
+    console.error('[CG/documents] ERROR:', error.message);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // POST /api/cg/user/upload
 // Upload d'une CG personnalisée — réponse immédiate, traitement asynchrone
 // -----------------------------------------------------------------------------
 router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Response) => {
   try {
-    const { insurance_type_code, insurer_code, user_email, contract_name, contract_version, doc_type, contract_url } = req.body;
+    const {
+      insurance_type_code,
+      insurer_code,
+      user_email,
+      contract_name,
+      contract_version,
+      doc_type,
+      contract_url,
+      insurance_sub_type_code,   // NOUVEAU — optionnel
+      document_type_code,        // NOUVEAU — optionnel (défaut : doc_type || 'CG')
+    } = req.body;
     const file = req.file;
 
     if (!insurance_type_code || !insurer_code || !user_email) {
@@ -123,28 +257,41 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
       return res.status(400).json({ error: 'Aucun fichier PDF fourni' });
     }
 
+    // Résolution du document_type_code : priorité à document_type_code, puis doc_type, défaut 'CG'
+    const resolvedDocTypeCode: string = document_type_code || doc_type || 'CG';
+
     // 1. Récupérer les noms (rapide — pas de Gemini)
-    const [insurerResult, typeResult] = await Promise.all([
+    const queryPromises: Promise<any>[] = [
       query('SELECT label, full_name FROM insurers WHERE code = $1', [insurer_code]),
-      query('SELECT label_fr FROM insurance_types WHERE code = $1', [insurance_type_code])
-    ]);
+      query('SELECT label_fr FROM insurance_types WHERE code = $1', [insurance_type_code]),
+    ];
+    if (insurance_sub_type_code) {
+      queryPromises.push(
+        query('SELECT label_fr FROM insurance_sub_types WHERE code = $1', [insurance_sub_type_code])
+      );
+    }
+    const [insurerResult, typeResult, subTypeResult] = await Promise.all(queryPromises);
     const insurerName = insurerResult.rows[0]?.full_name || insurerResult.rows[0]?.label || insurer_code;
     const insuranceTypeName = typeResult.rows[0]?.label_fr || insurance_type_code;
+    const insuranceSubTypeName = subTypeResult?.rows[0]?.label_fr || insurance_sub_type_code || null;
 
     // 2. Insérer immédiatement avec statut 'extracting' — PDF stocké, pas encore traité
     const base64Pdf = file.buffer.toString('base64');
 
     const insertResult = await query(
       `INSERT INTO user_cg (
-        insurer_code, insurance_type_code, version, type, detail, url,
+        insurer_code, insurance_type_code, insurance_sub_type_code,
+        document_type_code, version, type, detail, url,
         owner, target_filename, status, metadata, pdf_base64, vectorization_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'extracting')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'extracting')
       RETURNING id`,
       [
         insurer_code,
         insurance_type_code,
+        insurance_sub_type_code || null,
+        resolvedDocTypeCode,
         contract_version || '001',
-        doc_type || 'CG',
+        resolvedDocTypeCode,           // ancien champ libre maintenu pour rétro-compat
         contract_name || null,
         contract_url || null,
         user_email,
@@ -153,6 +300,7 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
         JSON.stringify({
           insurer_name: insurerName,
           insurance_type_name: insuranceTypeName,
+          insurance_sub_type_name: insuranceSubTypeName,
           source: 'user_upload',
           uploaded_at: new Date().toISOString()
         }),
@@ -161,6 +309,16 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
     );
 
     const cgId = insertResult.rows[0].id;
+
+    // Sauvegarde du PDF sur le disque (non-bloquant — fire & forget)
+    setImmediate(() => {
+      savePdfToDisk(file.buffer, `user/${insurer_code}`, file.originalname)
+        .then(relPath => query(
+          'UPDATE user_cg SET pdf_file_path = $1 WHERE id = $2',
+          [relPath, cgId]
+        ))
+        .catch(err => console.warn(`⚠️ Sauvegarde PDF disque user_cg ${cgId}:`, err?.message));
+    });
 
     // 3. Récupérer l'id utilisateur (pour user_coverage_facts)
     let userId: number | null = null;
@@ -175,7 +333,10 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
       id: cgId,
       status: 'extracting',
       insurer_name: insurerName,
-      insurance_type_name: insuranceTypeName
+      insurance_type_name: insuranceTypeName,
+      insurance_sub_type_code: insurance_sub_type_code || null,
+      insurance_sub_type_name: insuranceSubTypeName,
+      document_type_code: resolvedDocTypeCode
     });
 
     // 5. Pipeline asynchrone complet (extraction + vectorisation)
@@ -379,10 +540,64 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
   }
 }
 
-async function generateEmbedding(text: string): Promise<number[]> {
-  // Kept for backward compat — now delegates to centralized null-safe version
-  const values = await generateEmbeddingCentral(text);
-  return values ?? new Array(768).fill(0);
-}
+// -----------------------------------------------------------------------------
+// GET /api/cg/files/central/:id
+// Sert le fichier PDF d'une CG centrale depuis le disque (pdf_file_path)
+// -----------------------------------------------------------------------------
+router.get('/files/central/:id', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
+
+    const result = await query(
+      'SELECT pdf_file_path, target_filename FROM central_cg WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
+
+    const { pdf_file_path, target_filename } = result.rows[0];
+    if (!pdf_file_path) return res.status(404).json({ error: 'Fichier non disponible sur disque' });
+
+    const fullPath = path.join(PDF_STORAGE_DIR, pdf_file_path);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Fichier introuvable sur le serveur' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${target_filename || 'document.pdf'}"`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (err: any) {
+    console.error('Erreur GET /files/central:', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// GET /api/cg/files/user/:id
+// Sert le fichier PDF d'une CG utilisateur depuis le disque (pdf_file_path)
+// -----------------------------------------------------------------------------
+router.get('/files/user/:id', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
+
+    const result = await query(
+      'SELECT pdf_file_path, target_filename FROM user_cg WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
+
+    const { pdf_file_path, target_filename } = result.rows[0];
+    if (!pdf_file_path) return res.status(404).json({ error: 'Fichier non disponible sur disque' });
+
+    const fullPath = path.join(PDF_STORAGE_DIR, pdf_file_path);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Fichier introuvable sur le serveur' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${target_filename || 'document.pdf'}"`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (err: any) {
+    console.error('Erreur GET /files/user:', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 export default router;

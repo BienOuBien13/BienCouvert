@@ -98,6 +98,12 @@ const PDF_FOLDER = process.platform === 'win32'
   ? 'C:\\biencouvert\\cdg' 
   : '/home/VMRemi19821982/AssurClair/pdfs';
 
+// Répertoire de stockage centralisé des PDFs (configuré via PDF_STORAGE_DIR)
+const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR
+  || (process.platform === 'win32'
+    ? 'C:\\biencouvert\\pdf-storage'
+    : '/data/assur-clair/pdfs');
+
 /**
  * Extrait le texte complet d'un PDF (pour central_cg)
  */
@@ -387,6 +393,8 @@ async function insertCentralCg(data) {
     INSERT INTO central_cg (
       insurer_code,
       insurance_type_code,
+      insurance_sub_type_code,
+      document_type_code,
       version,
       type,
       owner,
@@ -399,15 +407,17 @@ async function insertCentralCg(data) {
       metadata,
       created_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
     RETURNING id
   `;
 
   const values = [
     data.insurer_code,
     data.insurance_type_code,
+    data.insurance_sub_type_code || null,
+    data.document_type_code || data.type || 'CG',
     data.version || '001',
-    data.type || 'CG',
+    data.document_type_code || data.type || 'CG',
     data.owner || 'system_bulk_upload',
     data.detail || '',
     data.url || '',
@@ -608,8 +618,10 @@ async function processDocument(row, index, total) {
     const cgData = {
       insurer_code: row.Insurer,
       insurance_type_code: row.Insurance_type,
+      insurance_sub_type_code: row.Insurance_sub_type_code || row.Sub_type || null,
+      document_type_code: row.Document_type_code || row.Type || 'CG',
       version: version,
-      type: row.Type || 'CG',
+      type: row.Document_type_code || row.Type || 'CG',
       owner: 'system_bulk_upload',
       detail: row['Détail'] || '',
       url: row.URL || '',
@@ -627,7 +639,19 @@ async function processDocument(row, index, total) {
     const cgId = await retryDbOperation(() => insertCentralCg(cgData));
     log(`  ✅ Document central_cg créé avec ID ${cgId}`);
 
-    // Charger le PDF pour compter les pages
+    // Copier le PDF dans le répertoire de stockage centralisé
+    try {
+      const targetDir = path.join(PDF_STORAGE_DIR, 'central', row.Insurer);
+      fs.mkdirSync(targetDir, { recursive: true });
+      const safeName = `${Date.now()}_${row['nom fichier cible'].replace(/[^a-zA-Z0-9_\-.]/g, '_')}`;
+      const targetPath = path.join(targetDir, safeName);
+      fs.copyFileSync(pdfPath, targetPath);
+      const relPath = `central/${row.Insurer}/${safeName}`;
+      await pool.query('UPDATE central_cg SET pdf_file_path = $1 WHERE id = $2', [relPath, cgId]);
+      log(`  ✅ PDF copié: ${relPath}`);
+    } catch (copyErr) {
+      log(`  ⚠️  Copie PDF échouée (non bloquant): ${copyErr.message}`);
+    }
     const pdfDoc = await PDFDocument.load(pdfBuffer);
     const pageCount = pdfDoc.getPageCount();
     log(`  📄 ${pageCount} pages à traiter`);

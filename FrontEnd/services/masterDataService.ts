@@ -38,7 +38,6 @@ export interface Insurer {
 export async function getInsuranceTypes(): Promise<InsuranceType[]> {
   try {
     const url = `${API_BASE}/api/masterdata/insurance-types`;
-    console.log('🔍 Chargement des types depuis:', url);
     
     const response = await fetch(url, {
       credentials: 'include',
@@ -49,7 +48,6 @@ export async function getInsuranceTypes(): Promise<InsuranceType[]> {
     }
     
     const data = await response.json();
-    console.log(`✅ ${data.length} types d'assurance chargés`);
     return data;
   } catch (error) {
     console.error('❌ Erreur lors de la récupération des types d\'assurance:', error);
@@ -109,6 +107,82 @@ export async function getInsuranceTypeByCode(code: string): Promise<InsuranceTyp
     console.error(`❌ Erreur lors de la récupération du type ${code}:`, error);
     return null;
   }
+}
+
+// ─── Sous-types d'assurance ────────────────────────────────────────────────
+
+export interface InsuranceSubType {
+  code: string;
+  parentTypeCode: string;
+  labelFr: string;
+  labelEn: string | null;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+// ─── Type de document ────────────────────────────────────────────────────────
+
+export interface DocumentType {
+  code: string;
+  labelFr: string;
+  labelEn: string | null;
+  description: string | null;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+/**
+ * Récupère les types de document (CG, CP, IPID, DIP, NOTIF, AN, TGARP, FIC)
+ */
+export async function getDocumentTypes(): Promise<DocumentType[]> {
+  try {
+    const response = await fetch(`${API_BASE}/api/masterdata/document-types`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    return data.map((d: any) => ({
+      code: d.code,
+      labelFr: d.label_fr ?? d.labelFr ?? d.code,
+      labelEn: d.label_en ?? d.labelEn ?? null,
+      description: d.description ?? null,
+      displayOrder: d.display_order ?? d.displayOrder ?? 0,
+      isActive: d.is_active ?? d.isActive ?? true,
+    }));
+  } catch (error) {
+    console.error('❌ getDocumentTypes:', error);
+    return [];
+  }
+}
+
+/**
+ * Récupère les sous-types pour un type parent (ex: 'HAB01' → HAB_PRINCIPALE, PNO…)
+ */
+export async function getInsuranceSubTypes(parentTypeCode?: string): Promise<InsuranceSubType[]> {
+  try {
+    const url = parentTypeCode
+      ? `${API_BASE}/api/masterdata/insurance-sub-types?parentTypeCode=${encodeURIComponent(parentTypeCode)}`
+      : `${API_BASE}/api/masterdata/insurance-sub-types`;
+    const response = await fetch(url, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.error('❌ getInsuranceSubTypes:', error);
+    return [];
+  }
+}
+
+// ─── Options disponibles sur une police ─────────────────────────────────────
+
+export interface AvailableOption {
+  guarantee_label: string;
+  guarantee_key: string;
+  formula_label: string;
+  coverage_amount: string | null;
+  coverage_notes: string | null;
+  source_page: number | null;
+  isSubscribed: boolean;
 }
 
 /**

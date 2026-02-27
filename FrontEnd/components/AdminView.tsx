@@ -9,6 +9,7 @@ import { CentralCgEntry, PolicyType } from '../types';
 import { storageService } from '../services/storageService';
 import { indexCgDocument } from '../services/geminiService';
 import { useMasterData } from '../hooks/useMasterData';
+import { getInsuranceSubTypes, getDocumentTypes, type InsuranceSubType, type DocumentType } from '../services/masterDataService';
 
 type VectorizationStatus = {
   id: number;
@@ -33,10 +34,15 @@ export const AdminView: React.FC = () => {
     insurerCode: '',
     productName: '',
     insuranceTypeCode: '',
+    insuranceSubTypeCode: '',
+    documentTypeCode: 'CG',
     version: '',
-    type: '',
     url: ''
   });
+
+  const [availableSubTypes, setAvailableSubTypes] = useState<InsuranceSubType[]>([]);
+  const [availableDocTypes, setAvailableDocTypes] = useState<DocumentType[]>([]);
+  const [isLoadingSubTypes, setIsLoadingSubTypes] = useState(false);
 
   const [pdfFile, setPdfFile] = useState<File | null>(null);
 
@@ -47,6 +53,24 @@ export const AdminView: React.FC = () => {
   } | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Charger les types de document au montage
+  useEffect(() => {
+    getDocumentTypes().then(setAvailableDocTypes);
+  }, []);
+
+  // Charger les sous-types quand le type d'assurance change
+  useEffect(() => {
+    if (!newEntry.insuranceTypeCode) {
+      setAvailableSubTypes([]);
+      setNewEntry(prev => ({ ...prev, insuranceSubTypeCode: '' }));
+      return;
+    }
+    setIsLoadingSubTypes(true);
+    getInsuranceSubTypes(newEntry.insuranceTypeCode)
+      .then(setAvailableSubTypes)
+      .finally(() => setIsLoadingSubTypes(false));
+  }, [newEntry.insuranceTypeCode]);
 
   useEffect(() => {
     const loadRepo = async () => {
@@ -134,8 +158,10 @@ export const AdminView: React.FC = () => {
         insurerCode: newEntry.insurerCode,
         productName: newEntry.productName,
         insuranceTypeCode: newEntry.insuranceTypeCode,
+        insuranceSubTypeCode: newEntry.insuranceSubTypeCode || null,
+        documentTypeCode: newEntry.documentTypeCode || 'CG',
         version: newEntry.version || '',
-        type: newEntry.type || 'CG',
+        type: newEntry.documentTypeCode || 'CG',
         url: newEntry.url || '',
         targetFilename: pdfFile.name,
         pdfData: pdfBase64,
@@ -176,7 +202,7 @@ export const AdminView: React.FC = () => {
 
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
-      setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', version: '', type: '', url: '' });
+      setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', insuranceSubTypeCode: '', documentTypeCode: 'CG', version: '', url: '' });
       setIndexingResult(null);
       setShowAddForm(false);
       setPdfFile(null);
@@ -328,12 +354,43 @@ export const AdminView: React.FC = () => {
               />
             </div>
             <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Sous-type d'assurance</label>
+              <select
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
+                value={newEntry.insuranceSubTypeCode}
+                onChange={e => setNewEntry({...newEntry, insuranceSubTypeCode: e.target.value})}
+                disabled={!newEntry.insuranceTypeCode || isLoadingSubTypes}
+              >
+                <option value="">{isLoadingSubTypes ? 'Chargement...' : '— Aucun sous-type —'}</option>
+                {availableSubTypes.map(st => (
+                  <option key={st.code} value={st.code}>{st.labelFr}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Type de document</label>
-              <input 
-                type="text" placeholder="CG, Notice, Annexe..." 
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
-                value={newEntry.type} onChange={e => setNewEntry({...newEntry, type: e.target.value})}
-              />
+              <select
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold appearance-none"
+                value={newEntry.documentTypeCode}
+                onChange={e => setNewEntry({...newEntry, documentTypeCode: e.target.value})}
+              >
+                {availableDocTypes.length > 0 ? (
+                  availableDocTypes.map(dt => (
+                    <option key={dt.code} value={dt.code}>{dt.labelFr}</option>
+                  ))
+                ) : (
+                  <>
+                    <option value="CG">Conditions Générales</option>
+                    <option value="CP">Conditions Particulières</option>
+                    <option value="IPID">IPID</option>
+                    <option value="DIP">Document d'information précontractuelle</option>
+                    <option value="NOTIF">Notice d'information</option>
+                    <option value="AN">Annexe contractuelle</option>
+                    <option value="TGARP">Tableau des garanties</option>
+                    <option value="FIC">Fiche d'information et de conseil</option>
+                  </>
+                )}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400 ml-1">URL (optionnelle)</label>

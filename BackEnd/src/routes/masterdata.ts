@@ -106,4 +106,91 @@ router.get('/insurers-by-type/:insuranceTypeCode', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sous-types d'assurance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Route GET /api/masterdata/insurance-sub-types
+ * Retourne tous les sous-types actifs.
+ * Paramètre optionnel ?parentTypeCode=HABITATION pour filtrer par type parent.
+ */
+router.get('/insurance-sub-types', async (req, res) => {
+  try {
+    const parent = req.query.parentTypeCode as string | undefined;
+    const cacheKey = `insurance-sub-types:${parent || 'all'}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached);
+    }
+    const subTypes = await masterDataService.getInsuranceSubTypes(parent);
+    setCached(cacheKey, subTypes);
+    res.setHeader('X-Cache', 'MISS');
+    res.json(subTypes);
+  } catch (err) {
+    console.error('Erreur GET /insurance-sub-types:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route GET /api/masterdata/insurance-sub-types/:code
+ * Récupère un sous-type spécifique par son code
+ */
+router.get('/insurance-sub-types/:code', async (req, res) => {
+  try {
+    const subType = await masterDataService.getInsuranceSubTypeByCode(req.params.code);
+    if (!subType) {
+      return res.status(404).json({ message: 'Sub-type not found' });
+    }
+    res.json(subType);
+  } catch (err) {
+    console.error('Erreur GET /insurance-sub-types/:code:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types de documents
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Route GET /api/masterdata/document-types
+ * Retourne tous les types de documents actifs (CG, NI, IPID, DIP, TABLEAU…)
+ */
+router.get('/document-types', async (req, res) => {
+  try {
+    const cached = getCached('document-types');
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cached);
+    }
+    const docTypes = await masterDataService.getDocumentTypes();
+    setCached('document-types', docTypes);
+    res.setHeader('X-Cache', 'MISS');
+    res.json(docTypes);
+  } catch (err) {
+    console.error('Erreur GET /document-types:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route GET /api/masterdata/document-types/:code
+ * Récupère un type de document spécifique par son code
+ */
+router.get('/document-types/:code', async (req, res) => {
+  try {
+    const docType = await masterDataService.getDocumentTypeByCode(req.params.code);
+    if (!docType) {
+      return res.status(404).json({ message: 'Document type not found' });
+    }
+    res.json(docType);
+  } catch (err) {
+    console.error('Erreur GET /document-types/:code:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

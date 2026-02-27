@@ -82,6 +82,40 @@ export const storageService = {
   },
 
   /**
+   * Met à jour la formule et les options souscrites d'une police
+   */
+  updatePolicyOptions: async (policyId: string, data: { formula?: string; options?: string[]; subTypeCode?: string }): Promise<void> => {
+    await apiFetch(`/policies/${policyId}/options`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Récupère les options disponibles (tableau de garanties optionnelles) pour une police
+   * avec le flag isSubscribed pour chaque option
+   */
+  getAvailableOptions: async (policyId: string): Promise<{
+    formula: string;
+    subscribedOptions: string[];
+    availableOptions: Array<{
+      guarantee_label: string;
+      guarantee_key: string;
+      formula_label: string;
+      coverage_amount: string | null;
+      coverage_notes: string | null;
+      source_page: number | null;
+      isSubscribed: boolean;
+    }>;
+  } | null> => {
+    try {
+      return await apiFetch(`/policies/${policyId}/available-options`, { method: 'GET' });
+    } catch {
+      return null;
+    }
+  },
+
+  /**
    * Récupère le référentiel central des CG
    */
   getCentralCgRepo: async (): Promise<CentralCgEntry[]> => {

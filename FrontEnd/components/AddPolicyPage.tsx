@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
+import { getInsuranceSubTypes, type InsuranceSubType } from '../services/masterDataService';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -70,6 +71,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [contractVersion, setContractVersion] = useState('001');
   const [docType, setDocType] = useState('CG');
   const [contractUrl, setContractUrl] = useState('');
+  const [selectedSubTypeCode, setSelectedSubTypeCode] = useState('');
+  const [availableSubTypes, setAvailableSubTypes] = useState<InsuranceSubType[]>([]);
+  const [isLoadingSubTypes, setIsLoadingSubTypes] = useState(false);
   // Progression traitement async
   const [processingPercent, setProcessingPercent] = useState(0);
   const [processingPhase, setProcessingPhase] = useState('');
@@ -90,10 +94,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     const user = localStorage.getItem('assurclair_current_user');
     if (user) {
       const userData = JSON.parse(user);
-      console.log('User data from localStorage:', userData);
       setUserEmail(userData.email);
-      setUserId(userData.id || userData.user_id || ''); // Try both id and user_id
-      console.log('userId set to:', userData.id || userData.user_id);
+      setUserId(userData.id || userData.user_id || '');
     }
   };
 
@@ -132,8 +134,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     if (mode === 'standard') {
       await searchCG(selectedType!.code, insurer.code, insurer);
     } else {
-      // Custom mode → formulaire de détails de la CG
+      // Custom mode → charger les sous-types et passer au formulaire
       setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
+      setSelectedSubTypeCode('');
+      setIsLoadingSubTypes(true);
+      getInsuranceSubTypes(selectedType!.code)
+        .then(setAvailableSubTypes)
+        .finally(() => setIsLoadingSubTypes(false));
       setStep('customConfig');
     }
   };
@@ -212,6 +219,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       formData.append('contract_version', contractVersion || '001');
       formData.append('doc_type', docType || 'CG');
       if (contractUrl.trim()) formData.append('contract_url', contractUrl.trim());
+      if (selectedSubTypeCode) formData.append('insurance_sub_type_code', selectedSubTypeCode);
 
       const response = await fetch(`${API_URL}/api/cg/user/upload`, {
         method: 'POST',
@@ -554,6 +562,33 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               </select>
             </div>
           </div>
+
+          {/* Sous-type d'assurance */}
+          {availableSubTypes.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Sous-type d'assurance</label>
+              <div className="flex flex-wrap gap-2">
+                {isLoadingSubTypes ? (
+                  <span className="text-sm text-gray-500">Chargement...</span>
+                ) : (
+                  availableSubTypes.map(st => (
+                    <button
+                      key={st.code}
+                      type="button"
+                      onClick={() => setSelectedSubTypeCode(prev => prev === st.code ? '' : st.code)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                        selectedSubTypeCode === st.code
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
+                      }`}
+                    >
+                      {st.labelFr}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
           {/* URL optionnel */}
           <div>

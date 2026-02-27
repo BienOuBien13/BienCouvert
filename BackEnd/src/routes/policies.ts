@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 import { storage } from '../storage';
 import { summarizePolicy, searchPolicyInfo, detectDuplicates } from '../services/geminiService';
 import { query } from '../db';
@@ -25,6 +27,19 @@ const upload = multer({
   }
 });
 const router = Router();
+
+// ─── Stockage PDF sur disque ──────────────────────────────────────────────────
+const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR || path.join(__dirname, '..', '..', 'pdf-storage');
+
+async function savePdfToDisk(buffer: Buffer, subDir: string, filename: string): Promise<string> {
+  const safeDir = subDir.replace(/[^a-zA-Z0-9_\-/]/g, '_');
+  const dir = path.join(PDF_STORAGE_DIR, safeDir);
+  fs.mkdirSync(dir, { recursive: true });
+  const safeFilename = filename.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+  const uniqueName = `${Date.now()}_${safeFilename}`;
+  fs.writeFileSync(path.join(dir, uniqueName), buffer);
+  return `${safeDir}/${uniqueName}`;
+}
 
 /**
  * Route GET /api/policies
@@ -79,6 +94,7 @@ router.post('/', upload.single('file'), async (req: any, res) => {
       userId: userId,
       insurerCode: body.insurerCode,
       insuranceTypeCode: body.insurance_type_code,
+      insuranceSubTypeCode: body.insurance_sub_type_code || null,  // NOUVEAU — optionnel
       centralCgId: body.cg_source === 'central' ? body.cg_id : null,
       userCgId: body.cg_source === 'user' ? body.cg_id : null,
       startDate: body.startDate || new Date().toISOString().split('T')[0],
@@ -166,6 +182,186 @@ router.put('/:id', upload.single('file'), async (req: any, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Route PATCH /api/policies/:id/options
+ * Met à jour la formule et/ou les options souscrites d'une police existante.
+ * Uniquement les champs fournis sont modifiés — les autres restent inchangés.
+ *
+ * Body attendu :
+ *   { formula?: string, options?: string[] }
+ *
+ * Options : tableau de libellés correspondant aux guarantee_label des coverage_facts
+ *   (ex: ["Bris de glace", "Protection juridique"])
+ */
+router.patch('/:id/options', async (req: any, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: 'Invalid policy id' });
+
+    const { formula, options } = req.body;
+    if (formula === undefined && options === undefined) {
+      return res.status(400).json({ message: 'At least one of formula or options is required' });
+    }
+
+    // Récupérer la police existante (valeurs actuelles)
+    const result = await query(
+      'SELECT metadata FROM policies WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ message: 'Policy not found' });
+
+    const existingMeta = result.rows[0].metadata || {};
+
+    // Fusionner uniquement ce qui est fourni
+    const updatedMeta = {
+      ...existingMeta,
+      ...(formula !== undefined  ? { formula }  : {}),
+      ...(options !== undefined  ? { options }   : {}),
+    };
+
+    await query(
+      `UPDATE policies
+         SET metadata = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [JSON.stringify(updatedMeta), id]
+    );
+
+    res.json({
+      id,
+      formula: updatedMeta.formula  || null,
+      options: updatedMeta.options  || [],
+    });
+  } catch (err: any) {
+    console.error('❌ PATCH /policies/:id/options:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+/**
+ * Route GET /api/policies/:id/available-options
+ * Retourne les options disponibles (coverage_status = 'optional') pour la formule
+ * souscrite de la police, en indiquant lesquelles sont déjà sélectionnées.
+ *
+ * Répond avec :
+ * {
+ *   formula: string | null,
+ *   subscribedOptions: string[],           // options déjà cochées (metadata.options)
+ *   availableOptions: [{
+ *     guarantee_label: string,
+ *     guarantee_key: string,
+ *     formula_label: string,
+ *     coverage_amount: string|null,
+ *     coverage_notes: string|null,
+ *     isSubscribed: boolean
+ *   }]
+ * }
+ */
+router.get('/:id/available-options', async (req: any, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: 'Invalid policy id' });
+
+    // Récupérer la police avec ses liens CG et ses options souscrites
+    const policyResult = await query(
+      `SELECT p.metadata, p.central_cg_id, p.user_cg_id
+       FROM policies p WHERE p.id = $1`,
+      [id]
+    );
+    if (policyResult.rows.length === 0) return res.status(404).json({ message: 'Policy not found' });
+
+    const row = policyResult.rows[0];
+    const meta = row.metadata || {};
+    const formula: string | null = meta.formula || null;
+    const subscribedOptions: string[] = Array.isArray(meta.options) ? meta.options : [];
+
+    // Normaliser les options souscrites en keys pour comparaison
+    const normalizeKey = (s: string) =>
+      s.toLowerCase()
+       .replace(/\+/g, '_plus')
+       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+       .replace(/[^a-z0-9]+/g, '_')
+       .replace(/^_+|_+$/g, '');
+    const subscribedKeys = new Set(subscribedOptions.map(normalizeKey));
+
+    // Chercher les options dans coverage_facts (central_cg) ou user_coverage_facts (user_cg)
+    let availableOptions: any[] = [];
+
+    if (row.central_cg_id) {
+      // Construire le filtre de formule si disponible
+      const params: any[] = [row.central_cg_id];
+      let formulaClause = '';
+      if (formula) {
+        const fKey = normalizeKey(formula);
+        const fKeyAlt = normalizeKey(formula.replace(/\+/g, ''));
+        params.push(fKey, fKeyAlt);
+        formulaClause = `AND (cf.formula_key = $${params.length - 1} OR cf.formula_key = $${params.length} OR cf.formula_key LIKE $${params.length - 1} || '%')`;
+      }
+
+      const cfResult = await query(
+        `SELECT DISTINCT ON (cf.guarantee_key)
+           cf.guarantee_label,
+           cf.guarantee_key,
+           cf.formula_label,
+           cf.formula_key,
+           cf.coverage_amount,
+           cf.coverage_notes,
+           cf.source_page_number
+         FROM coverage_facts cf
+         WHERE cf.central_cg_id = $1
+           AND cf.coverage_status = 'optional'
+           ${formulaClause}
+         ORDER BY cf.guarantee_key, cf.formula_key`,
+        params
+      );
+      availableOptions = cfResult.rows;
+    } else if (row.user_cg_id) {
+      const params: any[] = [row.user_cg_id];
+      let formulaClause = '';
+      if (formula) {
+        const fKey = normalizeKey(formula);
+        const fKeyAlt = normalizeKey(formula.replace(/\+/g, ''));
+        params.push(fKey, fKeyAlt);
+        formulaClause = `AND (ucf.formula_key = $${params.length - 1} OR ucf.formula_key = $${params.length})`;
+      }
+
+      const ucfResult = await query(
+        `SELECT DISTINCT ON (ucf.guarantee_key)
+           ucf.guarantee_label,
+           ucf.guarantee_key,
+           ucf.formula_label,
+           ucf.formula_key,
+           ucf.source_page_number,
+           NULL::text AS coverage_amount,
+           NULL::text AS coverage_notes
+         FROM user_coverage_facts ucf
+         WHERE ucf.user_cg_id = $1
+           AND ucf.coverage_status = 'optional'
+           ${formulaClause}
+         ORDER BY ucf.guarantee_key, ucf.formula_key`,
+        params
+      );
+      availableOptions = ucfResult.rows;
+    }
+
+    res.json({
+      formula,
+      subscribedOptions,
+      availableOptions: availableOptions.map(opt => ({
+        guarantee_label: opt.guarantee_label,
+        guarantee_key:   opt.guarantee_key,
+        formula_label:   opt.formula_label,
+        coverage_amount: opt.coverage_amount  || null,
+        coverage_notes:  opt.coverage_notes   || null,
+        source_page:     opt.source_page_number || null,
+        isSubscribed:    subscribedKeys.has(opt.guarantee_key),
+      })),
+    });
+  } catch (err: any) {
+    console.error('❌ GET /policies/:id/available-options:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
@@ -285,6 +481,8 @@ router.post('/central-cg', async (req, res) => {
       insurerCode,
       productName,
       insuranceTypeCode,
+      insuranceSubTypeCode,
+      documentTypeCode,
       version,
       type,
       url,
@@ -297,6 +495,8 @@ router.post('/central-cg', async (req, res) => {
       insurerCode, 
       productName, 
       insuranceTypeCode,
+      insuranceSubTypeCode,
+      documentTypeCode,
       version,
       type,
       url,
@@ -325,8 +525,10 @@ router.post('/central-cg', async (req, res) => {
     const newEntry: any = {
       insurerCode,
       insuranceTypeCode,
+      insuranceSubTypeCode: insuranceSubTypeCode || null,
+      documentTypeCode: documentTypeCode || type || 'CG',
       version: version || null,
-      type: type || 'CG',
+      type: documentTypeCode || type || 'CG',
       owner: `user_${userId}`,
       detail: null,
       url: url || null,
@@ -362,6 +564,20 @@ router.post('/central-cg', async (req, res) => {
           [pdfBase64, entryId]
         );
         console.log(`✅ PDF stocké en DB pour CG ${entryId} (${Math.round(pdfBase64.length / 1024)} KB)`);
+
+        // Étape 1b : sauvegarder le PDF sur le disque
+        try {
+          const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+          const filename = newEntry.targetFilename || 'document.pdf';
+          const relPath = await savePdfToDisk(pdfBuffer, `central/${insurerCode}`, filename);
+          await query(
+            'UPDATE central_cg SET pdf_file_path = $1 WHERE id = $2',
+            [relPath, entryId]
+          );
+          console.log(`✅ PDF sauvegardé sur disque: ${relPath}`);
+        } catch (diskErr: any) {
+          console.warn(`⚠️ Sauvegarde PDF disque central_cg ${entryId}:`, diskErr?.message);
+        }
 
         // Étape 2 : vectorisation page par page
         console.log(`🚀 Démarrage vectorisation en arrière-plan pour CG ${entryId}`);

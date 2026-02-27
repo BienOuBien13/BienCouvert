@@ -5,11 +5,13 @@ const API_URL = (import.meta as any).env?.VITE_API_URL || '';
 import { 
   Trash2, Pencil, Shield, ChevronDown, Car, Home, Heart, Scale, 
   Briefcase, CreditCard, Banknote, Smartphone, Share2, 
-  ChevronRight, Filter, SortAsc, SortDesc, Calendar, Euro, Building2, Info, CheckCircle, Zap, ExternalLink, Globe, Search, Loader2, AlertCircle, FileWarning, Link2, X, Check, FileText, Download, LayoutList
+  ChevronRight, Filter, SortAsc, SortDesc, Calendar, Euro, Building2, Info, CheckCircle, Zap, ExternalLink, Globe, Search, Loader2, AlertCircle, FileWarning, Link2, X, Check, FileText, Download, LayoutList, Layers, Settings2
 } from 'lucide-react';
 import { Policy, PolicyType, User } from '../types';
 import { searchPolicyInfo } from '../services/geminiService';
 import { generatePortfolioPDF } from '../services/pdfService';
+import { storageService } from '../services/storageService';
+import { getInsuranceSubTypes, type InsuranceSubType } from '../services/masterDataService';
 
 interface Props {
   policies: Policy[];
@@ -29,12 +31,27 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
   const [inlineEditFormula, setInlineEditFormula] = useState('');
   const [availableFormulas, setAvailableFormulas] = useState<string[]>([]);
   const [isLoadingFormulas, setIsLoadingFormulas] = useState(false);
+  // Sous-types
+  const [inlineEditSubTypeCode, setInlineEditSubTypeCode] = useState('');
+  const [subTypesForEdit, setSubTypesForEdit] = useState<InsuranceSubType[]>([]);
+  const [isLoadingSubTypes, setIsLoadingSubTypes] = useState(false);
+  // Options souscrites
+  const [availableOptions, setAvailableOptions] = useState<Array<{
+    guarantee_label: string; guarantee_key: string; isSubscribed: boolean;
+    coverage_amount: string | null; coverage_notes: string | null;
+  }>>([]);
+  const [inlineEditOptions, setInlineEditOptions] = useState<string[]>([]);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
 
   const openInlineEdit = async (policy: Policy) => {
     setInlineEditId(policy.id);
     setInlineEditSummary(policy.summary || '');
     setInlineEditFormula(policy.formula || policy.coverageDetail || '');
+    setInlineEditSubTypeCode((policy as any).subTypeCode || '');
+    setInlineEditOptions(policy.options || []);
     setAvailableFormulas([]);
+    setSubTypesForEdit([]);
+    setAvailableOptions([]);
 
     const insurerCode = (policy as any).insurerCode;
     const typeCode = (policy as any).typeCode;
@@ -53,13 +70,59 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
         setIsLoadingFormulas(false);
       }
     }
+
+    // Sous-types
+    if (typeCode) {
+      setIsLoadingSubTypes(true);
+      getInsuranceSubTypes(typeCode)
+        .then(subs => setSubTypesForEdit(subs))
+        .catch(() => {})
+        .finally(() => setIsLoadingSubTypes(false));
+    }
+
+    // Options disponibles
+    setIsLoadingOptions(true);
+    storageService.getAvailableOptions(policy.id)
+      .then(data => {
+        if (data) {
+          setAvailableOptions(data.availableOptions);
+          // Si les options souscrites viennent d'une source fiable (backend), les utiliser
+          const backendSubscribed = data.availableOptions
+            .filter(o => o.isSubscribed)
+            .map(o => o.guarantee_label);
+          if (backendSubscribed.length > 0) setInlineEditOptions(backendSubscribed);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingOptions(false));
   };
 
-  const closeInlineEdit = () => setInlineEditId(null);
+  const closeInlineEdit = () => {
+    setInlineEditId(null);
+    setSubTypesForEdit([]);
+    setAvailableOptions([]);
+  };
 
-  const saveInlineEdit = (policy: Policy) => {
+  const saveInlineEdit = async (policy: Policy) => {
     if (onUpdatePolicy) {
-      onUpdatePolicy({ ...policy, summary: inlineEditSummary, formula: inlineEditFormula });
+      onUpdatePolicy({
+        ...policy,
+        summary: inlineEditSummary,
+        formula: inlineEditFormula,
+        options: inlineEditOptions,
+        subTypeCode: inlineEditSubTypeCode || undefined,
+        subTypeLabel: subTypesForEdit.find(s => s.code === inlineEditSubTypeCode)?.labelFr,
+      });
+    }
+    // PATCH dédié options / sous-type sur le backend
+    try {
+      await storageService.updatePolicyOptions(policy.id, {
+        formula: inlineEditFormula,
+        options: inlineEditOptions,
+        subTypeCode: inlineEditSubTypeCode || undefined,
+      });
+    } catch (e) {
+      console.error('Erreur PATCH options:', e);
     }
     closeInlineEdit();
   };
@@ -135,8 +198,13 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                 </div>
                 <div className="flex-grow min-w-0">
                   <h4 className="font-black text-slate-900 truncate">{policy.name}</h4>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{policy.insurer}</p>
+                    {policy.subTypeLabel && (
+                      <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
+                        <Layers className="w-2.5 h-2.5" />{policy.subTypeLabel}
+                      </span>
+                    )}
                     {policy.coverageDetail && (
                       <span className="text-[8px] font-black text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full uppercase">
                         {policy.coverageDetail}
@@ -172,8 +240,16 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                     </div>
 
                     {/* Formule et options */}
-                    {(policy.formula || policy.coverageDetail || (policy.options && policy.options.length > 0)) && (
+                    {(policy.formula || policy.coverageDetail || policy.subTypeLabel || (policy.options && policy.options.length > 0)) && (
                       <div className="bg-gradient-to-br from-primary-50 to-blue-50 p-6 rounded-[2rem] border border-primary-100 space-y-4">
+                        {policy.subTypeLabel && (
+                          <div>
+                            <label className="text-[10px] font-black text-indigo-700 uppercase tracking-widest flex items-center gap-2">
+                              <Layers className="w-3 h-3" /> Type de contrat
+                            </label>
+                            <p className="text-sm font-black text-indigo-900 mt-1">{policy.subTypeLabel}</p>
+                          </div>
+                        )}
                         {(policy.formula || policy.coverageDetail) && (
                           <div>
                             <label className="text-[10px] font-black text-primary-700 uppercase tracking-widest flex items-center gap-2">
@@ -271,6 +347,38 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                              </button>
                            </div>
                            <div className="space-y-3">
+                             {/* Sous-type */}
+                             {(isLoadingSubTypes || subTypesForEdit.length > 0) && (
+                               <div>
+                                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1">
+                                   <Layers className="w-3 h-3" /> Type de contrat
+                                   {isLoadingSubTypes && <Loader2 className="w-3 h-3 animate-spin ml-1" />}
+                                 </label>
+                                 <div className="flex flex-wrap gap-2 mt-2">
+                                   <button
+                                     type="button"
+                                     onClick={() => setInlineEditSubTypeCode('')}
+                                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border-2 transition-all ${
+                                       inlineEditSubTypeCode === ''
+                                         ? 'bg-slate-700 text-white border-slate-700'
+                                         : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                     }`}
+                                   >Non précisé</button>
+                                   {subTypesForEdit.map(sub => (
+                                     <button
+                                       key={sub.code}
+                                       type="button"
+                                       onClick={() => setInlineEditSubTypeCode(sub.code === inlineEditSubTypeCode ? '' : sub.code)}
+                                       className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border-2 transition-all ${
+                                         inlineEditSubTypeCode === sub.code
+                                           ? 'bg-indigo-600 text-white border-indigo-600'
+                                           : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-200'
+                                       }`}
+                                     >{sub.labelFr}</button>
+                                   ))}
+                                 </div>
+                               </div>
+                             )}
                              <div>
                                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1">
                                  Formule souscrite {isLoadingFormulas && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -303,6 +411,46 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                                  className="w-full mt-1.5 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-300"
                                />
                              </div>
+                             {/* Options souscrites */}
+                             {(isLoadingOptions || availableOptions.length > 0) && (
+                               <div>
+                                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1">
+                                   <Settings2 className="w-3 h-3" /> Options souscrites
+                                   {isLoadingOptions && <Loader2 className="w-3 h-3 animate-spin ml-1" />}
+                                 </label>
+                                 <div className="mt-2 space-y-1.5">
+                                   {availableOptions.map(opt => {
+                                     const isChecked = inlineEditOptions.includes(opt.guarantee_label);
+                                     return (
+                                       <button
+                                         key={opt.guarantee_key}
+                                         type="button"
+                                         onClick={() => setInlineEditOptions(
+                                           isChecked
+                                             ? inlineEditOptions.filter(o => o !== opt.guarantee_label)
+                                             : [...inlineEditOptions, opt.guarantee_label]
+                                         )}
+                                         className={`w-full flex items-center justify-between p-3 rounded-2xl border-2 transition-all text-left ${
+                                           isChecked
+                                             ? 'bg-emerald-50 border-emerald-400 text-emerald-900'
+                                             : 'bg-white border-slate-100 text-slate-600 hover:border-slate-200'
+                                         }`}
+                                       >
+                                         <span className="text-[10px] font-bold">{opt.guarantee_label}</span>
+                                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 ${
+                                           isChecked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200'
+                                         }`}>
+                                           {isChecked && <Check className="w-3 h-3" />}
+                                         </div>
+                                       </button>
+                                     );
+                                   })}
+                                   {availableOptions.length === 0 && !isLoadingOptions && (
+                                     <p className="text-[9px] text-slate-400 font-medium ml-1">Aucune option disponible pour cette formule</p>
+                                   )}
+                                 </div>
+                               </div>
+                             )}
                              <div>
                                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Description / Résumé</label>
                                <textarea

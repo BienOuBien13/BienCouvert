@@ -222,12 +222,14 @@ export const storage = {
       SELECT 
         p.*,
         it.label_fr as type_label,
+        ist.label_fr as sub_type_label,
         i.label as insurer_label,
         i.logo_url as insurer_logo,
         ccg.url as central_cg_url,
         ucg.url as user_cg_url
       FROM policies p
       LEFT JOIN insurance_types it ON p.insurance_type_code = it.code
+      LEFT JOIN insurance_sub_types ist ON p.insurance_sub_type_code = ist.code
       LEFT JOIN insurers i ON p.insurer_code = i.code
       LEFT JOIN central_cg ccg ON p.central_cg_id = ccg.id
       LEFT JOIN user_cg ucg ON p.user_cg_id = ucg.id
@@ -258,6 +260,8 @@ export const storage = {
         insurerLogo: row.insurer_logo,
         type: typeEnum, // Utilise la valeur de l'enum PolicyType (ex: 'Automobile')
         typeCode: typeCode,
+        subTypeCode: row.insurance_sub_type_code || null,
+        subTypeLabel: row.sub_type_label || null,
         formula: metadata.formula || null,
         options: metadata.options || [],
         premium: metadata.premium ? parseFloat(metadata.premium) : null,
@@ -282,8 +286,8 @@ export const storage = {
    */
   writePolicy: async (data: any) => {
     const { 
-      id, userId, insurerCode, insuranceTypeCode, centralCgId, userCgId,
-      startDate, endDate, status, documentUrl, metadata
+      id, userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode,
+      centralCgId, userCgId, startDate, endDate, status, documentUrl, metadata
     } = data;
     
     // Validation des codes requis
@@ -309,10 +313,12 @@ export const storage = {
       await query(
         `UPDATE policies 
          SET user_id = $1, insurer_code = $2, insurance_type_code = $3,
-             central_cg_id = $4, user_cg_id = $5, start_date = $6, end_date = $7,
-             status = $8, document_url = $9, metadata = $10, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $11`,
-        [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null, 
+             insurance_sub_type_code = $4,
+             central_cg_id = $5, user_cg_id = $6, start_date = $7, end_date = $8,
+             status = $9, document_url = $10, metadata = $11, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $12`,
+        [userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode || null,
+         centralCgId || null, userCgId || null, 
          startDate, endDate, status, documentUrl, metadataJson, id]
       );
       return id;
@@ -320,11 +326,12 @@ export const storage = {
       // Insertion
       const result = await query(
         `INSERT INTO policies 
-         (user_id, insurer_code, insurance_type_code, central_cg_id, user_cg_id,
-          start_date, end_date, status, document_url, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (user_id, insurer_code, insurance_type_code, insurance_sub_type_code,
+          central_cg_id, user_cg_id, start_date, end_date, status, document_url, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id`,
-        [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null,
+        [userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode || null,
+         centralCgId || null, userCgId || null,
          startDate, endDate, status || 'active', documentUrl, metadataJson]
       );
       return result.rows[0].id;
@@ -393,13 +400,15 @@ export const storage = {
    */
   writeCentralCgEntry: async (data: any) => {
     const { 
-      id, insurerCode, insuranceTypeCode, version, type, owner, 
+      id, insurerCode, insuranceTypeCode, insuranceSubTypeCode, documentTypeCode,
+      version, type, owner, 
       detail, url, targetFilename, status, contentText, embedding, metadata, pdfBase64
     } = data;
     
     // S'assurer que metadata est un objet JSON valide
     const metadataJson = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
     const embeddingJson = embedding ? (typeof embedding === 'string' ? embedding : JSON.stringify(embedding)) : null;
+    const resolvedDocType = documentTypeCode || type || 'CG';
     
     if (id) {
       // Mise à jour
@@ -407,21 +416,26 @@ export const storage = {
         `UPDATE central_cg 
          SET insurer_code = $1, insurance_type_code = $2, version = $3, type = $4,
              owner = $5, detail = $6, url = $7, target_filename = $8, status = $9,
-             content_text = $10, embedding = $11, metadata = $12, pdf_base64 = $13, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $14`,
-        [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
-         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null, id]
+             content_text = $10, embedding = $11, metadata = $12, pdf_base64 = $13,
+             insurance_sub_type_code = $14, document_type_code = $15,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $16`,
+        [insurerCode, insuranceTypeCode, version, resolvedDocType, owner, detail, url, 
+         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null,
+         insuranceSubTypeCode || null, resolvedDocType, id]
       );
     } else {
       // Insertion
       const result = await query(
         `INSERT INTO central_cg 
          (insurer_code, insurance_type_code, version, type, owner, detail, url, 
-          target_filename, status, content_text, embedding, metadata, pdf_base64)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          target_filename, status, content_text, embedding, metadata, pdf_base64,
+          insurance_sub_type_code, document_type_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING id`,
-        [insurerCode, insuranceTypeCode, version, type, owner, detail, url, 
-         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null]
+        [insurerCode, insuranceTypeCode, version, resolvedDocType, owner, detail, url, 
+         targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null,
+         insuranceSubTypeCode || null, resolvedDocType]
       );
       return result.rows[0].id;
     }

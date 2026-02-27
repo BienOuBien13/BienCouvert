@@ -573,7 +573,7 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
   try {
     // ── Diagnostics de base ──
     policies.forEach((p: any, i: number) => {
-      console.log(`${tag}📋 Policy ${i + 1}: name="${p.name}" insurer="${p.insurer}" insurerCode="${p.insurerCode}" typeCode="${p.typeCode}" formula="${p.formula}" centralCgId=${p.centralCgId} userCgId=${p.userCgId}`);
+      console.log(`${tag}📋 Policy ${i + 1}: name="${p.name}" insurer="${p.insurer}" insurerCode="${p.insurerCode}" typeCode="${p.typeCode}" subTypeCode="${p.subTypeCode || ''}" formula="${p.formula}" centralCgId=${p.centralCgId} userCgId=${p.userCgId}`);
     });
 
     // ── Résolution des centralCgIds ──
@@ -583,18 +583,24 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
       .filter((id: any) => id != null)
       .map(Number);
 
-    // Priorité 2 : si certaines policies n'ont pas de centralCgId, chercher par insurer_code + insurance_type_code
+    // Priorité 2 : si certaines policies n'ont pas de centralCgId, chercher par insurer_code + insurance_type_code (+ sous-type si présent)
     const policiesNoCgId = policies.filter((p: any) => !p.centralCgId);
     if (policiesNoCgId.length > 0) {
-      console.log(`${tag}🔎 ${policiesNoCgId.length} policy(s) sans centralCgId — recherche par insurer+type`);
+      console.log(`${tag}🔎 ${policiesNoCgId.length} policy(s) sans centralCgId — recherche par insurer+type+sous-type`);
       try {
-        const conditions = policiesNoCgId
-          .filter((p: any) => p.insurerCode && p.typeCode)
-          .map((_: any, i: number) => `(cg.insurer_code = $${i * 2 + 1} AND cg.insurance_type_code = $${i * 2 + 2})`)
-          .join(' OR ');
-        const params = policiesNoCgId
-          .filter((p: any) => p.insurerCode && p.typeCode)
-          .flatMap((p: any) => [p.insurerCode, p.typeCode]);
+        const eligiblePolicies = policiesNoCgId.filter((p: any) => p.insurerCode && p.typeCode);
+        const params: any[] = [];
+        const conditions = eligiblePolicies.map((p: any) => {
+          params.push(p.insurerCode, p.typeCode);
+          let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
+          if (p.subTypeCode) {
+            params.push(p.subTypeCode);
+            // Correspondance exacte si sous-type connu, sinon on accepte aussi les lignes sans sous-type
+            clause += ` AND (cg.insurance_sub_type_code = $${params.length} OR cg.insurance_sub_type_code IS NULL)`;
+          }
+          clause += ')';
+          return clause;
+        }).join(' OR ');
 
         if (conditions && params.length > 0) {
           const cgLookup = await dbQuery(
@@ -602,7 +608,7 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
             params
           );
           const found = cgLookup.rows.map((r: any) => Number(r.id));
-          console.log(`${tag}✅ CG trouvés par insurer+type: [${found.join(', ')}]`);
+          console.log(`${tag}✅ CG trouvés par insurer+type+sous-type: [${found.join(', ')}]`);
           cgIdsForFacts = [...new Set([...cgIdsForFacts, ...found])];
         } else {
           console.warn(`${tag}⚠️ Impossible de résoudre CG: insurerCode ou typeCode manquant`);
@@ -1045,24 +1051,63 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 
     // Données structurées coverage_facts (tableau précis garantie × formule — source prioritaire)
     if (coverageFacts.length > 0) {
+      // ── Construire l'ensemble des options souscrites par l'utilisateur ──────
+      // On collecte les options de TOUTES les policies pour construire un dict
+      // guarantee_key → policy_name (pour attribution dans le tableau)
+      const subscribedOptionsByKey = new Map<string, string>(); // key → policy name
+      policies.forEach((p: any) => {
+        const opts: string[] = Array.isArray(p.options)
+          ? p.options
+          : Array.isArray(p.metadata?.options)
+          ? p.metadata.options
+          : [];
+        opts.forEach((opt: string) => {
+          const k = normalizeKey(opt);
+          subscribedOptionsByKey.set(k, p.name || 'Contrat');
+          // Alias sans accents et variantes courtes (ex: "Bris de glace" → "bris_de_glace" déjà OK)
+        });
+      });
+
       const grouped = new Map<string, any[]>();
       coverageFacts.forEach((f: any) => {
         const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key)!.push(f);
       });
+
+      // ── Bannière des options souscrites ──────────────────────────────────
+      if (subscribedOptionsByKey.size > 0) {
+        enrichedContext += '⚙️ OPTIONS SOUSCRITES PAR L\'UTILISATEUR (garanties EN OPTION effectivement achetées):\n';
+        subscribedOptionsByKey.forEach((policyName, key) => {
+          // Retrouver le label lisible depuis les facts (prefer guarantee_label)
+          const matchFact = coverageFacts.find((f: any) => f.guarantee_key === key);
+          const label = matchFact?.guarantee_label || key;
+          enrichedContext += `  ✓ ${label} (contrat: ${policyName})\n`;
+        });
+        enrichedContext += '\n⚠️ INSTRUCTION IA: les options listées ci-dessus sont INCLUSES dans la couverture de l\'utilisateur même si le tableau les marque "EN OPTION". Réponds en conséquence.\n\n';
+      }
+
       enrichedContext += '📊 TABLEAU DES GARANTIES PAR FORMULE (données structurées — à utiliser en PRIORITÉ):\n\n';
       grouped.forEach((facts, key) => {
         enrichedContext += `[${key}]\n`;
         facts.forEach((f: any) => {
-          const statusIcon = f.coverage_status === 'included' ? '✓ INCLUSE'
-                           : f.coverage_status === 'optional' ? '○ EN OPTION'
-                           : f.coverage_status === 'excluded' ? '✗ EXCLUE'
-                           : '— N/A';
+          // Déterminer si cette garantie EN OPTION est souscrite par l'utilisateur
+          const isSubscribedOption =
+            f.coverage_status === 'optional' &&
+            (subscribedOptionsByKey.has(f.guarantee_key) ||
+             subscribedOptionsByKey.has(normalizeKey(f.guarantee_label || '')));
+
+          const statusIcon = isSubscribedOption
+            ? '✓ INCLUSE (option souscrite)'
+            : f.coverage_status === 'included'  ? '✓ INCLUSE'
+            : f.coverage_status === 'optional'  ? '○ EN OPTION (non souscrite)'
+            : f.coverage_status === 'excluded'  ? '✗ EXCLUE'
+            : '— N/A';
+
           const details = [
             f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
             f.franchise       ? `franchise: ${f.franchise}`      : '',
-            f.coverage_notes  ? f.coverage_notes.substring(0, 80) : ''
+            f.coverage_notes  ? f.coverage_notes.substring(0, 100) : ''
           ].filter(Boolean).join(', ');
           const pageSrc = f.source_page_number
             ? ` [page ${f.source_page_number}${f.pdf_url ? ` | PDF: ${f.pdf_url}` : ''}]`
@@ -1091,10 +1136,12 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       enrichedContext = 'Vos contrats:\n' + policies.map(p => {
         const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
         const formula = (p as any).formula || (p as any).coverage || (p as any).metadata?.formula || null;
-        const options = (p as any).options || (p as any).metadata?.options || [];
+        const options: string[] = (p as any).options || (p as any).metadata?.options || [];
         
         const formulaInfo = formula ? ` - Formule: ${formula}` : '';
-        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        const optionsInfo = options.length > 0
+          ? ` - Options souscrites: ${options.join(', ')}`
+          : '';
         return `- ${p.name} (${p.type}) chez ${insurer}${formulaInfo}${optionsInfo}: ${p.summary || 'Pas de résumé'}`;
       }).join('\n');
     } else {
@@ -1102,11 +1149,13 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       const policiesInfo = policies.map(p => {
         const insurer = p.provider || (p as any).insurer || 'Assureur inconnu';
         const formula = (p as any).formula || (p as any).coverage || (p as any).metadata?.formula || null;
-        const options = (p as any).options || (p as any).metadata?.options || [];
+        const options: string[] = (p as any).options || (p as any).metadata?.options || [];
         
-        // Construire la ligne avec toutes les infos importantes
-        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
         const formulaInfo = formula ? ` - Formule: ${formula}` : '';
+        // Distinguer options souscrites clairement pour l'IA
+        const optionsInfo = options.length > 0
+          ? ` - Options souscrites (INCLUSES dans la couverture): ${options.join(', ')}`
+          : ' - Aucune option souscrite';
         
         const policyLine = `${p.name}: ${insurer} / ${p.type}${formulaInfo}${optionsInfo}`;
         console.log(`📝 Contexte policy: ${policyLine}`);
@@ -1139,6 +1188,13 @@ RÈGLES ABSOLUES:
 - Reste concis et direct
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
 
+RÈGLE OPTIONS SOUSCRITES (CRITIQUE):
+- Dans "📋 VOS CONTRATS", le champ "Options souscrites (INCLUSES dans la couverture): ..." liste les options que l'utilisateur a RÉELLEMENT ACHETÉES
+- Dans le tableau 📊, ces options apparaissent marquées "✓ INCLUSE (option souscrite)" → elles SONT couvertes
+- Si dans 📊 une option est "○ EN OPTION (non souscrite)" → elle N'EST PAS couverte
+- Ne confonds JAMAIS "option disponible dans le contrat" avec "option souscrite par l'utilisateur"
+- Si l'utilisateur demande "est-ce que je suis couvert pour X ?", vérifie d'abord la liste des options souscrites avant de répondre
+
 FORMAT DE RÉPONSE OBLIGATOIRE:
 - Une ligne d'introduction courte identifiant la formule
 - Liste à puces avec - (jamais de *)
@@ -1146,13 +1202,13 @@ FORMAT DE RÉPONSE OBLIGATOIRE:
 - Indiquer clairement si la garantie demandée est INCLUSE / EN OPTION / EXCLUE dans la formule de l'utilisateur
 - Terminer par une ligne source discrète: [NomProduit - page X](url_pdf) si url_pdf disponible, sinon [NomProduit - page X]
 
-Exemple CORRECT:
-Votre contrat MAAF AUTO avec formule TIERS ESSENTIEL couvre:
+Exemple CORRECT (avec option souscrite):
+Votre contrat MAAF AUTO avec formule TIERS ESSENTIEL + option Bris de glace couvre:
 
 - Responsabilité civile: dommages causés aux tiers (illimité pour dommages corporels, 100M€ pour dommages matériels)
 - Défense recours: prise en charge frais avocat jusqu'à 16 000€
 - Assistance aux personnes: incluse dès 0 km
-- Bris de glace: EN OPTION (franchise 50€ — à souscrire séparément)
+- Bris de glace: incluse (option souscrite — franchise 50€)
 
 [CG MAAF Auto - page 5](https://storage.azure.com/cg/maaf-auto.pdf)
 
@@ -1398,26 +1454,53 @@ export const sendMessageToAssistantStream = async (
       });
     }
 
-    // Donn\u00e9es structur\u00e9es coverage_facts (tableau pr\u00e9cis garantie \u00d7 formule)
+    // Données structurées coverage_facts (tableau précis garantie × formule)
     if (coverageFacts.length > 0) {
+      // Construire l'ensemble des options souscrites
+      const subscribedOptionsByKey2 = new Map<string, string>();
+      policies.forEach((p: any) => {
+        const opts: string[] = (p as any).options || (p as any).metadata?.options || [];
+        opts.forEach((opt: string) => {
+          subscribedOptionsByKey2.set(normalizeKey(opt), p.name || 'Contrat');
+        });
+      });
+
       const grouped = new Map<string, any[]>();
       coverageFacts.forEach((f: any) => {
         const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key)!.push(f);
       });
-      enrichedContext += '\ud83d\udcca TABLEAU DES GARANTIES PAR FORMULE (donn\u00e9es structur\u00e9es \u2014 \u00e0 utiliser en PRIORIT\u00c9):\n\n';
+
+      if (subscribedOptionsByKey2.size > 0) {
+        enrichedContext += '⚙️ OPTIONS SOUSCRITES (garanties optionnelles effectivement achetées):\n';
+        subscribedOptionsByKey2.forEach((policyName, key) => {
+          const matchFact = coverageFacts.find((f: any) => f.guarantee_key === key);
+          const label = matchFact?.guarantee_label || key;
+          enrichedContext += `  ✓ ${label} (contrat: ${policyName})\n`;
+        });
+        enrichedContext += '\n';
+      }
+
+      enrichedContext += '📊 TABLEAU DES GARANTIES PAR FORMULE (données structurées — à utiliser en PRIORITÉ):\n\n';
       grouped.forEach((facts, key) => {
         enrichedContext += `[${key}]\n`;
         facts.forEach((f: any) => {
-          const statusIcon = f.coverage_status === 'included' ? '\u2713 INCLUSE'
-                           : f.coverage_status === 'optional' ? '\u25cb EN OPTION'
-                           : f.coverage_status === 'excluded' ? '\u2717 EXCLUE'
-                           : '\u2014 N/A';
+          const isSubscribedOption =
+            f.coverage_status === 'optional' &&
+            (subscribedOptionsByKey2.has(f.guarantee_key) ||
+             subscribedOptionsByKey2.has(normalizeKey(f.guarantee_label || '')));
+
+          const statusIcon = isSubscribedOption
+            ? '✓ INCLUSE (option souscrite)'
+            : f.coverage_status === 'included'  ? '✓ INCLUSE'
+            : f.coverage_status === 'optional'  ? '○ EN OPTION (non souscrite)'
+            : f.coverage_status === 'excluded'  ? '✗ EXCLUE'
+            : '— N/A';
           const details = [
             f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
             f.franchise       ? `franchise: ${f.franchise}`      : '',
-            f.coverage_notes  ? f.coverage_notes.substring(0, 80) : ''
+            f.coverage_notes  ? f.coverage_notes.substring(0, 100) : ''
           ].filter(Boolean).join(', ');
           const pageSrc = f.source_page_number
             ? ` [page ${f.source_page_number}${f.pdf_url ? ` | PDF: ${f.pdf_url}` : ''}]`
@@ -1444,17 +1527,21 @@ export const sendMessageToAssistantStream = async (
       enrichedContext = 'Vos contrats:\n' + policies.map(p => {
         const insurer = (p as any).insurer || 'Assureur inconnu';
         const formula = (p as any).formula || null;
-        const options = (p as any).options || [];
+        const options: string[] = (p as any).options || (p as any).metadata?.options || [];
         const formulaInfo = formula ? ` - Formule: ${formula}` : '';
-        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        const optionsInfo = options.length > 0
+          ? ` - Options souscrites: ${options.join(', ')}`
+          : '';
         return `- ${p.name} (${p.type}) chez ${insurer}${formulaInfo}${optionsInfo}`;
       }).join('\n');
     } else {
       const policiesInfo = policies.map(p => {
         const insurer = (p as any).insurer || 'Assureur inconnu';
         const formula = (p as any).formula || null;
-        const options = (p as any).options || [];
-        const optionsInfo = options.length > 0 ? ` [Options: ${options.join(', ')}]` : '';
+        const options: string[] = (p as any).options || (p as any).metadata?.options || [];
+        const optionsInfo = options.length > 0
+          ? ` - Options souscrites (INCLUSES): ${options.join(', ')}`
+          : ' - Aucune option souscrite';
         const formulaInfo = formula ? ` - Formule: ${formula}` : '';
         return `${p.name}: ${insurer} / ${p.type}${formulaInfo}${optionsInfo}`;
       }).join('\n');

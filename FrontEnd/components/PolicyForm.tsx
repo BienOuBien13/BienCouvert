@@ -4,11 +4,20 @@ import { uuid } from '../utils/uuid';
 import { 
   FileText, Loader2, ArrowRight, 
   Car, Home, Heart, Scale, Shield, CreditCard, Smartphone, Banknote, 
-  Sparkles, Zap, X, Bot, CheckCircle2, ChevronLeft, Search, Check, Info, Database
+  Sparkles, Zap, X, Bot, CheckCircle2, ChevronLeft, Search, Check, Info, Database, Layers
 } from 'lucide-react';
 import { Policy, PolicyType } from '../types';
 import { searchPolicyInfo, parsePoliciesFromText } from '../services/geminiService';
 import { storageService } from '../services/storageService';
+import { getInsuranceSubTypes, type InsuranceSubType } from '../services/masterDataService';
+
+// Mapping PolicyType (label → code API)
+const POLICY_TYPE_TO_CODE: Partial<Record<PolicyType, string>> = {
+  [PolicyType.AUTO]: 'AUT01',
+  [PolicyType.HOME]: 'HAB01',
+  [PolicyType.HEALTH]: 'SAN01',
+  [PolicyType.LIFE]: 'PRE01',
+};
 
 interface Props {
   onAddPolicy: (policy: Omit<Policy, 'userId'>) => void;
@@ -65,6 +74,11 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     suggestedFormulas?: string[]; 
     suggestedOptions?: string[];
   } | null>(null);
+
+  // Sous-types
+  const [refiningSubTypeCode, setRefiningSubTypeCode] = useState<string>('');
+  const [availableSubTypes, setAvailableSubTypes] = useState<InsuranceSubType[]>([]);
+  const [isLoadingSubTypes, setIsLoadingSubTypes] = useState(false);
 
   // Manual Mode Fields
   const [name, setName] = useState('');
@@ -141,6 +155,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     setSourceUrl(''); setSmartText(''); setRefiningPolicy(null);
     setChatMessages([]); setIsWaitingResponse(false);
     setFoundCgDocs([]); setVoiceTranscript('');
+    setRefiningSubTypeCode(''); setAvailableSubTypes([]);
     if (cleanupVoiceRef.current) {
       cleanupVoiceRef.current();
       cleanupVoiceRef.current = null;
@@ -153,8 +168,20 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
 
   const startRefining = async (extracted: Partial<Policy>) => {
     setFormView('refining');
+    setRefiningSubTypeCode('');
     const temp: any = { ...extracted, isSearchingPDF: true };
     setRefiningPolicy(temp);
+
+    // Charger les sous-types disponibles pour ce type d'assurance
+    const parentCode = POLICY_TYPE_TO_CODE[extracted.type as PolicyType];
+    if (parentCode) {
+      setIsLoadingSubTypes(true);
+      getInsuranceSubTypes(parentCode)
+        .then(subs => setAvailableSubTypes(subs))
+        .finally(() => setIsLoadingSubTypes(false));
+    } else {
+      setAvailableSubTypes([]);
+    }
 
     try {
       // Priorité 1 : Recherche dans la base vérifiée (Admin Base)
@@ -315,6 +342,8 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       summary: refiningPolicy.summary || summary || "Vérifié par BienCouvert.",
       sourceUrl: refiningPolicy.sourceUrl || sourceUrl,
       isInternalSource: refiningPolicy.isInternalSource,
+      subTypeCode: refiningSubTypeCode || undefined,
+      subTypeLabel: availableSubTypes.find(s => s.code === refiningSubTypeCode)?.labelFr,
       addedAt: Date.now(),
       fileData: null,
       fileName: null,
@@ -399,6 +428,33 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
              </div>
            ) : (
              <div className="space-y-8 animate-slideUp">
+
+                {/* Sous-type Pill Selector */}
+                {(isLoadingSubTypes || availableSubTypes.length > 0) && (
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                      <Layers className="w-3 h-3 text-indigo-500" />
+                      De quel type s'agit-il ?
+                      {isLoadingSubTypes && <Loader2 className="w-3 h-3 animate-spin ml-1" />}
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableSubTypes.map(sub => (
+                        <button
+                          key={sub.code}
+                          onClick={() => setRefiningSubTypeCode(sub.code === refiningSubTypeCode ? '' : sub.code)}
+                          className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${
+                            refiningSubTypeCode === sub.code
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl scale-105'
+                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-indigo-200'
+                          }`}
+                        >
+                          {sub.labelFr}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Formules Pill Selector */}
                 <div className="space-y-4">
                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">

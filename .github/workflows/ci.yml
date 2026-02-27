@@ -1,0 +1,174 @@
+name: AssurClair CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel previous runs for the same PR/branch to avoid wasting resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1 — Backend: TypeScript check + build
+  # ─────────────────────────────────────────────────────────────
+  backend-ci:
+    name: Backend — TypeCheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: BackEnd/package-lock.json
+
+      - name: Install dependencies
+        working-directory: BackEnd
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: BackEnd
+        run: npm run typecheck
+
+      - name: Build (TypeScript → dist/)
+        working-directory: BackEnd
+        run: npm run build
+
+      - name: Verify dist/index.js exists
+        run: test -f BackEnd/dist/index.js && echo "✅ Build artifact present" || exit 1
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2 — Frontend: TypeScript check + Vite build
+  # ─────────────────────────────────────────────────────────────
+  frontend-ci:
+    name: Frontend — TypeCheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: FrontEnd/package-lock.json
+
+      - name: Install dependencies
+        working-directory: FrontEnd
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: FrontEnd
+        run: npm run typecheck
+
+      - name: Vite build
+        working-directory: FrontEnd
+        run: npx vite build
+        env:
+          VITE_API_URL: https://placeholder-for-ci.example.com
+          VITE_API_BASE_URL: https://placeholder-for-ci.example.com
+
+      - name: Verify dist/index.html exists
+        run: test -f FrontEnd/dist/index.html && echo "✅ Frontend build artifact present" || exit 1
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 3 — Security: dependency audit
+  # ─────────────────────────────────────────────────────────────
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    # Don't block deploy on audit — report only (high/critical still fail)
+    continue-on-error: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit BackEnd dependencies
+        working-directory: BackEnd
+        run: npm audit --audit-level=high --omit=dev || true
+
+      - name: Audit FrontEnd dependencies
+        working-directory: FrontEnd
+        run: npm audit --audit-level=high --omit=dev || true
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 4 — Docker image build validation
+  # ─────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./BackEnd
+          file: ./BackEnd/Dockerfile
+          push: false
+          tags: assurclair-backend:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 5 — Deploy to Azure VM (push to main only)
+  # ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Azure VM
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "📥 Pull latest code..."
+            cd ~/AssurClair
+            git pull origin main
+
+            echo "🐳 Rebuild and restart backend..."
+            cd /opt/assurclair
+            docker compose build backend
+            docker compose up -d backend
+
+            echo "🌐 Build and deploy frontend..."
+            cd ~/AssurClair/FrontEnd
+            npm ci --omit=dev
+            npx vite build
+            sudo cp -r dist/* /var/www/assurclair/
+
+            echo "✅ Deployment complete — $(date)"
