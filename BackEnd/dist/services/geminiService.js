@@ -8,6 +8,7 @@ exports.getAiClient = getAiClient;
 exports.resolveCoverageFacts = resolveCoverageFacts;
 const dotenv_1 = __importDefault(require("dotenv"));
 const db_1 = require("../db");
+const geminiMetrics_1 = require("../utils/geminiMetrics");
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
 // Ce service encapsule l'accès à l'API Gemini (librairie `@google/genai`). Si la
@@ -34,7 +35,8 @@ function getAiClient() {
             return null;
         }
     }
-    return client;
+    // Retourne un client proxié qui track automatiquement les tokens Gemini
+    return (0, geminiMetrics_1.trackGeminiClient)(client);
 }
 const generateSystemInstruction = (policies = []) => {
     let context = "Tu es AssurClair, un assistant personnel expert en assurances. Ton but est d'aider l'utilisateur à comprendre ses couvertures. ";
@@ -68,7 +70,7 @@ const summarizePolicy = async (fileBase64, mimeType) => {
         return `Résumé simulé (${mimeType}) : impossible d'accéder à Gemini, configurez GEMINI_API_KEY.`;
     }
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'summarizePolicy');
         const result = await model.generateContent([
             {
                 inlineData: {
@@ -117,7 +119,7 @@ Réponds en JSON:
             const model = ai.getGenerativeModel({
                 model: 'gemini-2.5-flash',
                 generationConfig: { responseMimeType: 'application/json' }
-            });
+            }, 'searchPolicyInfo_rag');
             const extractResult = await model.generateContent([promptExtract]);
             const extractText = extractResult.response.text();
             const extracted = JSON.parse(extractText);
@@ -158,7 +160,7 @@ Réponds en JSON:
             generationConfig: {
                 responseMimeType: 'application/json'
             }
-        });
+        }, 'searchPolicyInfo_internet');
         const result = await model.generateContent([prompt]);
         const response = await result.response;
         const text = response.text();
@@ -266,7 +268,7 @@ Retourne UNIQUEMENT un tableau JSON valide d'optimisations avec les champs:
             generationConfig: {
                 responseMimeType: 'application/json'
             }
-        });
+        }, 'detectDuplicates');
         const result = await model.generateContent(parts);
         const response = await result.response;
         const text = response.text();
@@ -367,7 +369,7 @@ CONSIGNES :
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: { responseMimeType: 'application/json' }
-        });
+        }, 'getCoverageAnalysis');
         const result = await model.generateContent([{ text: prompt }]);
         const text = result.response.text();
         const parsed = JSON.parse(text);
@@ -1117,7 +1119,7 @@ Il existe plusieurs niveaux de garantie. **Responsabilité civile** est obligato
         }));
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash'
-        });
+        }, 'chat');
         // Ajouter le contexte système au premier message si l'historique est vide
         const chat = model.startChat({
             history: [
@@ -1452,7 +1454,7 @@ FORMAT DE RÉPONSE OBLIGATOIRE:
         }
         const model = ai.getGenerativeModel({
             model: 'gemini-2.5-flash'
-        });
+        }, 'chatStream');
         const chat = model.startChat({
             history: [
                 { role: 'user', parts: [{ text: systemInstruction }] },
@@ -1562,7 +1564,7 @@ ${text}`;
             generationConfig: {
                 responseMimeType: 'application/json'
             }
-        });
+        }, 'parsePoliciesFromText');
         const result = await model.generateContent([prompt]);
         const response = await result.response;
         const jsonText = response.text();
@@ -1616,7 +1618,7 @@ ${contentText.slice(0, 12000)}`;
             const model = ai.getGenerativeModel({
                 model: 'gemini-2.5-flash',
                 generationConfig: { responseMimeType: 'application/json' }
-            });
+            }, 'indexCgDocument');
             const result = await model.generateContent([{ text: prompt }]);
             const response = await result.response;
             let jsonText = response.text().trim();
@@ -1681,7 +1683,7 @@ Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentai
             generationConfig: {
                 responseMimeType: 'application/json'
             }
-        });
+        }, 'indexCgDocument_pdf');
         console.log(`📤 Demande d'indexation à Gemini avec le contenu du PDF`);
         const result = await model.generateContent([
             {
@@ -1738,7 +1740,7 @@ const generateShareableReport = async (policies, findings) => {
   ${findings.length > 0 ? `J'ai ${findings.length} optimisation(s) possibles.` : ''}
   Ton texte doit être engageant et positif.`;
     try {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'generateShareableReport');
         const result = await model.generateContent([prompt]);
         const response = await result.response;
         return response.text().trim() || "J'ai fait mon bilan AssurClair !";

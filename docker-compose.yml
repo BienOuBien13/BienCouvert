@@ -12,10 +12,13 @@ services:
       - ./BackEnd/.env              # Secrets sur la VM (gitignore, surcharge .env.production)
     environment:
       - REDIS_URL=redis://redis:6379  # Cache IA (container Redis interne)
+      - OTEL_ENABLED=true            # Active la télémétrie OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     ports:
       - "4000:4000"
     depends_on:
       - redis
+      - otel-collector
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/"]
@@ -54,6 +57,56 @@ services:
       retries: 3
       start_period: 10s
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Observabilité — Suivi tokens Gemini
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  # OpenTelemetry Collector : reçoit OTLP du backend → route vers OpenObserve
+  otel-collector:
+    container_name: assurclair-otel-collector
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      - OPENOBSERVE_USER=admin@assurclair.local
+      - OPENOBSERVE_PASSWORD=ChangeMe_OO_2025!
+    depends_on:
+      - openobserve
+    restart: unless-stopped
+    # Port 4318 intentionnellement non exposé hors du réseau Docker (sécurité)
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # OpenObserve : backend d'observabilité (métriques + dashboards)
+  # Accès UI : http://localhost:5080 via SSH tunnel   →  user: admin@assurclair.local
+  # Depuis la VM : ssh -L 5080:localhost:5080 <user>@<vm-ip>
+  openobserve:
+    container_name: assurclair-openobserve
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    ports:
+      - "127.0.0.1:5080:5080"   # Bind localhost seulement — accessible via SSH tunnel
+    environment:
+      - ZO_ROOT_USER_EMAIL=admin@assurclair.local
+      - ZO_ROOT_USER_PASSWORD=ChangeMe_OO_2025!
+      - ZO_DATA_DIR=/data
+    volumes:
+      - openobserve_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
 networks:
   default:
     name: assurclair-network
+
+volumes:
+  openobserve_data:
+    driver: local

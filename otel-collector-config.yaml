@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenTelemetry Collector — Configuration AssurClair
+#
+# Pipeline : Backend Node.js → OTLP/HTTP (port 4318) → Collector → OpenObserve
+#
+# Variables d'environnement attendues (injectées par docker-compose) :
+#   OPENOBSERVE_USER     ex: admin@assurclair.local
+#   OPENOBSERVE_PASSWORD ex: ChangeMe_OO_2025!
+# ─────────────────────────────────────────────────────────────────────────────
+
+extensions:
+  # Authentification Basic Auth vers OpenObserve
+  basicauth/openobserve:
+    client_auth:
+      username: ${env:OPENOBSERVE_USER}
+      password: ${env:OPENOBSERVE_PASSWORD}
+
+  # Health check interne du collector
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+receivers:
+  # OTLP HTTP : reçoit les métriques du backend Node.js
+  otlp:
+    protocols:
+      http:
+        endpoint: "0.0.0.0:4318"
+        # Pas d'auth sur le réseau Docker interne (isolé)
+
+processors:
+  # Batch : regroupe les métriques avant export pour réduire les requêtes
+  batch:
+    timeout: 15s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  # Ajoute des attributs de ressource communs
+  resource:
+    attributes:
+      - key: environment
+        value: production
+        action: upsert
+
+exporters:
+  # Export vers OpenObserve via OTLP HTTP
+  # L'endpoint de base est suffisant — le collector ajoute /v1/metrics automatiquement
+  otlphttp/openobserve:
+    endpoint: "http://openobserve:5080/api/default"
+    auth:
+      authenticator: basicauth/openobserve
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+  # Debug logs (désactiver en production pour réduire le bruit)
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [basicauth/openobserve, health_check]
+  pipelines:
+    metrics:
+      receivers:  [otlp]
+      processors: [batch, resource]
+      exporters:  [otlphttp/openobserve]
+  telemetry:
+    logs:
+      level: warn

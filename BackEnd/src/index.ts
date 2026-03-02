@@ -15,6 +15,8 @@ import contactRoutes from './routes/contact';
 import partnerRoutes from './routes/partner';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
+import { initTelemetry } from './telemetry';
+import { getTokenStats, resetTokenStats } from './utils/geminiMetrics';
 import { initAuditTable } from './services/auditService';
 import { verifySmtpConnection } from './services/emailService';
 import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, initPartnerTables, purgeExpiredTokens } from './services/dbInitService';
@@ -28,6 +30,9 @@ import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTa
 
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv.config();
+
+// Initialisation de la télémétrie OTel (avant tout appel Gemini)
+initTelemetry();
 
 // -----------------------------------------------------------------------------
 // Vérification des variables d'environnement critiques
@@ -233,8 +238,26 @@ app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // �
 app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // 📧 Prise de RDV avec CSRF
 app.use('/api/partner', doubleCsrfProtection, partnerRoutes);               // 🤝 Vue partenaire
 
-// -----------------------------------------------------------------------------
-// Démarrage du serveur
+// ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
+/**
+ * GET /api/admin/token-stats
+ * Retourne les statistiques de tokens Gemini pour la session en cours.
+ * Accès restreint : endpoint admin uniquement (pas exposé publiquement).
+ */
+app.get('/api/admin/token-stats', (req, res) => {
+  res.json(getTokenStats());
+});
+
+/**
+ * POST /api/admin/token-stats/reset
+ * Remet à zéro les compteurs en mémoire (ne remet pas à zéro les métriques OTel).
+ */
+app.post('/api/admin/token-stats/reset', (req, res) => {
+  resetTokenStats();
+  res.json({ ok: true, message: 'Compteurs remis à zéro' });
+});
+
+
 // -----------------------------------------------------------------------------
 
 const PORT = parseInt(process.env.PORT || '4000', 10);  // Port configurable via variable d'environnement

@@ -20,6 +20,8 @@ const cg_1 = __importDefault(require("./routes/cg"));
 const contact_1 = __importDefault(require("./routes/contact"));
 const partner_1 = __importDefault(require("./routes/partner"));
 require("./db"); // Initialisation de la connexion PostgreSQL
+const telemetry_1 = require("./telemetry");
+const geminiMetrics_1 = require("./utils/geminiMetrics");
 const auditService_1 = require("./services/auditService");
 const emailService_1 = require("./services/emailService");
 const dbInitService_1 = require("./services/dbInitService");
@@ -31,6 +33,8 @@ const dbInitService_1 = require("./services/dbInitService");
 // -----------------------------------------------------------------------------
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
+// Initialisation de la télémétrie OTel (avant tout appel Gemini)
+(0, telemetry_1.initTelemetry)();
 // -----------------------------------------------------------------------------
 // Vérification des variables d'environnement critiques
 // Le serveur s'arrête immédiatement si une variable obligatoire est manquante.
@@ -211,8 +215,23 @@ app.use('/api/masterdata', masterdataLimiter, masterdata_1.default); // 📊 Mas
 app.use('/api/cg', doubleCsrfProtection, cg_1.default); // 📄 Conditions Générales avec CSRF
 app.use('/api/contact', doubleCsrfProtection, contact_1.default); // 📧 Prise de RDV avec CSRF
 app.use('/api/partner', doubleCsrfProtection, partner_1.default); // 🤝 Vue partenaire
-// -----------------------------------------------------------------------------
-// Démarrage du serveur
+// ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
+/**
+ * GET /api/admin/token-stats
+ * Retourne les statistiques de tokens Gemini pour la session en cours.
+ * Accès restreint : endpoint admin uniquement (pas exposé publiquement).
+ */
+app.get('/api/admin/token-stats', (req, res) => {
+    res.json((0, geminiMetrics_1.getTokenStats)());
+});
+/**
+ * POST /api/admin/token-stats/reset
+ * Remet à zéro les compteurs en mémoire (ne remet pas à zéro les métriques OTel).
+ */
+app.post('/api/admin/token-stats/reset', (req, res) => {
+    (0, geminiMetrics_1.resetTokenStats)();
+    res.json({ ok: true, message: 'Compteurs remis à zéro' });
+});
 // -----------------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '4000', 10); // Port configurable via variable d'environnement
 // Initialisation de la table d'audit au démarrage
