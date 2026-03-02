@@ -22,6 +22,7 @@ exports.storage = {
             password: row.password,
             profile: row.profile ? JSON.parse(row.profile) : null,
             isAdmin: row.is_admin,
+            isPartner: row.is_partner || false,
             geminiAiConsent: row.gemini_ai_consent || false
         }));
     },
@@ -30,7 +31,7 @@ exports.storage = {
      * @param data - Objet utilisateur à sauvegarder
      */
     writeUser: async (data) => {
-        let { id, email, firstName, lastName, password, profile, isAdmin, geminiAiConsent } = data;
+        let { id, email, firstName, lastName, password, profile, isAdmin, isPartner, geminiAiConsent } = data;
         // Ajout de valeurs par défaut pour firstName et lastName
         if (!firstName)
             firstName = 'Utilisateur';
@@ -44,9 +45,9 @@ exports.storage = {
         if (id) {
             // Mise à jour
             const result = await (0, db_1.query)(`UPDATE users 
-         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, gemini_ai_consent = $7, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $8
-         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, id]);
+         SET email = $1, first_name = $2, last_name = $3, password = $4, profile = $5, is_admin = $6, gemini_ai_consent = $7, is_partner = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9
+         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, isPartner || false, id]);
             if (result.rows.length === 0) {
                 throw new Error(`User with id ${id} not found for update`);
             }
@@ -54,9 +55,9 @@ exports.storage = {
         }
         else {
             // Insertion
-            const result = await (0, db_1.query)(`INSERT INTO users (email, first_name, last_name, password, profile, is_admin, gemini_ai_consent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false]);
+            const result = await (0, db_1.query)(`INSERT INTO users (email, first_name, last_name, password, profile, is_admin, gemini_ai_consent, is_partner)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`, [email, firstName, lastName, password, profileStr, isAdmin || false, geminiAiConsent || false, isPartner || false]);
             return result.rows[0].id;
         }
     },
@@ -81,6 +82,119 @@ exports.storage = {
         }
     },
     /**
+     * Lit le profil d'analyse détaillé d'un utilisateur depuis user_analysis_profiles
+     * @param userId - ID de l'utilisateur
+     * @returns Objet profil ou null si non trouvé
+     */
+    readAnalysisProfile: async (userId) => {
+        const result = await (0, db_1.query)('SELECT * FROM user_analysis_profiles WHERE user_id = $1', [userId]);
+        if (result.rows.length === 0)
+            return null;
+        const r = result.rows[0];
+        return {
+            adultsCount: r.adults_count,
+            childrenCount: r.children_count,
+            householdMembersAges: r.household_members_ages || [],
+            hasPets: r.has_pets,
+            petDetails: r.pet_details,
+            postalCode: r.postal_code,
+            housingStatus: r.housing_status,
+            housingType: r.housing_type,
+            residenceType: r.residence_type,
+            housingSurface: r.housing_surface,
+            constructionYear: r.construction_year,
+            hasPool: r.has_pool,
+            hasGarden: r.has_garden,
+            reconstructionValue: r.reconstruction_value,
+            highTechValue: r.high_tech_value,
+            jewelryValue: r.jewelry_value,
+            vehiclesCount: r.vehicles_count,
+            monthlyIncome: r.monthly_income,
+            workStatus: r.work_status,
+            profession: r.profession,
+            teleworkDays: r.telework_days,
+            riskySports: r.risky_sports || [],
+            healthNeeds: r.health_needs || [],
+            healthSpecifics: r.health_specifics,
+            claimsLast5Years: r.claims_last_5_years,
+            riskTolerance: r.risk_tolerance,
+        };
+    },
+    /**
+     * Crée ou met à jour le profil d'analyse d'un utilisateur (upsert)
+     * @param userId - ID de l'utilisateur
+     * @param data   - Données du profil (équivalent UserProfileData)
+     */
+    writeAnalysisProfile: async (userId, data) => {
+        await (0, db_1.query)(`INSERT INTO user_analysis_profiles (
+        user_id, adults_count, children_count, household_members_ages,
+        has_pets, pet_details, postal_code, housing_status, housing_type,
+        residence_type, housing_surface, construction_year, has_pool, has_garden,
+        reconstruction_value, high_tech_value, jewelry_value, vehicles_count,
+        monthly_income, work_status, profession, telework_days, risky_sports,
+        health_needs, health_specifics, claims_last_5_years, risk_tolerance,
+        updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27, NOW()
+      )
+      ON CONFLICT (user_id) DO UPDATE SET
+        adults_count            = EXCLUDED.adults_count,
+        children_count          = EXCLUDED.children_count,
+        household_members_ages  = EXCLUDED.household_members_ages,
+        has_pets                = EXCLUDED.has_pets,
+        pet_details             = EXCLUDED.pet_details,
+        postal_code             = EXCLUDED.postal_code,
+        housing_status          = EXCLUDED.housing_status,
+        housing_type            = EXCLUDED.housing_type,
+        residence_type          = EXCLUDED.residence_type,
+        housing_surface         = EXCLUDED.housing_surface,
+        construction_year       = EXCLUDED.construction_year,
+        has_pool                = EXCLUDED.has_pool,
+        has_garden              = EXCLUDED.has_garden,
+        reconstruction_value    = EXCLUDED.reconstruction_value,
+        high_tech_value         = EXCLUDED.high_tech_value,
+        jewelry_value           = EXCLUDED.jewelry_value,
+        vehicles_count          = EXCLUDED.vehicles_count,
+        monthly_income          = EXCLUDED.monthly_income,
+        work_status             = EXCLUDED.work_status,
+        profession              = EXCLUDED.profession,
+        telework_days           = EXCLUDED.telework_days,
+        risky_sports            = EXCLUDED.risky_sports,
+        health_needs            = EXCLUDED.health_needs,
+        health_specifics        = EXCLUDED.health_specifics,
+        claims_last_5_years     = EXCLUDED.claims_last_5_years,
+        risk_tolerance          = EXCLUDED.risk_tolerance,
+        updated_at              = NOW()`, [
+            userId,
+            data.adultsCount ?? 1,
+            data.childrenCount ?? 0,
+            data.householdMembersAges ?? [],
+            data.hasPets ?? false,
+            data.petDetails ?? null,
+            data.postalCode ?? null,
+            data.housingStatus ?? null,
+            data.housingType ?? null,
+            data.residenceType ?? null,
+            data.housingSurface ?? null,
+            data.constructionYear ?? null,
+            data.hasPool ?? false,
+            data.hasGarden ?? false,
+            data.reconstructionValue ?? null,
+            data.highTechValue ?? null,
+            data.jewelryValue ?? null,
+            data.vehiclesCount ?? 0,
+            data.monthlyIncome ?? null,
+            data.workStatus ?? null,
+            data.profession ?? null,
+            data.teleworkDays ?? 0,
+            data.riskySports ?? [],
+            data.healthNeeds ?? [],
+            data.healthSpecifics ?? null,
+            data.claimsLast5Years ?? 0,
+            data.riskTolerance ?? null,
+        ]);
+    },
+    /**
      * Lit la liste des polices d'assurance depuis la table policies
      * @param userId - (Optionnel) ID de l'utilisateur pour filtrer ses polices
      * @returns Promise avec tableau d'objets police
@@ -90,12 +204,14 @@ exports.storage = {
       SELECT 
         p.*,
         it.label_fr as type_label,
+        ist.label_fr as sub_type_label,
         i.label as insurer_label,
         i.logo_url as insurer_logo,
         ccg.url as central_cg_url,
         ucg.url as user_cg_url
       FROM policies p
       LEFT JOIN insurance_types it ON p.insurance_type_code = it.code
+      LEFT JOIN insurance_sub_types ist ON p.insurance_sub_type_code = ist.code
       LEFT JOIN insurers i ON p.insurer_code = i.code
       LEFT JOIN central_cg ccg ON p.central_cg_id = ccg.id
       LEFT JOIN user_cg ucg ON p.user_cg_id = ucg.id
@@ -121,6 +237,8 @@ exports.storage = {
                 insurerLogo: row.insurer_logo,
                 type: typeEnum, // Utilise la valeur de l'enum PolicyType (ex: 'Automobile')
                 typeCode: typeCode,
+                subTypeCode: row.insurance_sub_type_code || null,
+                subTypeLabel: row.sub_type_label || null,
                 formula: metadata.formula || null,
                 options: metadata.options || [],
                 premium: metadata.premium ? parseFloat(metadata.premium) : null,
@@ -143,7 +261,7 @@ exports.storage = {
      * @param data - Objet police à sauvegarder
      */
     writePolicy: async (data) => {
-        const { id, userId, insurerCode, insuranceTypeCode, centralCgId, userCgId, startDate, endDate, status, documentUrl, metadata } = data;
+        const { id, userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode, centralCgId, userCgId, startDate, endDate, status, documentUrl, metadata } = data;
         // Validation des codes requis
         if (!insurerCode || !insuranceTypeCode) {
             throw new Error('insurerCode and insuranceTypeCode are required');
@@ -163,19 +281,22 @@ exports.storage = {
             // Mise à jour
             await (0, db_1.query)(`UPDATE policies 
          SET user_id = $1, insurer_code = $2, insurance_type_code = $3,
-             central_cg_id = $4, user_cg_id = $5, start_date = $6, end_date = $7,
-             status = $8, document_url = $9, metadata = $10, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $11`, [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null,
+             insurance_sub_type_code = $4,
+             central_cg_id = $5, user_cg_id = $6, start_date = $7, end_date = $8,
+             status = $9, document_url = $10, metadata = $11, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $12`, [userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode || null,
+                centralCgId || null, userCgId || null,
                 startDate, endDate, status, documentUrl, metadataJson, id]);
             return id;
         }
         else {
             // Insertion
             const result = await (0, db_1.query)(`INSERT INTO policies 
-         (user_id, insurer_code, insurance_type_code, central_cg_id, user_cg_id,
-          start_date, end_date, status, document_url, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING id`, [userId, insurerCode, insuranceTypeCode, centralCgId || null, userCgId || null,
+         (user_id, insurer_code, insurance_type_code, insurance_sub_type_code,
+          central_cg_id, user_cg_id, start_date, end_date, status, document_url, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id`, [userId, insurerCode, insuranceTypeCode, insuranceSubTypeCode || null,
+                centralCgId || null, userCgId || null,
                 startDate, endDate, status || 'active', documentUrl, metadataJson]);
             return result.rows[0].id;
         }
@@ -225,10 +346,12 @@ exports.storage = {
             // Champs de compatibilité pour l'affichage
             insurer: row.insurer_label || row.insurer_code || 'Non spécifié',
             insurerLogo: row.insurer_logo,
+            insuranceTypeLabel: row.type_label || row.insurance_type_code || '',
             productName: row.metadata?.productName || 'Document CG',
             indexedFormulas: row.metadata?.indexedFormulas || [],
             indexedOptions: row.metadata?.indexedOptions || [],
             documentUrl: row.url,
+            vectorizedAt: row.vectorized_at || null,
             lastVerified: row.updated_at || row.created_at
         }));
     },
@@ -237,27 +360,33 @@ exports.storage = {
      * @param data - Objet CG à sauvegarder
      */
     writeCentralCgEntry: async (data) => {
-        const { id, insurerCode, insuranceTypeCode, version, type, owner, detail, url, targetFilename, status, contentText, embedding, metadata, pdfBase64 } = data;
+        const { id, insurerCode, insuranceTypeCode, insuranceSubTypeCode, documentTypeCode, version, type, owner, detail, url, targetFilename, status, contentText, embedding, metadata, pdfBase64 } = data;
         // S'assurer que metadata est un objet JSON valide
         const metadataJson = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
         const embeddingJson = embedding ? (typeof embedding === 'string' ? embedding : JSON.stringify(embedding)) : null;
+        const resolvedDocType = documentTypeCode || type || 'CG';
         if (id) {
             // Mise à jour
             await (0, db_1.query)(`UPDATE central_cg 
          SET insurer_code = $1, insurance_type_code = $2, version = $3, type = $4,
              owner = $5, detail = $6, url = $7, target_filename = $8, status = $9,
-             content_text = $10, embedding = $11, metadata = $12, pdf_base64 = $13, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $14`, [insurerCode, insuranceTypeCode, version, type, owner, detail, url,
-                targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null, id]);
+             content_text = $10, embedding = $11, metadata = $12, pdf_base64 = $13,
+             insurance_sub_type_code = $14, document_type_code = $15,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $16`, [insurerCode, insuranceTypeCode, version, resolvedDocType, owner, detail, url,
+                targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null,
+                insuranceSubTypeCode || null, resolvedDocType, id]);
         }
         else {
             // Insertion
             const result = await (0, db_1.query)(`INSERT INTO central_cg 
          (insurer_code, insurance_type_code, version, type, owner, detail, url, 
-          target_filename, status, content_text, embedding, metadata, pdf_base64)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         RETURNING id`, [insurerCode, insuranceTypeCode, version, type, owner, detail, url,
-                targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null]);
+          target_filename, status, content_text, embedding, metadata, pdf_base64,
+          insurance_sub_type_code, document_type_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         RETURNING id`, [insurerCode, insuranceTypeCode, version, resolvedDocType, owner, detail, url,
+                targetFilename, status, contentText, embeddingJson, metadataJson, pdfBase64 || null,
+                insuranceSubTypeCode || null, resolvedDocType]);
             return result.rows[0].id;
         }
     },
@@ -301,7 +430,7 @@ exports.storage = {
             const chunk = chunks[i];
             const embedding = await generateEmbedding(chunk);
             await (0, db_1.query)(`INSERT INTO policy_embeddings (policy_id, chunk_text, chunk_index, embedding, created_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [policyId, chunk, i, JSON.stringify(embedding)]);
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [policyId, chunk, i, embedding ? JSON.stringify(embedding) : null]);
         }
         console.log(`✅ ${chunks.length} chunks vectorisés pour policy ${policyId}`);
     },
@@ -317,11 +446,9 @@ exports.storage = {
             throw new Error(`Vectorisation CG ${cgId} impossible: texte vide`);
         }
         const embedding = await generateEmbedding(text);
-        const isValidEmbedding = Array.isArray(embedding)
-            && embedding.length === 768
-            && embedding.some((value) => Number.isFinite(value) && value !== 0);
-        if (!isValidEmbedding) {
-            throw new Error(`Embedding invalide pour CG ${cgId} (vecteur nul ou incomplet). Vérifiez GEMINI_API_KEY et l'accès au modèle d'embedding.`);
+        if (!embedding || !embedding.some((v) => v !== 0)) {
+            console.warn(`⚠️ Embedding indisponible pour CG ${cgId} — sauvegarde sans vecteur`);
+            return; // Non fatal : les pages sont quand même indexées en texte
         }
         await (0, db_1.query)(`UPDATE central_cg SET embedding = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [JSON.stringify(embedding), cgId]);
         console.log(`✅ CG ${cgId} vectorisé`);

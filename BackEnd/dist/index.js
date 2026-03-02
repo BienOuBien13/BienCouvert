@@ -17,8 +17,12 @@ const policies_1 = __importDefault(require("./routes/policies"));
 const ai_1 = __importDefault(require("./routes/ai"));
 const masterdata_1 = __importDefault(require("./routes/masterdata"));
 const cg_1 = __importDefault(require("./routes/cg"));
+const contact_1 = __importDefault(require("./routes/contact"));
+const partner_1 = __importDefault(require("./routes/partner"));
 require("./db"); // Initialisation de la connexion PostgreSQL
 const auditService_1 = require("./services/auditService");
+const emailService_1 = require("./services/emailService");
+const dbInitService_1 = require("./services/dbInitService");
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
 // Ce fichier configure Express avec les middlewares nécessaires et monte
@@ -27,6 +31,18 @@ const auditService_1 = require("./services/auditService");
 // -----------------------------------------------------------------------------
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
+// -----------------------------------------------------------------------------
+// Vérification des variables d'environnement critiques
+// Le serveur s'arrête immédiatement si une variable obligatoire est manquante.
+// -----------------------------------------------------------------------------
+const REQUIRED_ENV = ['JWT_SECRET', 'CSRF_SECRET'];
+REQUIRED_ENV.forEach(key => {
+    if (!process.env[key]) {
+        console.error(`❌ Variable d'environnement obligatoire manquante : ${key}`);
+        console.error('   Définissez-la dans le fichier .env ou dans les variables de votre environnement.');
+        process.exit(1);
+    }
+});
 const app = (0, express_1.default)();
 // Correction proxy pour express-rate-limit derrière nginx/docker
 app.set('trust proxy', 1);
@@ -136,14 +152,28 @@ const apiLimiter = (0, express_rate_limit_1.default)({
     max: 100, // Maximum 100 requêtes par IP
     message: 'Trop de requêtes depuis cette adresse IP, veuillez réessayer plus tard.',
     standardHeaders: true, // Retourne les headers RateLimit-*
-    legacyHeaders: false
+    legacyHeaders: false,
+    // Exclure les endpoints de polling de statut et les endpoints de profil utilisateur
+    skip: (req) => /\/api\/cg\/user\/status\//.test(req.originalUrl) ||
+        /\/api\/auth\/me/.test(req.originalUrl) ||
+        /\/api\/policies\/central-cg\/[^/]+\/vectorization-status/.test(req.originalUrl) ||
+        /\/api\/masterdata\//.test(req.originalUrl)
 });
-// Limiter strict pour l'authentification (login, register)
-const authLimiter = (0, express_rate_limit_1.default)({
+// Limiter strict pour les routes IA (prévention des coûts API Gemini incontrôlés)
+const aiLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10, // Max 10 requêtes IA par minute par IP
+    message: 'Limite d\'analyse IA atteinte, veuillez réessayer dans 1 minute.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+// Limiter dédié pour masterdata (données de référence, appelées fréquemment)
+const masterdataLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Maximum 5 tentatives par IP
-    message: 'Trop de tentatives de connexion. Veuillez réessayer dans 15 minutes.',
-    skipSuccessfulRequests: true // Ne compte que les échecs
+    max: 500, // 500 req/15min par IP (données statiques)
+    message: 'Trop de requêtes masterdata, veuillez réessayer plus tard.',
+    standardHeaders: true,
+    legacyHeaders: false,
 });
 // Application des middlewares
 app.use((0, cors_1.default)(corsOptions)); // Gestion CORS
@@ -173,17 +203,30 @@ app.get('/api/csrf-token', (req, res) => {
     });
 });
 // Montage des routes principales de l'API
-app.use('/api/auth', authLimiter, doubleCsrfProtection, auth_1.default); // 🔒 Auth avec rate limiting + CSRF
+// 🔒 authLimiter est appliqué directement sur les routes /login et /register (dans auth.ts)
+app.use('/api/auth', doubleCsrfProtection, auth_1.default); // 🔒 Auth avec CSRF
 app.use('/api/policies', doubleCsrfProtection, policies_1.default); // 🔒 Policies avec CSRF
-app.use('/api/ai', doubleCsrfProtection, ai_1.default); // 🔒 AI avec CSRF
-app.use('/api/masterdata', masterdata_1.default); // 📊 Master Data (lecture seule, pas de CSRF)
+app.use('/api/ai', aiLimiter, doubleCsrfProtection, ai_1.default); // 🔒 AI avec CSRF + rate limit strict
+app.use('/api/masterdata', masterdataLimiter, masterdata_1.default); // 📊 Master Data (lecture seule, pas de CSRF)
 app.use('/api/cg', doubleCsrfProtection, cg_1.default); // 📄 Conditions Générales avec CSRF
+app.use('/api/contact', doubleCsrfProtection, contact_1.default); // 📧 Prise de RDV avec CSRF
+app.use('/api/partner', doubleCsrfProtection, partner_1.default); // 🤝 Vue partenaire
 // -----------------------------------------------------------------------------
 // Démarrage du serveur
 // -----------------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '4000', 10); // Port configurable via variable d'environnement
 // Initialisation de la table d'audit au démarrage
-(0, auditService_1.initAuditTable)().then(() => {
+(0, auditService_1.initAuditTable)().then(async () => {
+    // Tables authentification et contact
+    await (0, dbInitService_1.initPasswordResetsTable)();
+    await (0, dbInitService_1.initEmailVerificationsTable)();
+    await (0, dbInitService_1.initRdvRequestsTable)();
+    await (0, dbInitService_1.initPartnerTables)();
+    // Vérification connexion SMTP (non bloquante)
+    (0, emailService_1.verifySmtpConnection)();
+    // Purge quotidienne des tokens expirés
+    (0, dbInitService_1.purgeExpiredTokens)();
+    setInterval(dbInitService_1.purgeExpiredTokens, 24 * 60 * 60 * 1000);
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
     });

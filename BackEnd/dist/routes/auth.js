@@ -4,12 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const storage_1 = require("../storage");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const express_validator_1 = require("express-validator");
 const passwordValidator_1 = require("../utils/passwordValidator");
 const auditService_1 = require("../services/auditService");
+const emailService_1 = require("../services/emailService");
+const db_1 = require("../db");
 // -----------------------------------------------------------------------------
 // Routes d'authentification
 // - Inscription, connexion, réinitialisation de mot de passe, lecture/mise à jour
@@ -19,6 +22,14 @@ const auditService_1 = require("../services/auditService");
 const router = (0, express_1.Router)();
 // Clé secrète pour signer les tokens JWT (à configurer via variable d'environnement en production)
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+// 🔒 Rate limiter strict réservé aux routes d'authentification (login / register uniquement)
+// Les routes protégées comme PUT /me ou GET /me ne sont PAS limitées
+const authLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Maximum 5 tentatives d'authentification par IP
+    message: 'Trop de tentatives de connexion. Veuillez réessayer dans 15 minutes.',
+    skipSuccessfulRequests: true // Ne compte que les échecs
+});
 /**
  * Génère un token JWT pour un utilisateur authentifié.
  * Le token contient l'ID, l'email, le prénom et nom de l'utilisateur.
@@ -40,31 +51,32 @@ function signToken(user) {
  */
 function authMiddleware(req, res, next) {
     // 🔒 Priorité 1: Cookie httpOnly (sécurisé)
-    let token = req.cookies?.token;
+    const cookieToken = req.cookies?.token;
     // 🔓 Fallback: Header Authorization (compatibilité ancienne version)
-    if (!token) {
-        const auth = req.headers.authorization;
-        if (auth) {
-            const parts = auth.split(' ');
-            if (parts.length === 2 && parts[0] === 'Bearer') {
-                token = parts[1];
-            }
+    let bearerToken;
+    const auth = req.headers.authorization;
+    if (auth) {
+        const parts = auth.split(' ');
+        if (parts.length === 2 && parts[0] === 'Bearer') {
+            bearerToken = parts[1];
         }
     }
-    if (!token) {
+    // Try cookie token first, fallback to bearer
+    const tokensToTry = [cookieToken, bearerToken].filter(Boolean);
+    if (tokensToTry.length === 0) {
         return res.status(401).json({ message: 'Missing authentication token' });
     }
-    try {
-        // Vérification de la signature du JWT et extraction du payload
-        const payload = jsonwebtoken_1.default.verify(token, JWT_SECRET);
-        // Injection des données utilisateur dans la requête pour les routes suivantes
-        req.user = payload;
-        next();
+    for (const token of tokensToTry) {
+        try {
+            const payload = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+            req.user = payload;
+            return next();
+        }
+        catch {
+            // Try next token
+        }
     }
-    catch (e) {
-        // Token invalide ou expiré
-        return res.status(401).json({ message: 'Invalid token' });
-    }
+    return res.status(401).json({ message: 'Invalid token' });
 }
 /**
  * Route POST /api/auth/register
@@ -72,11 +84,12 @@ function authMiddleware(req, res, next) {
  * Vérifie l'unicité de l'email, hache le mot de passe avec bcrypt,
  * crée le compte et retourne un token JWT en cookie httpOnly.
  */
-router.post('/register', [
+router.post('/register', authLimiter, [
     // 🔒 Validation des inputs avec express-validator
     (0, express_validator_1.body)('email')
         .isEmail().withMessage('Email invalide')
-        .normalizeEmail(),
+        // gmail_remove_dots: false → garde les points (remi.jolivalt@gmail.com ne devient pas remijolivalt@gmail.com)
+        .normalizeEmail({ gmail_remove_dots: false }),
     (0, express_validator_1.body)('password')
         .notEmpty().withMessage('Mot de passe requis'),
     (0, express_validator_1.body)('firstName')
@@ -136,6 +149,21 @@ router.post('/register', [
         // Insertion dans PostgreSQL et récupération de l'ID généré
         const userId = await storage_1.storage.writeUser(newUser);
         newUser.id = userId;
+        // 📧 Envoi de l'email de vérification (non bloquant)
+        const frontendBaseUrl = process.env.FRONTEND_URL || 'https://biencouvert.fr';
+        try {
+            const verifResult = await (0, db_1.query)(`INSERT INTO email_verifications (email, user_id) VALUES ($1, $2) RETURNING token`, [newUser.email, userId]);
+            const verifToken = verifResult.rows[0]?.token;
+            if (verifToken) {
+                const verifUrl = `${frontendBaseUrl}?verify=${verifToken}`;
+                await (0, emailService_1.sendVerificationEmail)(newUser.email, verifUrl, newUser.firstName);
+                console.log(`📧 Email de vérification envoyé à ${newUser.email}`);
+            }
+        }
+        catch (verifErr) {
+            console.warn('⚠️ Email vérification non envoyé:', verifErr.message);
+            // Non bloquant
+        }
         // 📝 Audit: Enregistrement nouveau compte
         await (0, auditService_1.logAudit)({
             action: auditService_1.AuditAction.USER_REGISTER,
@@ -163,6 +191,7 @@ router.post('/register', [
                 lastName: newUser.lastName,
                 profile: newUser.profile,
                 isAdmin: newUser.isAdmin,
+                isPartner: newUser.isPartner || false,
                 geminiAiConsent: newUser.geminiAiConsent || false
             }
         });
@@ -177,11 +206,11 @@ router.post('/register', [
  * Connexion d'un utilisateur existant.
  * Vérifie les identifiants (email/mot de passe) et retourne un token JWT en cookie httpOnly.
  */
-router.post('/login', [
+router.post('/login', authLimiter, [
     // 🔒 Validation des inputs
     (0, express_validator_1.body)('email')
         .isEmail().withMessage('Email invalide')
-        .normalizeEmail(),
+        .normalizeEmail({ gmail_remove_dots: false }),
     (0, express_validator_1.body)('password')
         .notEmpty().withMessage('Mot de passe requis')
 ], async (req, res) => {
@@ -246,6 +275,7 @@ router.post('/login', [
                 lastName: found.lastName,
                 profile: found.profile || {}, // Retourne un objet vide si pas de profil
                 isAdmin: found.isAdmin || false, // Retourne false si pas défini
+                isPartner: found.isPartner || false,
                 geminiAiConsent: found.geminiAiConsent || false
             }
         });
@@ -281,16 +311,55 @@ router.post('/logout', authMiddleware, async (req, res) => {
     res.json({ ok: true, message: 'Logged out successfully' });
 });
 /**
+ * Route POST /api/auth/forgot-password
+ * Vérifie si l'email existe et simule l'envoi d'un email de réinitialisation.
+ * En production : générer un token signé (JWT ou uuid), le stocker avec TTL, et envoyer un lien par email.
+ */
+router.post('/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    if (!email)
+        return res.status(400).json({ message: 'Email requis' });
+    try {
+        const users = await storage_1.storage.readUsers();
+        const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        // Réponse volontairement identique qu'il existe ou non (sécurité : évite l'enumération)
+        if (!user) {
+            return res.json({ ok: true, exists: false });
+        }
+        // Supprimer les anciens tokens non utilisés pour cet email
+        await (0, db_1.query)(`DELETE FROM password_resets WHERE email = $1 AND used = FALSE`, [user.email]);
+        // Créer un token opaque UUID en base (TTL 1h)
+        const result = await (0, db_1.query)(`INSERT INTO password_resets (email) VALUES ($1) RETURNING token`, [user.email]);
+        const resetToken = result.rows[0].token;
+        const frontendUrl = process.env.FRONTEND_URL || 'https://biencouvert.fr';
+        const resetUrl = `${frontendUrl}?reset=${resetToken}`;
+        // Envoi de l'email de réinitialisation
+        try {
+            await (0, emailService_1.sendPasswordResetEmail)(user.email, resetUrl);
+            console.log(`📧 Email de réinitialisation envoyé à : ${user.email}`);
+        }
+        catch (emailErr) {
+            console.error('❌ Erreur envoi email reset:', emailErr.message);
+            // On ne bloque pas la réponse si l'email échoue
+        }
+        res.json({ ok: true, exists: true });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
  * Route POST /api/auth/reset
- * Réinitialisation du mot de passe d'un utilisateur.
- * En production, cette route devrait être sécurisée par un token de réinitialisation
- * envoyé par email. Ici, version simplifiée pour démonstration.
+ * Réinitialisation du mot de passe via token opaque (UUID) envoyé par email.
+ * Le token est vérifié en base (table password_resets), consommé une seule fois,
+ * et expire après 1h.
  */
 router.post('/reset', async (req, res) => {
-    const { email, newPassword } = req.body;
+    const { token, newPassword } = req.body;
     // Validation des champs requis
-    if (!email || !newPassword)
-        return res.status(400).json({ message: 'Invalid' });
+    if (!token || !newPassword)
+        return res.status(400).json({ message: 'Token et nouveau mot de passe requis' });
     // 🔒 Validation de la politique de mot de passe (ANSSI)
     const passwordCheck = (0, passwordValidator_1.validatePassword)(newPassword);
     if (!passwordCheck.valid) {
@@ -301,11 +370,20 @@ router.post('/reset', async (req, res) => {
         });
     }
     try {
+        // Vérifier le token en base
+        const result = await (0, db_1.query)(`SELECT email FROM password_resets 
+       WHERE token = $1 AND used = FALSE AND expires_at > NOW()`, [token]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ message: 'Lien de réinitialisation invalide ou expiré' });
+        }
+        const email = result.rows[0].email;
+        // Marquer le token comme utilisé (consommation unique)
+        await (0, db_1.query)(`UPDATE password_resets SET used = TRUE WHERE token = $1`, [token]);
         // Recherche de l'utilisateur par email
         const users = await storage_1.storage.readUsers();
         const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
         if (!user)
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'Utilisateur introuvable' });
         // Hachage du nouveau mot de passe et mise à jour
         user.password = await bcryptjs_1.default.hash(newPassword, 10);
         await storage_1.storage.writeUser(user);
@@ -317,6 +395,34 @@ router.post('/reset', async (req, res) => {
             ...(0, auditService_1.getAuditContext)(req)
         });
         res.json({ ok: true });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
+ * Route GET /api/auth/verify-email?token=UUID
+ * Valide le token de vérification email envoyé lors de l'inscription.
+ * Marque l'utilisateur comme vérifié dans la DB.
+ */
+router.get('/verify-email', async (req, res) => {
+    const { token } = req.query;
+    if (!token)
+        return res.status(400).json({ message: 'Token manquant' });
+    try {
+        const result = await (0, db_1.query)(`UPDATE email_verifications 
+       SET verified_at = NOW() 
+       WHERE token = $1 AND verified_at IS NULL AND expires_at > NOW()
+       RETURNING user_id, email`, [token]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ message: 'Lien invalide ou déjà utilisé' });
+        }
+        const { user_id, email } = result.rows[0];
+        // Marquer l'utilisateur comme vérifié
+        await (0, db_1.query)(`UPDATE users SET email_verified = TRUE WHERE id = $1`, [user_id]);
+        console.log(`✅ Email vérifié : ${email}`);
+        res.json({ ok: true, email });
     }
     catch (err) {
         console.error(err);
@@ -437,6 +543,80 @@ router.put('/me', authMiddleware, async (req, res) => {
     catch (err) {
         console.error('❌ Error in PUT /me:', err);
         res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+});
+/**
+ * Route POST /api/auth/renew
+ * Renouvelle le token JWT sans re-saisir les identifiants.
+ * Accepte l'ancien token depuis le cookie httpOnly OU le header Authorization.
+ * Retourne un nouveau token (cookie + body) signé avec le JWT_SECRET actuel.
+ * Utile quand le secret a été changé ou que le token approche de l'expiration.
+ */
+router.post('/renew', authMiddleware, async (req, res) => {
+    try {
+        const users = await storage_1.storage.readUsers();
+        const user = users.find((x) => x.id === req.user.id);
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        const newToken = signToken(user);
+        // Renouveler le cookie httpOnly
+        res.cookie('token', newToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            path: '/'
+        });
+        res.json({
+            token: newToken,
+            user: {
+                id: user.id,
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                profile: user.profile || {},
+                isAdmin: user.isAdmin || false,
+                geminiAiConsent: user.geminiAiConsent || false
+            }
+        });
+    }
+    catch (err) {
+        console.error('POST /renew error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
+ * Route GET /api/auth/me/analysis-profile (protégée)
+ * Retourne le profil de profilage détaillé de l'utilisateur (questionnaire AnalysisView).
+ */
+router.get('/me/analysis-profile', authMiddleware, async (req, res) => {
+    try {
+        const profile = await storage_1.storage.readAnalysisProfile(parseInt(req.user.id));
+        res.json({ profile: profile || {} });
+    }
+    catch (err) {
+        console.error('GET /me/analysis-profile error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
+ * Route PUT /api/auth/me/analysis-profile (protégée)
+ * Crée ou met à jour le profil de profilage détaillé de l'utilisateur.
+ */
+router.put('/me/analysis-profile', authMiddleware, async (req, res) => {
+    try {
+        const userId = parseInt(req.user.id);
+        const data = req.body;
+        if (!data || typeof data !== 'object') {
+            return res.status(400).json({ message: 'Body invalide' });
+        }
+        await storage_1.storage.writeAnalysisProfile(userId, data);
+        const saved = await storage_1.storage.readAnalysisProfile(userId);
+        res.json({ profile: saved });
+    }
+    catch (err) {
+        console.error('PUT /me/analysis-profile error:', err);
+        res.status(500).json({ message: 'Server error' });
     }
 });
 /**
