@@ -52,6 +52,8 @@ interface AddPolicyPageProps {
 const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
   const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'customConfig' | 'configure'>('selectType');
+  // true = aucune CG trouvée dans le référentiel, saisie manuelle de la formule
+  const [isNoCgMode, setIsNoCgMode] = useState(false);
   
   // Master data
   const [insuranceTypes, setInsuranceTypes] = useState<InsuranceType[]>([]);
@@ -149,34 +151,33 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const searchCG = async (typeCode: string, insurerCode: string, insurer: Insurer) => {
     setLoading(true);
     setError('');
+    setIsNoCgMode(false);
 
     try {
-      // GET requests don't need CSRF token
       const url = `${API_URL}/api/cg/central/by-type-and-insurer?insurance_type_code=${encodeURIComponent(typeCode)}&insurer_code=${encodeURIComponent(insurerCode)}`;
       
-      const response = await fetch(url, {
-        credentials: 'include'
-      });
+      const response = await fetch(url, { credentials: 'include' });
       
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error('NOT_FOUND');
+          // Aucune CG trouvée — mode dégradé : saisie manuelle de formule
+          setIsNoCgMode(true);
+          setCgData({ id: null as any, formules: [], options: {}, resume_court: '', insurer_name: insurer.label, insurance_type_name: selectedType?.labelFr || '' });
+          setPolicyName(`${selectedType?.labelFr || typeCode} - ${insurer.label}`);
+          setStep('configure');
+          return;
         }
         throw new Error('API_ERROR');
       }
       
       const data = await response.json();
-      console.log('CG Data received:', data);
       setCgData(data);
+      setIsNoCgMode(false);
       setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
       setStep('configure');
     } catch (err: any) {
-      console.error('Error fetching CG:', err);
-      if (err.message === 'NOT_FOUND') {
-        setError('Aucune condition générale trouvée. Essayez le mode "CG Personnalisées".');
-      } else {
-        setError('Erreur lors de la recherche des conditions générales');
-      }
+      if (err.message !== 'API_ERROR') throw err;
+      setError('Erreur lors de la recherche des conditions générales. Essayez le mode "CG Personnalisées".');
     } finally {
       setLoading(false);
     }
@@ -234,7 +235,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       const cgId = data.id;
 
       const phaseLabels: Record<string, string> = {
-        extracting: 'Extraction du texte (Gemini)...',
+        extracting: 'Extraction du texte (locale)...',
         embedding: 'Analyse des métadonnées et formules...',
         processing: 'Vectorisation page par page...',
         done: 'Traitement terminé ✔️',
@@ -311,7 +312,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
   // Ajout au portefeuille
   const addToPortfolio = async () => {
-    if (!cgData || !selectedFormule || !policyName) {
+    if (!selectedFormule || !policyName) {
       setError('Veuillez sélectionner une formule et nommer le contrat');
       return;
     }
@@ -322,6 +323,11 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     try {
       const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
       const { csrfToken } = await csrfRes.json();
+
+      // En mode sans CG (isNoCgMode), on n'envoie pas de cg_id
+      const cgPayload = (cgData?.id)
+        ? { cg_source: mode === 'standard' ? 'central' : 'user', cg_id: cgData.id }
+        : {};
 
       const response = await fetch(`${API_URL}/api/policies`, {
         method: 'POST',
@@ -336,8 +342,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           insurance_type_code: selectedType!.code,
           formula: selectedFormule,
           options: selectedOptions,
-          cg_source: mode === 'standard' ? 'central' : 'user',
-          cg_id: cgData.id,
+          ...cgPayload,
           startDate: new Date().toISOString().split('T')[0],
           status: 'active'
         }),
@@ -664,7 +669,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       )}
 
       {/* Étape 3: Configuration du contrat */}
-      {step === 'configure' && cgData && (
+      {step === 'configure' && (
         <div className="space-y-6">
           <button
             onClick={() => {
@@ -674,6 +679,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 setStep('selectInsurer');
               }
               setCgData(null);
+              setIsNoCgMode(false);
               setSelectedFormule('');
               setSelectedOptions([]);
             }}
@@ -681,6 +687,12 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           >
             ← Changer l'assureur
           </button>
+
+          {isNoCgMode && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+              ℹ️ Aucune Condition Générale trouvée dans le référentiel pour cet assureur/type. Vous pouvez tout de même ajouter le contrat en saisissant votre formule manuellement.
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-2">Nom du contrat</label>
@@ -695,34 +707,44 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
           <div>
             <label className="block text-sm font-medium mb-3">Formule</label>
-            <div className="space-y-2">
-              {cgData.formules.map(formule => (
-                <label 
-                  key={formule} 
-                  className={`flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition ${
-                    selectedFormule === formule
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="formule"
-                    value={formule}
-                    checked={selectedFormule === formule}
-                    onChange={(e) => setSelectedFormule(e.target.value)}
-                    className="w-5 h-5 text-blue-600"
-                  />
-                  <span className="font-medium">{formule}</span>
-                  {selectedFormule === formule && (
-                    <Check className="w-5 h-5 text-blue-600 ml-auto" />
-                  )}
-                </label>
-              ))}
-            </div>
+            {cgData?.formules && cgData.formules.length > 0 ? (
+              <div className="space-y-2">
+                {cgData.formules.map(formule => (
+                  <label 
+                    key={formule} 
+                    className={`flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition ${
+                      selectedFormule === formule
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="formule"
+                      value={formule}
+                      checked={selectedFormule === formule}
+                      onChange={(e) => setSelectedFormule(e.target.value)}
+                      className="w-5 h-5 text-blue-600"
+                    />
+                    <span className="font-medium">{formule}</span>
+                    {selectedFormule === formule && (
+                      <Check className="w-5 h-5 text-blue-600 ml-auto" />
+                    )}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={selectedFormule}
+                onChange={(e) => setSelectedFormule(e.target.value)}
+                placeholder="Ex: Tiers, Tous Risques, Essentiel..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            )}
           </div>
 
-          {cgData.options && Object.keys(cgData.options).length > 0 && (
+          {cgData?.options && Object.keys(cgData.options).length > 0 && (
             <div>
               <label className="block text-sm font-medium mb-3">Options</label>
               <div className="space-y-3">

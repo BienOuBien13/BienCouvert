@@ -14,6 +14,9 @@ const _require = createRequire(import.meta.url);
 const _nodeFetch = _require('node-fetch');
 const _https = _require('https');
 const _insecureAgent = new _https.Agent({ rejectUnauthorized: false });
+// Local PDF parsing (zero Gemini tokens for text extraction)
+const pdfParse = _require('pdf-parse');
+const pdfjsLib = _require('pdfjs-dist/legacy/build/pdf.js');
 const { Pool } = pkg;
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import xlsx from 'xlsx';
@@ -105,59 +108,53 @@ const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR
     : '/data/assur-clair/pdfs');
 
 /**
- * Extrait le texte complet d'un PDF (pour central_cg)
+ * Extrait le texte complet d'un PDF localement via pdf-parse (0 token Gemini)
  */
-async function extractFullTextFromPdf(base64Pdf) {
+async function extractFullTextFromPdf(pdfBuffer) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'application/pdf',
-          data: base64Pdf
-        }
-      },
-      {
-        text: 'Extract all text from this PDF document. Return only the raw text content without any formatting or explanations.'
-      }
-    ]);
-
-    const response = await result.response;
-    return response.text();
+    const data = await pdfParse(pdfBuffer);
+    return data.text || '';
   } catch (error) {
-    console.error('❌ Erreur lors de l\'extraction du texte:', error.message);
-    throw error;
+    console.error('❌ Erreur extraction texte locale:', error.message);
+    // Fallback: retourner chaîne vide pour ne pas bloquer le script
+    return '';
   }
 }
 
 /**
- * Extrait le texte de toutes les pages via Gemini (remplace pdfjs-dist)
+ * Extrait le texte de toutes les pages localement via pdfjs-dist (0 token Gemini)
  * Retourne un tableau [{pageNumber, text}]
  */
-async function extractAllPagesByGemini(base64Pdf, pageCount) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  const result = await model.generateContent([
-    { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
-    { text: `Extract the text of this PDF document page by page.\nFor each page use EXACTLY this format:\n===PAGE_START_N===\n[text]\n===PAGE_END_N===\nwhere N is the page number (1 to ${pageCount}).\nReturn only the structured output, no extra text.` }
-  ]);
-  const responseText = result.response.text();
-  const pages = [];
-  for (let i = 1; i <= pageCount; i++) {
-    const match = responseText.match(new RegExp(`===PAGE_START_${i}===[\\s\\S]*?([\\s\\S]*?)===PAGE_END_${i}===`));
-    pages.push({ pageNumber: i, text: match ? match[1].trim() : '' });
-  }
-  // Fallback: si Gemini n'a pas respecté le format, découper le texte en chunks égaux
-  const hasContent = pages.some(p => p.text.length > 0);
-  if (!hasContent) {
-    const fullText = responseText;
-    const chunkSize = Math.ceil(fullText.length / pageCount);
+async function extractAllPagesByGemini(pdfBuffer, pageCount) {
+  try {
+    // Désactiver le worker (environnement Node.js)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
+    const pdfDoc = await loadingTask.promise;
+    const pages = [];
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      try {
+        const page = await pdfDoc.getPage(i);
+        const content = await page.getTextContent();
+        const text = content.items.map(item => item.str).join(' ');
+        pages.push({ pageNumber: i, text });
+      } catch (pageErr) {
+        log(`      ⚠️  Erreur page ${i} (pdfjs): ${pageErr.message}`);
+        pages.push({ pageNumber: i, text: '' });
+      }
+    }
+    return pages;
+  } catch (error) {
+    log(`  ⚠️  Erreur pdfjs, fallback pdf-parse: ${error.message}`);
+    // Fallback: découper le texte complet en N chunks égaux
+    const data = await pdfParse(pdfBuffer);
+    const fullText = data.text || '';
+    const chunkSize = Math.ceil(fullText.length / pageCount) || 1;
     return Array.from({ length: pageCount }, (_, i) => ({
       pageNumber: i + 1,
       text: fullText.slice(i * chunkSize, (i + 1) * chunkSize)
     }));
   }
-  return pages;
 }
 
 /**
@@ -597,11 +594,12 @@ async function processDocument(row, index, total) {
     // Lire le fichier PDF
     log(`  📄 Lecture du fichier...`);
     const pdfBuffer = fs.readFileSync(pdfPath);
-    const base64Pdf = pdfBuffer.toString('base64');
+    // base64 conservé uniquement si nécessaire pour d'autres usages (ex: stockage)
+    // L'extraction de texte et la vectorisation page par page utilisent le buffer local maintenant
 
-    // Extraire le texte complet pour central_cg
-    log(`  📄 Extraction du texte complet...`);
-    const fullText = await extractFullTextFromPdf(base64Pdf);
+    // Extraire le texte complet pour central_cg (LOCAL - 0 token Gemini)
+    log(`  📄 Extraction du texte complet (locale, sans Gemini)...`);
+    const fullText = await extractFullTextFromPdf(pdfBuffer);
     log(`  ✅ ${fullText.length} caractères extraits`);
 
     // Générer l'embedding du document complet
@@ -656,9 +654,9 @@ async function processDocument(row, index, total) {
     const pageCount = pdfDoc.getPageCount();
     log(`  📄 ${pageCount} pages à traiter`);
 
-    // Extraire toutes les pages en un seul appel Gemini (remplace pdfjs-dist)
-    log(`  📄 Extraction du texte page par page via Gemini...`);
-    const allPages = await extractAllPagesByGemini(base64Pdf, pageCount);
+    // Extraire toutes les pages localement via pdfjs-dist (LOCAL - 0 token Gemini)
+    log(`  📄 Extraction du texte page par page (locale, sans Gemini)...`);
+    const allPages = await extractAllPagesByGemini(pdfBuffer, pageCount);
 
     let pagesProcessed = 0;
     let tablesFound = 0;

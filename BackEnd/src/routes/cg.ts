@@ -13,6 +13,8 @@ import { query } from '../db';
 import pool from '../db';
 import { generateEmbedding as generateEmbeddingCentral } from '../services/geminiService';
 import { vectorizeUserCgByPages } from '../services/pageVectorizationService';
+// pdf-parse : extraction texte locale (0 token Gemini output)
+const pdfParse = require('pdf-parse');
 
 const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -477,21 +479,30 @@ async function getCurrentMeta(cgId: number): Promise<any> {
 // Fonctions utilitaires
 // -----------------------------------------------------------------------------
 
+/**
+ * Extrait le texte d'un PDF localement via pdf-parse (0 token Gemini).
+ * Falls back to Gemini Vision uniquement si pdf-parse retourne < 100 chars (PDF scanné).
+ */
 async function extractTextFromPdf(base64Pdf: string): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  
-  const result = await model.generateContent([
-    {
-      inlineData: {
-        mimeType: 'application/pdf',
-        data: base64Pdf
-      }
-    },
-    {
-      text: 'Extract all text from this PDF document. Return only the raw text content without any formatting or explanations.'
+  try {
+    const pdfBuffer = Buffer.from(base64Pdf, 'base64');
+    const data = await pdfParse(pdfBuffer);
+    const localText = (data.text || '').trim();
+    if (localText.length >= 100) {
+      console.log(`✅ extractTextFromPdf: ${localText.length} chars extrait localement (0 token Gemini)`);
+      return localText;
     }
-  ]);
+    console.warn(`⚠️ pdf-parse: texte court (${localText.length} chars) — PDF probablement scanné, fallback Gemini Vision`);
+  } catch (parseErr: any) {
+    console.warn(`⚠️ pdf-parse échoué: ${parseErr.message} — fallback Gemini Vision`);
+  }
 
+  // Fallback Gemini (uniquement pour PDFs scannés / Image-only)
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const result = await model.generateContent([
+    { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
+    { text: 'Extract all text from this PDF document. Return only the raw text content without any formatting or explanations.' }
+  ]);
   return result.response.text();
 }
 

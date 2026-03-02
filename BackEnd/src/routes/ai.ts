@@ -138,7 +138,27 @@ router.post('/index-cg', async (req, res) => {
   const { provider, type, pdfUrl } = req.body;
   if (!provider || !type || !pdfUrl) return res.status(400).json({ message: 'Missing parameters' });
   try {
-    const result = await indexCgDocument(provider, type, pdfUrl);
+    // Extraire le texte localement avant l'appel Gemini (réduit drastiquement les output tokens)
+    let contentText: string | undefined;
+    try {
+      const pdfParse = require('pdf-parse');
+      let pdfBuffer: Buffer;
+      if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+        pdfBuffer = Buffer.from(pdfUrl.split(',')[1], 'base64');
+      } else {
+        const resp = await fetch(pdfUrl);
+        if (resp.ok) pdfBuffer = Buffer.from(await resp.arrayBuffer());
+      }
+      if (pdfBuffer!) {
+        const parsed = await pdfParse(pdfBuffer);
+        contentText = parsed.text || undefined;
+        console.log(`💡 /index-cg: texte extrait localement (${contentText?.length ?? 0} chars) - envoi texte seul à Gemini`);
+      }
+    } catch (parseErr: any) {
+      console.warn(`⚠️  Extraction locale échouée, fallback PDF binaire: ${parseErr.message}`);
+    }
+
+    const result = await indexCgDocument(provider, type, pdfUrl, contentText);
     res.json(result);
   } catch (e) {
     console.error(e);

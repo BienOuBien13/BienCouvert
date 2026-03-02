@@ -1730,18 +1730,74 @@ ${text}`;
 };
 
 /**
- * Indexe un document de Conditions Générales via URL PDF ou base64
- * Télécharge le PDF et l'analyse directement pour extraire uniquement le contenu réel
+ * Indexe un document de Conditions Générales.
+ * Si `contentText` est fourni (déjà extrait localement), Gemini reçoit uniquement
+ * du texte brut → zéro token d'entrée lié au binaire PDF, output minimal.
+ * Sinon, télécharge le PDF et l'envoie en binaire (fallback pour compatibilité).
  */
-export const indexCgDocument = async (provider: string, type: string, pdfUrl: string): Promise<any> => {
+export const indexCgDocument = async (provider: string, type: string, pdfUrl: string, contentText?: string): Promise<any> => {
   const ai = getAiClient();
   if (!ai) {
     return { indexedFormulas: [], indexedOptions: [], semanticSummary: "Service IA non disponible" };
   }
 
+  // ─── CHEMIN OPTIMISÉ : texte déjà extrait localement ───────────────────────
+  if (contentText && contentText.trim().length > 100) {
+    console.log(`💡 indexCgDocument: utilisation du texte pré-extrait (${contentText.length} chars) - 0 token PDF`);
+    try {
+      const prompt = `Analyse ce texte extrait de Conditions Générales ${type} de chez ${provider}.
+
+IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
+
+Extrais du texte :
+1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
+3. Un résumé sémantique concis des garanties principales (max 200 mots).
+
+Si une information n'est pas présente, laisse le tableau vide ou indique "Non spécifié" dans le résumé.
+
+Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
+{
+  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedOptions": ["Option 1", "Option 2"],
+  "semanticSummary": "Résumé des garanties principales..."
+}
+
+Texte du document (tronqué à 12 000 caractères) :
+${contentText.slice(0, 12000)}`;
+
+      const model = ai.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: { responseMimeType: 'application/json' }
+      });
+      const result = await model.generateContent([{ text: prompt }]);
+      const response = await result.response;
+      let jsonText = response.text().trim();
+
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```json?\s*/i, '').replace(/```\s*$/i, '');
+      }
+      const firstBrace = jsonText.indexOf('{');
+      const lastBrace = jsonText.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+      }
+
+      const parsed = JSON.parse(jsonText);
+      if (!parsed.indexedFormulas || !parsed.indexedOptions || !parsed.semanticSummary) {
+        throw new Error('Réponse Gemini incomplète');
+      }
+      console.log(`✅ Indexation (texte): ${parsed.indexedFormulas.length} formules, ${parsed.indexedOptions.length} options`);
+      return parsed;
+    } catch (err: any) {
+      console.error('❌ gemini indexCgDocument (texte) error:', err);
+      return { indexedFormulas: [], indexedOptions: [], semanticSummary: `Erreur: ${err?.message || 'Erreur inconnue'}` };
+    }
+  }
+
+  // ─── FALLBACK : envoi du PDF binaire (admin manuel, aucun texte pré-extrait) ─
+  console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl.substring(0, 100)}...`);
   try {
-    console.log(`📥 Téléchargement du PDF depuis: ${pdfUrl.substring(0, 100)}...`);
-    
     // Télécharger le PDF
     let pdfBase64: string;
     if (pdfUrl.startsWith('data:application/pdf;base64,')) {
