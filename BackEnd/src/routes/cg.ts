@@ -155,6 +155,46 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
 });
 
 // -----------------------------------------------------------------------------
+// GET /api/cg/central/available-sub-types
+// Retourne les sous-types distincts disponibles dans central_cg pour un
+// assureur + type d'assurance donnés (uniquement ceux qui ont des CG actives).
+// Paramètres query : insurance_type_code (requis), insurer_code (requis)
+// Réponse : [{ code, labelFr }]  — tableau vide si pas de sous-type
+// -----------------------------------------------------------------------------
+router.get('/central/available-sub-types', async (req: Request, res: Response) => {
+  try {
+    const { insurance_type_code, insurer_code } = req.query;
+
+    if (!insurance_type_code || !insurer_code) {
+      return res.status(400).json({
+        error: 'Les paramètres insurance_type_code et insurer_code sont requis'
+      });
+    }
+
+    const result = await query(
+      `SELECT DISTINCT
+         cg.insurance_sub_type_code AS code,
+         COALESCE(ist.label_fr, cg.insurance_sub_type_code) AS label_fr
+       FROM central_cg cg
+       LEFT JOIN insurance_sub_types ist
+         ON ist.code = cg.insurance_sub_type_code
+        AND ist.parent_type_code = $1
+       WHERE cg.insurance_type_code = $1
+         AND cg.insurer_code        = $2
+         AND cg.insurance_sub_type_code IS NOT NULL
+         AND cg.status = 'active'
+       ORDER BY label_fr`,
+      [insurance_type_code, insurer_code]
+    );
+
+    res.json(result.rows); // peut être [] si aucun sous-type
+  } catch (error: any) {
+    console.error('[CG/available-sub-types] ERROR:', error.message);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // GET /api/cg/central/documents
 // Retourne TOUS les documents disponibles pour un assureur + type + sous-type.
 // Utile pour lister CG, NI, IPID, DIP etc. sur la même page de contrat.

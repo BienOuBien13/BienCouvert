@@ -51,7 +51,7 @@ interface AddPolicyPageProps {
 
 const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
-  const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'customConfig' | 'configure'>('selectType');
+  const [step, setStep] = useState<'selectType' | 'selectInsurer' | 'selectSubType' | 'customConfig' | 'configure'>('selectType');
   // true = aucune CG trouvée dans le référentiel, saisie manuelle de la formule
   const [isNoCgMode, setIsNoCgMode] = useState(false);
   
@@ -73,9 +73,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [contractVersion, setContractVersion] = useState('001');
   const [docType, setDocType] = useState('CG');
   const [contractUrl, setContractUrl] = useState('');
-  const [selectedSubTypeCode, setSelectedSubTypeCode] = useState('');
+  const [selectedSubTypeCode, setSelectedSubTypeCode] = useState('');       // custom mode
   const [availableSubTypes, setAvailableSubTypes] = useState<InsuranceSubType[]>([]);
   const [isLoadingSubTypes, setIsLoadingSubTypes] = useState(false);
+  // Sous-types mode standard (multi-select : 1 ligne de portefeuille par sous-type)
+  const [availableSubTypesStandard, setAvailableSubTypesStandard] = useState<{ code: string; labelFr: string }[]>([]);
+  const [selectedSubTypeCodes, setSelectedSubTypeCodes] = useState<string[]>([]);
+  const [isLoadingSubTypesStandard, setIsLoadingSubTypesStandard] = useState(false);
   // Progression traitement async
   const [processingPercent, setProcessingPercent] = useState(0);
   const [processingPhase, setProcessingPhase] = useState('');
@@ -134,7 +138,31 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     setSelectedInsurer(insurer);
     
     if (mode === 'standard') {
-      await searchCG(selectedType!.code, insurer.code, insurer);
+      // Vérifier si plusieurs sous-types sont disponibles pour cet assureur + type
+      setIsLoadingSubTypesStandard(true);
+      try {
+        const subTypesRes = await fetch(
+          `${API_URL}/api/cg/central/available-sub-types?insurance_type_code=${encodeURIComponent(selectedType!.code)}&insurer_code=${encodeURIComponent(insurer.code)}`,
+          { credentials: 'include' }
+        );
+        const subTypes: { code: string; labelFr: string }[] = subTypesRes.ok ? await subTypesRes.json() : [];
+        if (subTypes.length >= 2) {
+          // Plusieurs sous-types → étape de sélection
+          setAvailableSubTypesStandard(subTypes);
+          setSelectedSubTypeCodes([]);
+          setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
+          setStep('selectSubType');
+        } else {
+          // 0 ou 1 sous-type → flux normal
+          const firstSubType = subTypes[0]?.code || null;
+          setSelectedSubTypeCodes(firstSubType ? [firstSubType] : []);
+          await searchCG(selectedType!.code, insurer.code, insurer, firstSubType);
+        }
+      } catch {
+        await searchCG(selectedType!.code, insurer.code, insurer, null);
+      } finally {
+        setIsLoadingSubTypesStandard(false);
+      }
     } else {
       // Custom mode → charger les sous-types et passer au formulaire
       setPolicyName(`${selectedType!.labelFr} - ${insurer.label}`);
@@ -148,13 +176,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   };
 
   // Mode standard : recherche des CG disponibles
-  const searchCG = async (typeCode: string, insurerCode: string, insurer: Insurer) => {
+  const searchCG = async (typeCode: string, insurerCode: string, insurer: Insurer, subTypeCode?: string | null) => {
     setLoading(true);
     setError('');
     setIsNoCgMode(false);
 
     try {
-      const url = `${API_URL}/api/cg/central/by-type-and-insurer?insurance_type_code=${encodeURIComponent(typeCode)}&insurer_code=${encodeURIComponent(insurerCode)}`;
+      const url = `${API_URL}/api/cg/central/by-type-and-insurer?insurance_type_code=${encodeURIComponent(typeCode)}&insurer_code=${encodeURIComponent(insurerCode)}`
+        + (subTypeCode ? `&insurance_sub_type_code=${encodeURIComponent(subTypeCode)}` : '');
       
       const response = await fetch(url, { credentials: 'include' });
       
@@ -310,7 +339,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     }
   };
 
-  // Ajout au portefeuille
+  // Ajout au portefeuille (crée 1 ligne par sous-type sélectionné)
   const addToPortfolio = async () => {
     if (!selectedFormule || !policyName) {
       setError('Veuillez sélectionner une formule et nommer le contrat');
@@ -329,48 +358,62 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         ? { cg_source: mode === 'standard' ? 'central' : 'user', cg_id: cgData.id }
         : {};
 
-      const response = await fetch(`${API_URL}/api/policies`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
-        },
-        body: JSON.stringify({
-          userId: userId,
-          name: policyName,
-          insurerCode: selectedInsurer!.code,
-          insurance_type_code: selectedType!.code,
-          formula: selectedFormule,
-          options: selectedOptions,
-          ...cgPayload,
-          startDate: new Date().toISOString().split('T')[0],
-          status: 'active'
-        }),
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        const msg = errorData.message === 'LIMIT_REACHED'
-          ? (errorData.detail || 'Vous avez atteint la limite de 10 contrats dans votre portefeuille.')
-          : (errorData.message || 'Add policy failed');
-        throw new Error(msg);
+      // Déterminer les sous-types à créer
+      const subTypesToCreate = selectedSubTypeCodes.length > 0
+        ? selectedSubTypeCodes
+        : [null];   // null = pas de sous-type
+
+      const createPolicy = async (subTypeCode: string | null) => {
+        const response = await fetch(`${API_URL}/api/policies`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          },
+          body: JSON.stringify({
+            userId: userId,
+            name: subTypesToCreate.length > 1 && subTypeCode
+              ? `${policyName} - ${availableSubTypesStandard.find(s => s.code === subTypeCode)?.labelFr || subTypeCode}`
+              : policyName,
+            insurerCode: selectedInsurer!.code,
+            insurance_type_code: selectedType!.code,
+            insurance_sub_type_code: subTypeCode || undefined,
+            formula: selectedFormule,
+            options: selectedOptions,
+            ...cgPayload,
+            startDate: new Date().toISOString().split('T')[0],
+            status: 'active'
+          }),
+          credentials: 'include'
+        });
+        if (!response.ok) {
+          const errorData = await response.json();
+          const msg = errorData.message === 'LIMIT_REACHED'
+            ? (errorData.detail || 'Vous avez atteint la limite de 10 contrats dans votre portefeuille.')
+            : (errorData.message || 'Add policy failed');
+          throw new Error(msg);
+        }
+        return await response.json();
+      };
+
+      const createdPolicies: any[] = [];
+      for (const code of subTypesToCreate) {
+        const p = await createPolicy(code);
+        createdPolicies.push(p);
       }
 
-      const createdPolicy = await response.json();
-      console.log('✅ Policy créée:', createdPolicy);
-      
-      // Notifier le parent avec la policy créée
+      console.log(`✅ ${createdPolicies.length} police(s) créée(s):`, createdPolicies.map(p => p.id));
+
       if (onAdd) {
-        onAdd(createdPolicy);
+        createdPolicies.forEach(p => onAdd(p));
       }
-      
-      alert('✅ Contrat ajouté au portefeuille');
-      
-      // Retourner au portefeuille
-      if (onCancel) {
-        onCancel();
-      }
+
+      const msg = createdPolicies.length > 1
+        ? `✅ ${createdPolicies.length} contrats ajoutés au portefeuille`
+        : '✅ Contrat ajouté au portefeuille';
+      alert(msg);
+
+      if (onCancel) onCancel();
     } catch (err: any) {
       console.error('Erreur ajout contrat:', err);
       setError(err.message || 'Erreur lors de l\'ajout au portefeuille');
@@ -399,6 +442,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           <p className="text-sm text-gray-600 mt-1">
             {step === 'selectType' && 'Choisissez le type d\'assurance'}
             {step === 'selectInsurer' && 'Sélectionnez votre assureur'}
+            {step === 'selectSubType' && 'Sélectionnez le(s) sous-type(s)'}
             {step === 'customConfig' && 'Renseignez les informations du document'}
             {step === 'configure' && 'Configurez votre contrat'}
           </p>
@@ -488,11 +532,17 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           </button>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {isLoadingSubTypesStandard && (
+              <div className="col-span-2 text-center py-4 text-sm text-gray-500">
+                ⏳ Vérification des sous-types disponibles...
+              </div>
+            )}
             {availableInsurers.map(insurer => (
               <button
                 key={insurer.code}
-                onClick={() => handleSelectInsurer(insurer)}
-                className="p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white"
+                onClick={() => !isLoadingSubTypesStandard && handleSelectInsurer(insurer)}
+                disabled={isLoadingSubTypesStandard}
+                className="p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white disabled:opacity-60 disabled:cursor-wait"
                 style={{ borderColor: selectedInsurer?.code === insurer.code ? insurer.color : undefined }}
               >
                 <div className="flex items-center gap-3">
@@ -517,7 +567,73 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         </div>
       )}
 
-      {/* Étape 2b (custom seulement): Informations du document CG */}
+      {/* Étape 2b (standard, sous-types multiples) : sélection multi des sous-types */}
+      {step === 'selectSubType' && mode === 'standard' && (
+        <div className="space-y-5">
+          <button
+            onClick={() => setStep('selectInsurer')}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            ← Changer l'assureur
+          </button>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+            🛂 Cet assureur propose plusieurs sous-types pour <strong>{selectedType?.labelFr}</strong>.
+            Sélectionnez un ou plusieurs sous-types : <strong>une ligne de portefeuille sera créée pour chacun</strong>.
+          </div>
+
+          {isLoadingSubTypesStandard ? (
+            <p className="text-sm text-gray-500">Chargement des sous-types...</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {availableSubTypesStandard.map(st => {
+                const checked = selectedSubTypeCodes.includes(st.code);
+                return (
+                  <label
+                    key={st.code}
+                    className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${
+                      checked
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 bg-white hover:border-blue-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedSubTypeCodes(prev =>
+                          checked ? prev.filter(c => c !== st.code) : [...prev, st.code]
+                        )
+                      }
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                    <span className="font-medium text-gray-900">{st.labelFr}</span>
+                    {checked && <Check className="w-4 h-4 text-blue-600 ml-auto" />}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            onClick={async () => {
+              if (selectedSubTypeCodes.length === 0) {
+                setError('Veuillez sélectionner au moins un sous-type');
+                return;
+              }
+              setError('');
+              // Charger la CG du premier sous-type sélectionné pour avoir les formules
+              await searchCG(selectedType!.code, selectedInsurer!.code, selectedInsurer!, selectedSubTypeCodes[0]);
+            }}
+            disabled={loading || selectedSubTypeCodes.length === 0}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
+          >
+            {loading ? '⏳ Chargement...' : `Suivant → (${selectedSubTypeCodes.length} sélectionné)`}
+          </button>
+        </div>
+      )}
+
+      {/* Étape 2c (custom seulement): Informations du document CG */}
       {step === 'customConfig' && mode === 'custom' && (
         <div className="space-y-5">
           <button
@@ -675,6 +791,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
             onClick={() => {
               if (mode === 'custom') {
                 setStep('customConfig');
+              } else if (availableSubTypesStandard.length >= 2) {
+                setStep('selectSubType');
               } else {
                 setStep('selectInsurer');
               }
@@ -691,6 +809,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           {isNoCgMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
               ℹ️ Aucune Condition Générale trouvée dans le référentiel pour cet assureur/type. Vous pouvez tout de même ajouter le contrat en saisissant votre formule manuellement.
+            </div>
+          )}
+
+          {/* Résumé sous-types sélectionnés (mode standard multi-sous-type) */}
+          {mode === 'standard' && selectedSubTypeCodes.length > 1 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
+              ✅ <strong>{selectedSubTypeCodes.length} contrats</strong> seront créés dans votre portefeuille :&nbsp;
+              {selectedSubTypeCodes.map(c => availableSubTypesStandard.find(s => s.code === c)?.labelFr || c).join(', ')}
             </div>
           )}
 

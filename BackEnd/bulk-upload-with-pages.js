@@ -134,10 +134,11 @@ const PDF_FOLDER = process.platform === 'win32'
   : '/home/VMRemi19821982/AssurClair/pdfs';
 
 // Répertoire de stockage centralisé des PDFs (configuré via PDF_STORAGE_DIR)
+// Linux fallback : ~/AssurClair/pdf-storage (toujours accessible, ne nécessite pas mkdir sudo)
 const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR
   || (process.platform === 'win32'
     ? 'C:\\biencouvert\\pdf-storage'
-    : '/data/assur-clair/pdfs');
+    : path.join(process.env.HOME || '/home/VMRemi19821982', 'AssurClair', 'pdf-storage'));
 
 /**
  * Extrait le texte complet d'un PDF localement via pdfjs-dist (0 token Gemini).
@@ -284,6 +285,7 @@ function tableToFacts(tableData, centralCgId, pageId, pageNumber, insurerCode, i
         formula_label: formulaLabel,
         coverage_status: coverageInfo.status,
         coverage_amount: coverageInfo.amount,
+        coverage_notes: null,
         franchise: coverageInfo.franchise,
         source_page_id: pageId,
         source_page_number: pageNumber,
@@ -368,6 +370,46 @@ function extractFranchise(text) {
   return null;
 }
 
+// ─── Classification sémantique des pages ────────────────────────────────────
+const GUARANTEE_PATTERNS = [
+  { code: 'RC',         keywords: /responsabilit[eé]\s+civile|r\.c\./i },
+  { code: 'DOMMAGES',   keywords: /dommages\s+(tous|collision|accident)|tous\s+risques/i },
+  { code: 'VOL',        keywords: /\bvol\b|tentative\s+de\s+vol/i },
+  { code: 'INCENDIE',   keywords: /incendie|explosion|attentat/i },
+  { code: 'BRIS_GLACE', keywords: /bris\s+de\s+glaces?|vitrage|pare-?brise/i },
+  { code: 'ASSISTANCE', keywords: /assistance|d[eé]pannage|remorquage/i },
+  { code: 'PJ',         keywords: /protection\s+juridique|d[eé]fense.+recours/i },
+  { code: 'CONDUCTEUR', keywords: /conducteur|corporels?\s+du\s+conducteur/i },
+  { code: 'CAT_NAT',    keywords: /catastrophes?\s+naturelles?|cat\s*nat/i },
+  { code: 'FRANCHISE',  keywords: /franchise|participation/i },
+  { code: 'PLAFOND',    keywords: /plafond|limite\s+de\s+garantie|montant\s+maximum/i },
+];
+
+function extractGuaranteeCodes(text) {
+  return GUARANTEE_PATTERNS.filter(p => p.keywords.test(text)).map(p => p.code);
+}
+
+function extractArticleRef(text) {
+  const match = text.match(/\b(art(?:icle|\.)?\s*[\d.]+[A-Za-z]?|§\s*\d+[\d.]*)/i);
+  return match ? match[0].trim() : null;
+}
+
+function classifyPageType(text, hasTable) {
+  if (!text || text.trim().length < 20)
+    return { chunkType: 'inconnu', guaranteeCodes: [], articleRef: null, confidence: 0 };
+  if (hasTable)
+    return { chunkType: 'tableau', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.95 };
+  if (/\b(ne\s+(pas|point)\s+(couvrir|garantir|inclure)|exclusion|exclu[se]?|non\s+garanti)\b/i.test(text) && text.length > 200)
+    return { chunkType: 'exclusion', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.85 };
+  if (/\b(franchise|plafond|seuil|limite|jusqu'[àa]|maximum|\d+\s*€)\b/i.test(text) && text.length > 150)
+    return { chunkType: 'restriction', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.80 };
+  if (/\bgaranti[et]|\bcouverture|\bprise\s+en\s+charge\b/i.test(text) && text.length > 200)
+    return { chunkType: 'garantie', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.75 };
+  if (/\b(au\s+sens\s+du\s+présent|on\s+entend\s+par|désigne|signifie)\b/i.test(text))
+    return { chunkType: 'definition', guaranteeCodes: [], articleRef: extractArticleRef(text), confidence: 0.80 };
+  return { chunkType: 'general', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.60 };
+}
+
 /**
  * Génère un embedding pour un texte via l'API REST Gemini
  */
@@ -419,7 +461,7 @@ async function generateEmbedding(text) {
 }
 
 /**
- * Insère un document dans central_cg
+ * Insère un document dans central_cg (identique au comportement de la page Admin)
  */
 async function insertCentralCg(data) {
   const query = `
@@ -438,9 +480,11 @@ async function insertCentralCg(data) {
       content_text,
       embedding,
       metadata,
+      pdf_base64,
+      vectorization_status,
       created_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'processing', NOW(), NOW())
     RETURNING id
   `;
 
@@ -457,8 +501,9 @@ async function insertCentralCg(data) {
     data.target_filename,
     data.status || 'active',
     data.content_text,
-    JSON.stringify(data.embedding),
-    data.metadata || {}
+    data.embedding ? JSON.stringify(data.embedding) : null,
+    JSON.stringify(data.metadata || {}),
+    data.pdf_base64 || null
   ];
 
   const result = await pool.query(query, values);
@@ -466,7 +511,7 @@ async function insertCentralCg(data) {
 }
 
 /**
- * Insère une page dans central_cg_pages
+ * Insère une page dans central_cg_pages (schema identique à la page Admin)
  */
 async function insertCgPage(pageData) {
   const query = `
@@ -474,13 +519,30 @@ async function insertCgPage(pageData) {
       central_cg_id,
       page_number,
       content_text,
+      layout_text,
       embedding,
       page_image_base64,
       has_table,
       table_json,
       table_extraction_confidence,
+      chunk_type,
+      guarantee_codes,
+      article_ref,
+      classification_confidence,
       created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+    ON CONFLICT (central_cg_id, page_number) DO UPDATE SET
+      content_text = EXCLUDED.content_text,
+      layout_text  = EXCLUDED.layout_text,
+      embedding    = COALESCE(EXCLUDED.embedding, central_cg_pages.embedding),
+      has_table    = EXCLUDED.has_table,
+      table_json   = EXCLUDED.table_json,
+      table_extraction_confidence = EXCLUDED.table_extraction_confidence,
+      chunk_type   = EXCLUDED.chunk_type,
+      guarantee_codes = EXCLUDED.guarantee_codes,
+      article_ref  = EXCLUDED.article_ref,
+      classification_confidence = EXCLUDED.classification_confidence,
+      updated_at   = CURRENT_TIMESTAMP
     RETURNING id
   `;
 
@@ -488,11 +550,16 @@ async function insertCgPage(pageData) {
     pageData.central_cg_id,
     pageData.page_number,
     pageData.content_text,
+    pageData.layout_text || pageData.content_text,   // layout_text = même texte si pas de rendu canvas
     pageData.embedding ? JSON.stringify(pageData.embedding) : null,
-    pageData.page_image_base64,
+    pageData.page_image_base64 || null,
     pageData.has_table,
     pageData.table_json ? JSON.stringify(pageData.table_json) : null,
-    pageData.confidence
+    pageData.confidence || null,
+    pageData.chunk_type || 'general',
+    pageData.guarantee_codes || [],
+    pageData.article_ref || null,
+    pageData.classification_confidence || null
   ];
 
   const result = await pool.query(query, values);
@@ -516,18 +583,20 @@ async function insertCoverageFacts(facts) {
       formula_label,
       coverage_status,
       coverage_amount,
+      coverage_notes,
       franchise,
       source_page_id,
       source_page_number,
       extraction_confidence,
       extracted_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
     ON CONFLICT (insurer_code, insurance_type_code, central_cg_id, guarantee_key, formula_key) 
     DO UPDATE SET
       guarantee_label = EXCLUDED.guarantee_label,
       formula_label = EXCLUDED.formula_label,
       coverage_status = EXCLUDED.coverage_status,
       coverage_amount = EXCLUDED.coverage_amount,
+      coverage_notes  = EXCLUDED.coverage_notes,
       franchise = EXCLUDED.franchise,
       source_page_id = EXCLUDED.source_page_id,
       source_page_number = EXCLUDED.source_page_number,
@@ -548,6 +617,7 @@ async function insertCoverageFacts(facts) {
         fact.formula_label,
         fact.coverage_status,
         fact.coverage_amount,
+        fact.coverage_notes || null,
         fact.franchise,
         fact.source_page_id,
         fact.source_page_number,
@@ -563,7 +633,7 @@ async function insertCoverageFacts(facts) {
           await pool.query(simpleQuery, [
             fact.insurer_code, fact.insurance_type_code, fact.central_cg_id,
             fact.guarantee_key, fact.guarantee_label, fact.formula_key, fact.formula_label,
-            fact.coverage_status, fact.coverage_amount, fact.franchise,
+            fact.coverage_status, fact.coverage_amount, fact.coverage_notes || null, fact.franchise,
             fact.source_page_id, fact.source_page_number, fact.extraction_confidence
           ]);
           insertedCount++;
@@ -630,8 +700,7 @@ async function processDocument(row, index, total) {
     // Lire le fichier PDF
     log(`  📄 Lecture du fichier...`);
     const pdfBuffer = fs.readFileSync(pdfPath);
-    // base64 conservé uniquement si nécessaire pour d'autres usages (ex: stockage)
-    // L'extraction de texte et la vectorisation page par page utilisent le buffer local maintenant
+    const pdfBase64 = pdfBuffer.toString('base64'); // stocker en DB comme la page Admin
 
     // Extraire le texte complet pour central_cg (LOCAL - 0 token Gemini)
     log(`  📄 Extraction du texte complet (locale, sans Gemini)...`);
@@ -652,20 +721,27 @@ async function processDocument(row, index, total) {
     const cgData = {
       insurer_code: row.Insurer,
       insurance_type_code: row.Insurance_type,
-      insurance_sub_type_code: row.Insurance_sub_type_code || row.Sub_type || null,
+      // Support des variantes de nommage de colonne dans l'Excel
+      insurance_sub_type_code: row.insurance_sub_type || row.Insurance_sub_type_code || row.Sub_type || null,
       document_type_code: row.Document_type_code || row.Type || 'CG',
       version: version,
       type: row.Document_type_code || row.Type || 'CG',
       owner: 'system_bulk_upload',
-      detail: row['Détail'] || '',
+      detail: row['Détail'] || row.detail || '',
       url: row.URL || '',
       target_filename: row['nom fichier cible'],
       status: 'active',
       content_text: fullText,
       embedding: fullEmbedding,
+      pdf_base64: pdfBase64,         // identique à la page Admin
       metadata: {
-        insurer_name: row.Insurer_name,
-        insurance_type_name: row.Insurance_type_name,
+        productName:          row.Product_name || row.Insurer_name || '',
+        insurer_name:         row.Insurer_name || row.Insurer || '',
+        insurance_type_name:  row.Insurance_type_name || row.Insurance_type || '',
+        formula:              row.formula || row.Formula || row.Formule || null,
+        description:          row.description || row.Description || row.Sous_produit || null,
+        indexedFormulas:      [],
+        indexedOptions:       {},
         source: 'excel_bulk_upload_with_pages'
       }
     };
@@ -736,16 +812,22 @@ async function processDocument(row, index, total) {
           }
         }
         
-        // Insérer la page dans central_cg_pages
+        // Insérer la page dans central_cg_pages (schema complet = page Admin)
+        const classification = classifyPageType(pageData.text, hasTable && tableJson !== null);
         const pageRecord = {
           central_cg_id: cgId,
           page_number: pageNum,
           content_text: pageData.text,
+          layout_text: pageData.text,   // pas de rendu canvas → même texte
           embedding: pageEmbedding,
           page_image_base64: null,
           has_table: hasTable && tableJson !== null,
           table_json: tableJson,
-          confidence: confidence
+          confidence: confidence,
+          chunk_type: classification.chunkType,
+          guarantee_codes: classification.guaranteeCodes,
+          article_ref: classification.articleRef,
+          classification_confidence: classification.confidence
         };
         
         pageId = await retryDbOperation(() => insertCgPage(pageRecord));
@@ -780,8 +862,26 @@ async function processDocument(row, index, total) {
     log(`     - ${tablesFound} tableaux extraits`);
     log(`     - ${factsCreated} faits de couverture créés`);
 
-    // Mettre à jour le statut
-    row.Status = 'vectorisé+pages';
+    // Marquer la vectorisation comme terminée (identique à pageVectorizationService)
+    try {
+      await pool.query(
+        `UPDATE central_cg
+         SET vectorization_status = 'done',
+             pages_total     = $1,
+             pages_processed = $2,
+             tables_extracted = $3,
+             vectorized_at   = NOW(),
+             updated_at      = NOW()
+         WHERE id = $4`,
+        [pageCount, pagesProcessed, tablesFound, cgId]
+      );
+      log(`  ✅ Statut central_cg mis à jour: done (${pagesProcessed}/${pageCount} pages, ${tablesFound} tableaux)`);
+    } catch (updErr) {
+      log(`  ⚠️  Mise à jour statut CG (non bloquant): ${updErr.message}`);
+    }
+
+    // Mettre à jour le statut Excel
+    row.Status = 'done';
     row['Date de chargement'] = formatDate();
 
     return { 
