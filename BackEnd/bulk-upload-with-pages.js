@@ -14,9 +14,41 @@ const _require = createRequire(import.meta.url);
 const _nodeFetch = _require('node-fetch');
 const _https = _require('https');
 const _insecureAgent = new _https.Agent({ rejectUnauthorized: false });
-// Local PDF parsing (zero Gemini tokens for text extraction)
-const pdfParse = _require('pdf-parse');
+// Local PDF parsing via pdfjs-dist only (zero Gemini tokens for text extraction)
 const pdfjsLib = _require('pdfjs-dist/legacy/build/pdf.js');
+
+// ─── Token tracking (bulk script) ────────────────────────────────────────────
+const tokenStats = {
+  tableExtraction: { calls: 0, inputTokens: 0, outputTokens: 0 },
+};
+
+function recordTokens(category, usageMetadata) {
+  if (!usageMetadata) return;
+  const input  = usageMetadata.promptTokenCount    || 0;
+  const output = usageMetadata.candidatesTokenCount || 0;
+  if (!tokenStats[category]) tokenStats[category] = { calls: 0, inputTokens: 0, outputTokens: 0 };
+  tokenStats[category].calls        += 1;
+  tokenStats[category].inputTokens  += input;
+  tokenStats[category].outputTokens += output;
+}
+
+function logTokenSummary() {
+  log('\n📊 BILAN TOKENS GEMINI');
+  let totalIn = 0, totalOut = 0, totalCalls = 0;
+  for (const [fn, s] of Object.entries(tokenStats)) {
+    if (s.calls === 0) continue;
+    log(`   ${fn}: ${s.calls} appels — in=${s.inputTokens.toLocaleString()} out=${s.outputTokens.toLocaleString()}`);
+    totalIn    += s.inputTokens;
+    totalOut   += s.outputTokens;
+    totalCalls += s.calls;
+  }
+  // Tarif Gemini 2.5 Flash (estimatif Mars 2026)
+  const costEur = ((totalIn / 1e6) * 0.075 + (totalOut / 1e6) * 0.30) * 0.92;
+  log(`   ─────────────────────────────────────────────────`);
+  log(`   TOTAL : ${totalCalls} appels — in=${totalIn.toLocaleString()} out=${totalOut.toLocaleString()} tokens`);
+  log(`   Coût estimé : ${costEur.toFixed(4)} EUR (tarif Flash 2.5)`);
+  log('');
+}
 const { Pool } = pkg;
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import xlsx from 'xlsx';
@@ -108,15 +140,25 @@ const PDF_STORAGE_DIR = process.env.PDF_STORAGE_DIR
     : '/data/assur-clair/pdfs');
 
 /**
- * Extrait le texte complet d'un PDF localement via pdf-parse (0 token Gemini)
+ * Extrait le texte complet d'un PDF localement via pdfjs-dist (0 token Gemini).
+ * Concatène le texte de toutes les pages.
  */
 async function extractFullTextFromPdf(pdfBuffer) {
   try {
-    const data = await pdfParse(pdfBuffer);
-    return data.text || '';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
+    const pdfDoc = await loadingTask.promise;
+    const texts = [];
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      try {
+        const page = await pdfDoc.getPage(i);
+        const content = await page.getTextContent();
+        texts.push(content.items.map(item => item.str).join(' '));
+      } catch (_) { /* page illisible, on passe */ }
+    }
+    return texts.join('\n');
   } catch (error) {
-    console.error('❌ Erreur extraction texte locale:', error.message);
-    // Fallback: retourner chaîne vide pour ne pas bloquer le script
+    console.error('❌ Erreur extraction texte locale (pdfjs):', error.message);
     return '';
   }
 }
@@ -145,15 +187,8 @@ async function extractAllPagesByGemini(pdfBuffer, pageCount) {
     }
     return pages;
   } catch (error) {
-    log(`  ⚠️  Erreur pdfjs, fallback pdf-parse: ${error.message}`);
-    // Fallback: découper le texte complet en N chunks égaux
-    const data = await pdfParse(pdfBuffer);
-    const fullText = data.text || '';
-    const chunkSize = Math.ceil(fullText.length / pageCount) || 1;
-    return Array.from({ length: pageCount }, (_, i) => ({
-      pageNumber: i + 1,
-      text: fullText.slice(i * chunkSize, (i + 1) * chunkSize)
-    }));
+    log(`  ⚠️  Erreur pdfjs extractAllPagesByGemini: ${error.message} — retour tableau vide`);
+    return Array.from({ length: pageCount }, (_, i) => ({ pageNumber: i + 1, text: '' }));
   }
 }
 
@@ -191,6 +226,7 @@ async function extractTableFromPageText(pageText, insurerCode, insuranceTypeCode
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const prompt = `Voici le texte d'une page d'un document d'assurance (assureur: ${insurerCode}, type: ${insuranceTypeCode}).\nAnalyse ce texte et extrais le tableau de garanties/formules si présent.\n\nTexte:\n${pageText.slice(0, 4000)}\n\nRéponds UNIQUEMENT avec un JSON valide (pas de markdown, pas d'explication) de cette structure exacte :\n{"headers":["Garantie","Formule1","Formule2"],"rows":[["Nom garantie","valeur1","valeur2"]],"confidence":0.8}\n- "headers" : première colonne = "Garantie", suivantes = noms des formules\n- "rows" : chaque ligne = [nom garantie, valeur formule1, valeur formule2, ...]\n- "confidence" : entre 0.0 et 1.0 selon la qualité de l'extraction\n- Si aucun tableau de garanties n'est présent, retourne : {"headers":[],"rows":[],"confidence":0.0}`;
     const result = await model.generateContent(prompt);
+    recordTokens('tableExtraction', result?.response?.usageMetadata);
     const responseText = result.response.text().trim();
     log(`      🤖 Réponse Gemini: ${responseText.slice(0, 200)}`);
     const jsonText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -845,6 +881,7 @@ async function main() {
     log(`   💎 Faits de couverture : ${totalFacts}`);
     log(`   📊 Total documents : ${rowsToProcess.length}`);
     log('============================================================\n');
+    logTokenSummary();
 
   } catch (error) {
     log('\n❌ Erreur fatale: ' + error.message);
