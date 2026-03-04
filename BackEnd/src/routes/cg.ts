@@ -72,49 +72,41 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       });
     }
 
-    // Construction dynamique : si un sous-type est précisé on l'utilise, sinon on
-    // accepte aussi les lignes sans sous-type (IS NULL) pour rester rétro-compat.
-    const params: any[] = [insurance_type_code, insurer_code];
-    let subTypeClause = '';
-    if (insurance_sub_type_code) {
-      params.push(insurance_sub_type_code);
-      subTypeClause = `AND (insurance_sub_type_code = $${params.length} OR insurance_sub_type_code IS NULL)`;
-    }
-
     console.log('[CG] Querying database for:', { insurance_type_code, insurer_code, insurance_sub_type_code });
 
-    // Clause ORDER BY : si un sous-type est demandé, on préfère la correspondance exacte
-    const orderBySubType = insurance_sub_type_code
-      ? `CASE WHEN insurance_sub_type_code = $${params.length} THEN 0 ELSE 1 END,`
-      : '';
-
-    const result = await query(
+    // Fonction utilitaire : exécuter la requête avec ou sans clause sous-type
+    const runQuery = async (subTypeFilter: string, qParams: any[]) => query(
       `SELECT 
-        id,
-        insurer_code,
-        insurance_type_code,
-        insurance_sub_type_code,
-        document_type_code,
-        version,
-        type,
-        detail,
-        url,
-        target_filename,
-        status,
-        metadata,
-        created_at
+        id, insurer_code, insurance_type_code, insurance_sub_type_code,
+        document_type_code, version, type, detail, url, target_filename,
+        status, metadata, created_at
       FROM central_cg
-      WHERE insurance_type_code = $1 
-        AND insurer_code = $2
-        AND (document_type_code = 'CG' OR document_type_code IS NULL)
-        ${subTypeClause}
-        AND status = 'active'
+      WHERE insurance_type_code = $1
+        AND insurer_code         = $2
+        AND status NOT IN ('archived', 'deleted')
+        ${subTypeFilter}
       ORDER BY
-        ${orderBySubType}
-        version DESC
+        CASE WHEN document_type_code = 'CG' THEN 0
+             WHEN document_type_code IS NULL THEN 1
+             ELSE 2 END,
+        version DESC NULLS LAST
       LIMIT 1`,
-      params
+      qParams
     );
+
+    // Tentative 1 : correspondance exacte (insensible à la casse) sur le sous-type
+    let result = { rows: [] as any[] };
+    if (insurance_sub_type_code) {
+      result = await runQuery(
+        `AND LOWER(insurance_sub_type_code) = LOWER($3)`,
+        [insurance_type_code, insurer_code, insurance_sub_type_code]
+      );
+    }
+
+    // Tentative 2 : sans filtre sous-type (inclut IS NULL et tout autre sous-type)
+    if (result.rows.length === 0) {
+      result = await runQuery('', [insurance_type_code, insurer_code]);
+    }
 
     console.log('[CG] Query result:', result.rows.length, 'rows');
 

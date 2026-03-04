@@ -35,11 +35,12 @@ interface CGData {
   insurance_type_name: string;
 }
 
-// Icônes par type d'assurance
-const insuranceIcons: Record<string, React.FC<any>> = {
-  AUT: Car,
-  HAB: Home,
-  SAN: Heart,
+// Icônes Lucide de secours (si l'image PNG n'est pas disponible)
+const insuranceIconsFallback: Record<string, React.FC<any>> = {
+  AUT: Car, AUT01: Car,
+  HAB: Home, HAB01: Home,
+  SAN: Heart, SAN01: Heart,
+  PRE: Heart, PRE01: Heart,
   PRO: Briefcase,
   DEFAULT: ShieldPlus
 };
@@ -341,8 +342,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
   // Ajout au portefeuille (crée 1 ligne par sous-type sélectionné)
   const addToPortfolio = async () => {
-    if (!selectedFormule || !policyName) {
-      setError('Veuillez sélectionner une formule et nommer le contrat');
+    if (!policyName) {
+      setError('Veuillez nommer le contrat');
       return;
     }
 
@@ -428,10 +429,15 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     );
   };
 
-  const getIcon = (typeCode: string) => {
-    const IconComponent = insuranceIcons[typeCode] || insuranceIcons.DEFAULT;
-    return IconComponent;
-  };
+  // Renvoie l'URL de l'image du type d'assurance stockée dans /public/insurance-types/
+  // Convention : /insurance-types/{CODE}.png  (ex: /insurance-types/AUT01.png)
+  const getTypeImageUrl = (type: InsuranceType) =>
+    (type as any).icon && ((type as any).icon.startsWith('/') || (type as any).icon.startsWith('http'))
+      ? (type as any).icon
+      : `/insurance-types/${type.code}.png`;
+
+  const getFallbackIcon = (typeCode: string) =>
+    insuranceIconsFallback[typeCode] || insuranceIconsFallback.DEFAULT;
 
   return (
     <div className="max-w-4xl mx-auto p-4">
@@ -488,12 +494,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         </div>
       )}
 
-      {/* Étape 1: Sélection du type d'assurance — grille d'icônes */}
+      {/* Étape 1: Sélection du type d'assurance — grille avec images */}
       {step === 'selectType' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {insuranceTypes.map(type => {
-            const IconComponent = getIcon(type.code);
+            const FallbackIcon = getFallbackIcon(type.code);
+            const imgUrl = getTypeImageUrl(type);
             const isSelected = selectedType?.code === type.code;
+            const bgColor = (type as any).color || '#4F46E5';
             return (
               <button
                 key={type.code}
@@ -505,10 +513,27 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 }`}
               >
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center text-white"
-                  style={{ backgroundColor: type.color }}
+                  className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden"
+                  style={{ backgroundColor: bgColor }}
                 >
-                  <IconComponent className="w-6 h-6" />
+                  <img
+                    src={imgUrl}
+                    alt={type.labelFr}
+                    className="w-10 h-10 object-contain"
+                    onError={(e) => {
+                      // Fallback : masquer l'img et afficher l'icône Lucide
+                      const target = e.currentTarget;
+                      target.style.display = 'none';
+                      const parent = target.parentElement;
+                      if (parent && !parent.querySelector('[data-fallback]')) {
+                        const span = document.createElement('span');
+                        span.dataset.fallback = '1';
+                        span.className = 'text-white text-xl font-bold';
+                        span.textContent = type.labelFr.substring(0, 2);
+                        parent.appendChild(span);
+                      }
+                    }}
+                  />
                 </div>
                 <span className={`text-xs font-medium text-center leading-tight ${
                   isSelected ? 'text-blue-700' : 'text-gray-700'
@@ -588,6 +613,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {availableSubTypesStandard.map(st => {
                 const checked = selectedSubTypeCodes.includes(st.code);
+                const label = st.labelFr || st.code; // fallback sur le code si label vide
                 return (
                   <label
                     key={st.code}
@@ -607,7 +633,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                       }
                       className="w-5 h-5 text-blue-600 rounded"
                     />
-                    <span className="font-medium text-gray-900">{st.labelFr}</span>
+                    <span className="font-medium text-gray-900">{label}</span>
+                    <span className="text-xs text-gray-400 ml-1">{st.code}</span>
                     {checked && <Check className="w-4 h-4 text-blue-600 ml-auto" />}
                   </label>
                 );
@@ -860,13 +887,18 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 ))}
               </div>
             ) : (
-              <input
-                type="text"
-                value={selectedFormule}
-                onChange={(e) => setSelectedFormule(e.target.value)}
-                placeholder="Ex: Tiers, Tous Risques, Essentiel..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="space-y-2">
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ℹ️ Aucune formule indexée pour ce contrat. Saisissez le nom de votre formule ou laissez vide.
+                </p>
+                <input
+                  type="text"
+                  value={selectedFormule}
+                  onChange={(e) => setSelectedFormule(e.target.value)}
+                  placeholder="Ex: Tiers, Tous Risques, Essentiel... (optionnel)"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             )}
           </div>
 
@@ -908,7 +940,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
           <button
             onClick={addToPortfolio}
-            disabled={loading || !selectedFormule || !policyName}
+            disabled={loading || !policyName}
             className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
           >
             {loading ? (
