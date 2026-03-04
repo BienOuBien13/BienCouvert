@@ -31,6 +31,10 @@ import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTa
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv.config();
 
+// Bypass SSL Zscaler/corporate proxy pour les appels HTTPS sortants (Gemini, etc.)
+// Identique à ce que font les scripts bulk – nécessaire sur les postes avec inspection TLS.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // Initialisation de la télémétrie OTel (avant tout appel Gemini)
 initTelemetry();
 

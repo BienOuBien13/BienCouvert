@@ -501,41 +501,51 @@ export const AdminView: React.FC = () => {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100">
-                <th className="px-8 py-4">Assureur</th>
-                <th className="px-8 py-4">Nom</th>
-                <th className="px-8 py-4">Type d'assurance</th>
-                <th className="px-8 py-4">URL</th>
-                <th className="px-8 py-4">Vectorisation</th>
-                <th className="px-8 py-4 text-right">Actions</th>
+                <th className="px-4 py-4">ID</th>
+                <th className="px-6 py-4">Assureur</th>
+                <th className="px-6 py-4">Type d'assurance</th>
+                <th className="px-6 py-4">Sous-type</th>
+                <th className="px-6 py-4">URL</th>
+                <th className="px-6 py-4">Statut</th>
+                <th className="px-6 py-4 text-center">Suppression</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredRepo.map((entry) => (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-8 py-5">
-                    <span className="font-black text-slate-900">{entry.insurer}</span>
+                  <td className="px-4 py-4">
+                    <span className="text-[10px] font-bold text-slate-400 font-mono">{entry.id}</span>
                   </td>
-                  <td className="px-8 py-5">
-                    <span className="font-bold text-slate-600">{entry.productName}</span>
-                  </td>
-                  <td className="px-8 py-5">
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase block w-fit">
-                        {(entry as any).insuranceTypeLabel || entry.insuranceTypeCode || entry.type || '–'}
-                      </span>
-                      <span className="text-[9px] text-slate-400">{entry.insurerCode}</span>
+                  <td className="px-6 py-4">
+                    <div className="space-y-0.5">
+                      <span className="font-black text-slate-900 text-sm">{entry.insurer}</span>
+                      <div className="text-[9px] text-slate-400">{entry.insurerCode}</div>
                     </div>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-6 py-4">
+                    <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-2 py-1 rounded-lg uppercase block w-fit">
+                      {(entry as any).insuranceTypeLabel || entry.insuranceTypeCode || entry.type || '–'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {(entry as any).insuranceSubTypeLabel || (entry as any).insuranceSubTypeCode ? (
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg block w-fit">
+                        {(entry as any).insuranceSubTypeLabel || (entry as any).insuranceSubTypeCode}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
                     {entry.documentUrl ? (
-                      <a 
-                        href={entry.documentUrl} 
-                        target="_blank" 
+                      <a
+                        href={entry.documentUrl}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-xs font-medium group/link"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span className="max-w-[200px] truncate group-hover/link:underline">
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        <span className="max-w-[160px] truncate group-hover/link:underline">
                           {entry.documentUrl.replace(/^https?:\/\//, '').split('/')[0]}
                         </span>
                       </a>
@@ -543,7 +553,7 @@ export const AdminView: React.FC = () => {
                       <span className="text-slate-300 text-xs">-</span>
                     )}
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-6 py-4">
                     {(entry as any).vectorizedAt ? (
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-1.5">
@@ -561,10 +571,11 @@ export const AdminView: React.FC = () => {
                       </div>
                     )}
                   </td>
-                  <td className="px-8 py-5 text-right">
-                    <button 
+                  <td className="px-6 py-4 text-center">
+                    <button
                       onClick={() => handleDelete(entry.id)}
                       className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                      title="Supprimer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
