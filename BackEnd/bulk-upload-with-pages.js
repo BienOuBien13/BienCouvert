@@ -16,10 +16,13 @@ const _https = _require('https');
 const _insecureAgent = new _https.Agent({ rejectUnauthorized: false });
 // Local PDF parsing via pdfjs-dist only (zero Gemini tokens for text extraction)
 const pdfjsLib = _require('pdfjs-dist/legacy/build/pdf.js');
+// Rendu page PDF → image PNG base64 (identique à pageVectorizationService.ts)
+const { createCanvas } = _require('canvas');
 
 // ─── Token tracking (bulk script) ────────────────────────────────────────────
 const tokenStats = {
-  tableExtraction: { calls: 0, inputTokens: 0, outputTokens: 0 },
+  tableExtraction:    { calls: 0, inputTokens: 0, outputTokens: 0 },
+  metadataExtraction: { calls: 0, inputTokens: 0, outputTokens: 0 },
 };
 
 function recordTokens(category, usageMetadata) {
@@ -410,6 +413,191 @@ function classifyPageType(text, hasTable) {
   return { chunkType: 'general', guaranteeCodes: extractGuaranteeCodes(text), articleRef: extractArticleRef(text), confidence: 0.60 };
 }
 
+// ─── Helpers d'alignement Admin ↔ Bulk ────────────────────────────────────────
+
+/**
+ * Lookup case-insensitive d'une valeur dans une row Excel.
+ * Essaie les clés exactes puis insensible à la casse + trim.
+ */
+function getColValue(row, ...keys) {
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+  }
+  const rowLow = {};
+  for (const [k, v] of Object.entries(row)) rowLow[k.trim().toLowerCase()] = v;
+  for (const key of keys) {
+    const v = rowLow[key.trim().toLowerCase()];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return null;
+}
+
+/**
+ * Extrait le texte ET rend la page en image PNG via canvas (identique à extractPage() de
+ * pageVectorizationService.ts). Prend un document pdfjs déjà chargé pour éviter le rechargement.
+ */
+async function extractPageWithCanvas(pdfDoc, pageNum) {
+  try {
+    const page = await pdfDoc.getPage(pageNum);
+
+    // ── Texte ──────────────────────────────────────────────────────────────────
+    const textContent = await page.getTextContent();
+    const contentText = textContent.items.map(item => item.str).join(' ');
+    const layoutText  = textContent.items
+      .map(item => ({ text: item.str, y: (item.transform ? item.transform[5] : 0) }))
+      .sort((a, b) => b.y - a.y)
+      .map(item => item.text)
+      .join('\n');
+
+    // ── Image canvas ──────────────────────────────────────────────────────────
+    let imageBase64 = null, width = null, height = null;
+    try {
+      const viewport = page.getViewport({ scale: 2.0 }); // 2× pour meilleure qualité
+      const canvas   = createCanvas(Math.floor(viewport.width), Math.floor(viewport.height));
+      const context  = canvas.getContext('2d');
+      await page.render({ canvasContext: context, viewport }).promise;
+      imageBase64 = canvas.toBuffer('image/png').toString('base64');
+      width  = Math.floor(viewport.width);
+      height = Math.floor(viewport.height);
+    } catch (renderErr) {
+      // Non bloquant — la page sera insérée sans image
+    }
+
+    return { contentText, layoutText, imageBase64, width, height };
+  } catch (err) {
+    log(`      ⚠️  extractPageWithCanvas p.${pageNum}: ${err.message}`);
+    return { contentText: '', layoutText: '', imageBase64: null, width: null, height: null };
+  }
+}
+
+/**
+ * Extraction tableau via Vision Gemini — identique à extractTableFromPageImage()
+ * dans tableExtractionService.ts.
+ * Retourne au format Vision : { headers, rows: [{guarantee, formulas{}}], confidence, _isVision:true }
+ */
+async function extractTableFromPageVision(imageBase64, insurerCode, insuranceTypeCode) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const prompt = `Tu es un expert en analyse de documents d'assurance. Analyse cette image de page de conditions générales et extrait le tableau de garanties s'il existe.
+
+FORMAT DE SORTIE (JSON strict):
+{
+  "has_table": true/false,
+  "headers": ["Garanties", "TIERS ECO", "TIERS ESSENTIEL", ...],
+  "rows": [
+    { "guarantee": "Responsabilité civile", "formulas": { "tiers_eco": "✓", "tiers_essentiel": "✓" } }
+  ],
+  "confidence": 0.95
+}
+
+LÉGENDE: ✓/● = inclus, ○ = option, - = exclu. Clés formules en snake_case (espaces→'_', '+'→'_plus').
+Si pas de tableau: {"has_table":false,"confidence":1.0}
+RÉPONDS UNIQUEMENT AVEC LE JSON.`;
+
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { mimeType: 'image/png', data: imageBase64 } }
+    ]);
+    recordTokens('tableExtraction', result?.response?.usageMetadata);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.has_table || !parsed.rows || parsed.rows.length === 0) return null;
+    return { headers: parsed.headers || [], rows: parsed.rows, confidence: parsed.confidence || 0.5, _isVision: true };
+  } catch (err) {
+    log(`      ⚠️  Vision table: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Convertit un tableau Vision (rows = objets {guarantee, formulas}) en coverage_facts.
+ * Miroir de tableToFacts() dans tableExtractionService.ts.
+ */
+function tableToFactsVision(tableData, centralCgId, pageId, pageNumber, insurerCode, insuranceTypeCode) {
+  const facts = [];
+  if (!tableData?.headers || !tableData?.rows) return facts;
+  const formulaHeaders = tableData.headers.slice(1); // ignorer la 1ère colonne "Garanties"
+  tableData.rows.forEach(row => {
+    const guaranteeLabel = row.guarantee || '';
+    if (!guaranteeLabel) return;
+    const guaranteeKey = normalizeKey(guaranteeLabel);
+    formulaHeaders.forEach((formulaLabel, idx) => {
+      const formulaKey = normalizeKey(formulaLabel.replace(/\+/g, '_plus'));
+      // Multi-stratégie lookup (même logique que tableExtractionService.ts)
+      let symbol = '';
+      const fmls = row.formulas || {};
+      if (fmls[formulaKey] !== undefined) {
+        symbol = String(fmls[formulaKey]);
+      } else {
+        const geminiKeys = Object.keys(fmls);
+        const matchKey = geminiKeys.find(gk => normalizeKey(gk.replace(/\+/g, '_plus')) === formulaKey);
+        symbol = matchKey !== undefined
+          ? String(fmls[matchKey])
+          : (idx < geminiKeys.length ? String(fmls[geminiKeys[idx]]) : '');
+      }
+      const coverageInfo = parseStatus(symbol);
+      facts.push({
+        insurer_code:        insurerCode,
+        insurance_type_code: insuranceTypeCode,
+        central_cg_id:       centralCgId,
+        guarantee_key:       guaranteeKey,
+        guarantee_label:     guaranteeLabel,
+        formula_key:         formulaKey,
+        formula_label:       formulaLabel,
+        coverage_status:     coverageInfo.status,
+        coverage_amount:     coverageInfo.amount,
+        coverage_notes:      null,
+        franchise:           coverageInfo.franchise,
+        source_page_id:      pageId,
+        source_page_number:  pageNumber,
+        extraction_confidence: tableData.confidence
+      });
+    });
+  });
+  return facts;
+}
+
+/**
+ * Extraction de métadonnées enrichies via Gemini (formules, options, résumé sémantique).
+ * Identique à extractEnrichedMetadata() dans cg.ts / indexCgDocument() dans ai.ts.
+ */
+async function extractEnrichedMetadataBulk(text, insurerCode, insuranceTypeCode) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const prompt = `Analyse ce texte extrait de Conditions Générales ${insuranceTypeCode} de chez ${insurerCode}.
+
+IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
+
+Extrais du texte :
+1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
+3. Un résumé sémantique concis des garanties principales (max 200 mots).
+
+Réponds UNIQUEMENT en JSON strict, sans texte ni markdown supplémentaire :
+{"indexedFormulas":["Formule 1","Formule 2"],"indexedOptions":["Option 1"],"semanticSummary":"Résumé..."}
+
+Texte (tronqué à 12 000 chars) :
+${text.slice(0, 12000)}`;
+
+    const result = await model.generateContent([{ text: prompt }]);
+    recordTokens('metadataExtraction', result?.response?.usageMetadata);
+    let jsonText = result.response.text().trim().replace(/^```json?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const fb = jsonText.indexOf('{'), lb = jsonText.lastIndexOf('}');
+    if (fb !== -1 && lb !== -1) jsonText = jsonText.substring(fb, lb + 1);
+    const parsed = JSON.parse(jsonText);
+    return {
+      indexedFormulas: Array.isArray(parsed.indexedFormulas) ? parsed.indexedFormulas : [],
+      indexedOptions:  Array.isArray(parsed.indexedOptions)  ? parsed.indexedOptions  : [],
+      semanticSummary: parsed.semanticSummary || ''
+    };
+  } catch (err) {
+    log(`  ⚠️  Extraction métadonnées enrichies échouée: ${err.message}`);
+    return { indexedFormulas: [], indexedOptions: [], semanticSummary: '' };
+  }
+}
+
 /**
  * Génère un embedding pour un texte via l'API REST Gemini
  */
@@ -522,6 +710,8 @@ async function insertCgPage(pageData) {
       layout_text,
       embedding,
       page_image_base64,
+      page_width,
+      page_height,
       has_table,
       table_json,
       table_extraction_confidence,
@@ -530,11 +720,14 @@ async function insertCgPage(pageData) {
       article_ref,
       classification_confidence,
       created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
     ON CONFLICT (central_cg_id, page_number) DO UPDATE SET
       content_text = EXCLUDED.content_text,
       layout_text  = EXCLUDED.layout_text,
       embedding    = COALESCE(EXCLUDED.embedding, central_cg_pages.embedding),
+      page_image_base64 = EXCLUDED.page_image_base64,
+      page_width   = EXCLUDED.page_width,
+      page_height  = EXCLUDED.page_height,
       has_table    = EXCLUDED.has_table,
       table_json   = EXCLUDED.table_json,
       table_extraction_confidence = EXCLUDED.table_extraction_confidence,
@@ -550,9 +743,11 @@ async function insertCgPage(pageData) {
     pageData.central_cg_id,
     pageData.page_number,
     pageData.content_text,
-    pageData.layout_text || pageData.content_text,   // layout_text = même texte si pas de rendu canvas
+    pageData.layout_text || pageData.content_text,
     pageData.embedding ? JSON.stringify(pageData.embedding) : null,
     pageData.page_image_base64 || null,
+    pageData.page_width  || null,
+    pageData.page_height || null,
     pageData.has_table,
     pageData.table_json ? JSON.stringify(pageData.table_json) : null,
     pageData.confidence || null,
@@ -709,8 +904,13 @@ async function processDocument(row, index, total) {
 
     // Générer l'embedding du document complet
     log(`  🔮 Génération de l'embedding du document...`);
-    const fullEmbedding = await generateEmbedding(fullText);
-    log(`  ✅ Embedding généré (${fullEmbedding.length} dimensions)`);
+    let fullEmbedding = null;
+    try {
+      fullEmbedding = await generateEmbedding(fullText);
+      log(`  ✅ Embedding généré (${fullEmbedding ? fullEmbedding.length + ' dims' : 'null'})`);
+    } catch (embErr) {
+      log(`  ⚠️  Embedding document indisponible (non bloquant): ${embErr.message}`);
+    }
 
     // Extraire la version du nom de fichier
     const versionMatch = row['nom fichier cible'].match(/_(\d+)\.pdf$/);
@@ -721,8 +921,9 @@ async function processDocument(row, index, total) {
     const cgData = {
       insurer_code: row.Insurer,
       insurance_type_code: row.Insurance_type,
-      // Support des variantes de nommage de colonne dans l'Excel
-      insurance_sub_type_code: row.insurance_sub_type || row.Insurance_sub_type_code || row.Sub_type || null,
+      // Support des variantes de nommage de colonne dans l'Excel (insensible à la casse)
+      insurance_sub_type_code: getColValue(row, 'insurance_sub_type', 'Insurance_sub_type',
+        'insurance_sub_type_code', 'Insurance_sub_type_code', 'Sub_type', 'sub_type'),
       document_type_code: row.Document_type_code || row.Type || 'CG',
       version: version,
       type: row.Document_type_code || row.Type || 'CG',
@@ -762,91 +963,107 @@ async function processDocument(row, index, total) {
     } catch (copyErr) {
       log(`  ⚠️  Copie PDF échouée (non bloquant): ${copyErr.message}`);
     }
-    const pdfDoc = await PDFDocument.load(pdfBuffer);
-    const pageCount = pdfDoc.getPageCount();
+    // Charger pdfjs ONCE pour texte + rendu canvas (identique à pageVectorizationService.ts)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    const pdfDocLoaded = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+    const pageCount = pdfDocLoaded.numPages;
     log(`  📄 ${pageCount} pages à traiter`);
 
-    // Extraire toutes les pages localement via pdfjs-dist (LOCAL - 0 token Gemini)
-    log(`  📄 Extraction du texte page par page (locale, sans Gemini)...`);
-    const allPages = await extractAllPagesByGemini(pdfBuffer, pageCount);
+    // Extraction des métadonnées enrichies via Gemini (formules, options, résumé)
+    log(`  🤖 Extraction métadonnées enrichies (Gemini)...`);
+    const enrichedMeta = await extractEnrichedMetadataBulk(fullText, row.Insurer, row.Insurance_type);
+    log(`  ✅ ${enrichedMeta.indexedFormulas.length} formules, ${enrichedMeta.indexedOptions.length} options indexées`);
+    try {
+      await pool.query(
+        `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
+        [JSON.stringify({
+          indexedFormulas: enrichedMeta.indexedFormulas,
+          indexedOptions:  enrichedMeta.indexedOptions,
+          semanticSummary: enrichedMeta.semanticSummary
+        }), cgId]
+      );
+    } catch (metaErr) { log(`  ⚠️  Update metadata enrichi (non bloquant): ${metaErr.message}`); }
 
     let pagesProcessed = 0;
     let tablesFound = 0;
     let factsCreated = 0;
 
-    // Traiter chaque page
+    // Traiter chaque page : texte + canvas image + Vision/texte table + embedding
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
       log(`    Page ${pageNum}/${pageCount}...`);
       
       try {
-        const pageData = allPages[pageNum - 1] || { text: '' };
+        // Extraction texte + rendu canvas (image base64) — identique à pageVectorizationService
+        const { contentText, layoutText, imageBase64, width, height } =
+          await extractPageWithCanvas(pdfDocLoaded, pageNum);
         
-        // Générer embedding de la page (pause 1s pour éviter rate limit)
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Embedding page (1.2s de pause pour respecter le rate-limit Gemini)
+        await new Promise(r => setTimeout(r, 1200));
         let pageEmbedding = null;
-        if (pageData.text && pageData.text.trim().length > 10) {
-          pageEmbedding = await generateEmbedding(pageData.text);
-        } else {
-          log(`      ⚠️  Page ${pageNum} vide, embedding ignoré`);
-        }
+        try {
+          if (contentText && contentText.trim().length > 10) {
+            pageEmbedding = await generateEmbedding(contentText);
+          } else {
+            log(`      ⚠️  Page ${pageNum} vide, embedding ignoré`);
+          }
+        } catch (embErr) { log(`      ⚠️  Embedding p.${pageNum}: ${embErr.message}`); }
         
-        // Détecter si la page contient un tableau
-        const hasTable = detectTableInPage(pageData.text);
+        // Détection tableau
+        const hasTable = detectTableInPage(contentText);
+        let tableJson = null, confidence = 0.0, tableIsVision = false;
         
-        let tableJson = null;
-        let confidence = 0.0;
-        let pageId = null;
-        
-        // Si tableau détecté, extraire via texte (sans image)
         if (hasTable) {
-          log(`      🔍 Tableau détecté, extraction texte...`);
-          tableJson = await extractTableFromPageText(
-            pageData.text,
-            row.Insurer,
-            row.Insurance_type
-          );
-          
-          if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
-            confidence = tableJson.confidence || 0;
-            tablesFound++;
+          if (imageBase64) {
+            // Vision extraction — identique Admin (plus précise)
+            log(`      📊 Tableau détecté, extraction Vision (image)...`);
+            tableJson = await extractTableFromPageVision(imageBase64, row.Insurer, row.Insurance_type);
+            if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
+              confidence = tableJson.confidence || 0;
+              tablesFound++;
+              tableIsVision = true;
+              log(`      ✅ Vision: ${tableJson.rows.length} garanties`);
+            }
+          }
+          if (!tableJson) {
+            // Fallback texte si image indisponible ou Vision insuffisante
+            log(`      🔍 Fallback extraction texte...`);
+            tableJson = await extractTableFromPageText(contentText, row.Insurer, row.Insurance_type);
+            if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
+              confidence = tableJson.confidence || 0;
+              tablesFound++;
+            }
           }
         }
         
-        // Insérer la page dans central_cg_pages (schema complet = page Admin)
-        const classification = classifyPageType(pageData.text, hasTable && tableJson !== null);
+        const classification = classifyPageType(contentText, hasTable && tableJson !== null);
         const pageRecord = {
-          central_cg_id: cgId,
-          page_number: pageNum,
-          content_text: pageData.text,
-          layout_text: pageData.text,   // pas de rendu canvas → même texte
-          embedding: pageEmbedding,
-          page_image_base64: null,
-          has_table: hasTable && tableJson !== null,
-          table_json: tableJson,
-          confidence: confidence,
-          chunk_type: classification.chunkType,
-          guarantee_codes: classification.guaranteeCodes,
-          article_ref: classification.articleRef,
+          central_cg_id:          cgId,
+          page_number:            pageNum,
+          content_text:           contentText,
+          layout_text:            layoutText || contentText,
+          embedding:              pageEmbedding,
+          page_image_base64:      imageBase64,    // ← rempli via canvas
+          page_width:             width,
+          page_height:            height,
+          has_table:              hasTable && tableJson !== null,
+          table_json:             tableJson,
+          confidence:             confidence,
+          chunk_type:             classification.chunkType,
+          guarantee_codes:        classification.guaranteeCodes,
+          article_ref:            classification.articleRef,
           classification_confidence: classification.confidence
         };
         
-        pageId = await retryDbOperation(() => insertCgPage(pageRecord));
+        const pageId = await retryDbOperation(() => insertCgPage(pageRecord));
         
-        // Si tableau valide, créer les coverage_facts
-        if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
-          const facts = tableToFacts(
-            tableJson,
-            cgId,
-            pageId,
-            pageNum,
-            row.Insurer,
-            row.Insurance_type
-          );
-          
+        // Coverage facts
+        if (tableJson) {
+          const facts = tableIsVision
+            ? tableToFactsVision(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type)
+            : tableToFacts(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type);
           if (facts.length > 0) {
-            const inserted = await insertCoverageFacts(facts);
-            factsCreated += inserted;
-            log(`      ✅ ${inserted} faits de couverture créés`);
+            factsCreated += await insertCoverageFacts(facts);
+            log(`      ✅ ${facts.length} faits de couverture créés`);
           }
         }
         

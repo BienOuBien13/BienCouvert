@@ -429,13 +429,22 @@ const EMBEDDING_MODELS = [
 ];
 
 // Cache du modèle qui fonctionne (évite de re-tester à chaque page)
+// Réinitialisé après 5 min pour éviter que les erreurs transitoires bloquent définitivement.
 let _workingEmbedModel: string | null | undefined = undefined; // undefined = pas encore testé
+let _workingEmbedModelTs  = 0; // timestamp du dernier passage à null
 
 async function callEmbedApi(modelName: string, text: string, retries: number): Promise<number[] | null> {
   // Utilise node-fetch pour compatibilité (évite les quirks du fetch natif Node)
   const nodeFetch = require('node-fetch');
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
+
+  // Agent TLS : désactive la vérification de cert si NODE_TLS_REJECT_UNAUTHORIZED=0
+  // (nécessaire sur les postes avec proxy Zscaler/corporate SSL inspection)
+  const _nodeHttps = require('https');
+  const _tlsAgent = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0'
+    ? new _nodeHttps.Agent({ rejectUnauthorized: false })
+    : undefined;
 
   let response: any;
   try {
@@ -444,7 +453,8 @@ async function callEmbedApi(modelName: string, text: string, retries: number): P
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content: { parts: [{ text: text.slice(0, 8192) }] }
-      })
+      }),
+      ...(_tlsAgent ? { agent: _tlsAgent } : {})
     });
   } catch (err: any) {
     console.error(`callEmbedApi network error [${modelName}]:`, err.message);
@@ -489,8 +499,11 @@ export const generateEmbedding = async (text: string, retries = 4): Promise<numb
     return null;
   }
 
-  // Si on sait déjà qu'aucun modèle ne marche pour cette clé
-  if (_workingEmbedModel === null) return null;
+  // Si on sait déjà qu'aucun modèle ne marche — réessayer toutes les 5 min (erreur transiente)
+  if (_workingEmbedModel === null) {
+    if (Date.now() - _workingEmbedModelTs < 5 * 60 * 1000) return null;
+    _workingEmbedModel = undefined; // réinitialiser pour re-tenter
+  }
 
   // Utiliser directement le modèle connu si déjà trouvé
   const modelsToTry = _workingEmbedModel
@@ -517,7 +530,8 @@ export const generateEmbedding = async (text: string, retries = 4): Promise<numb
 
   if (_workingEmbedModel === undefined) {
     console.error('❌ Aucun modèle embedding disponible pour cette clé API — les pages seront indexées sans vecteur (recherche sémantique désactivée).');
-    _workingEmbedModel = null; // ne plus réessayer
+    _workingEmbedModel = null; // ne plus réessayer (jusqu'au prochain timeout de 5 min)
+    _workingEmbedModelTs = Date.now();
   }
   return null;
 };

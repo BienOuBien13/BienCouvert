@@ -37,6 +37,7 @@ export const AdminView: React.FC = () => {
     insuranceSubTypeCode: '',
     documentTypeCode: 'CG',
     version: '',
+    detail: '',
     url: ''
   });
 
@@ -162,6 +163,7 @@ export const AdminView: React.FC = () => {
         documentTypeCode: newEntry.documentTypeCode || 'CG',
         version: newEntry.version || '',
         type: newEntry.documentTypeCode || 'CG',
+        detail: newEntry.detail || '',
         url: newEntry.url || '',
         targetFilename: pdfFile.name,
         pdfData: pdfBase64,
@@ -202,7 +204,7 @@ export const AdminView: React.FC = () => {
 
       const data = await storageService.getCentralCgRepo();
       setRepo(data || []);
-      setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', insuranceSubTypeCode: '', documentTypeCode: 'CG', version: '', url: '' });
+      setNewEntry({ insurerCode: '', productName: '', insuranceTypeCode: '', insuranceSubTypeCode: '', documentTypeCode: 'CG', version: '', detail: '', url: '' });
       setIndexingResult(null);
       setShowAddForm(false);
       setPdfFile(null);
@@ -398,6 +400,14 @@ export const AdminView: React.FC = () => {
                 type="url" placeholder="https://..." 
                 className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
                 value={newEntry.url} onChange={e => setNewEntry({...newEntry, url: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Détail du document (optionnel)</label>
+              <input
+                type="text" placeholder="Ex : CG Auto 2024 — formule Tiers+, version jan. 2024"
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-bold"
+                value={newEntry.detail} onChange={e => setNewEntry({...newEntry, detail: e.target.value})}
               />
             </div>
           </div>
