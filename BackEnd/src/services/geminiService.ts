@@ -856,9 +856,36 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
     let cgChunks: any[] = [];
     try {
       // Récupérer les IDs des CG liés aux policies
-      const centralCgIds = policies.map(p => (p as any).centralCgId).filter(id => id != null);
+      let centralCgIds: number[] = policies.map(p => (p as any).centralCgId).filter(id => id != null).map(Number);
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
-      
+
+      // Fallback: pour les policies sans centralCgId, chercher par insurer_code + insurance_type_code
+      const policiesNoCgId = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
+      if (policiesNoCgId.length > 0) {
+        try {
+          const params: any[] = [];
+          const conditions = policiesNoCgId.map((p: any) => {
+            params.push(p.insurerCode, p.typeCode);
+            let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
+            if (p.subTypeCode) {
+              params.push(p.subTypeCode);
+              clause += ` AND (cg.insurance_sub_type_code = $${params.length} OR cg.insurance_sub_type_code IS NULL)`;
+            }
+            clause += ')';
+            return clause;
+          }).join(' OR ');
+          const cgLookup = await dbQuery(
+            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            params
+          );
+          const foundIds = cgLookup.rows.map((r: any) => Number(r.id));
+          centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
+          if (foundIds.length > 0) console.log(`🔍 Fallback CG résolu par insurer+type: [${foundIds.join(', ')}]`);
+        } catch (lookupErr) {
+          console.warn('⚠️ Échec fallback CG lookup:', lookupErr);
+        }
+      }
+
       console.log(`🔍 Recherche CG liés aux policies: ${centralCgIds.length} central_cg, ${userCgIds.length} user_cg`);
       
       // Recherche dans central_cg via embeddings
@@ -1130,7 +1157,9 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
 
       const grouped = new Map<string, any[]>();
       coverageFacts.forEach((f: any) => {
-        const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+        const fl = f.formula_label || '';
+        const formulaDisplay = /^formule\s/i.test(fl) ? fl : `Formule ${fl}`;
+        const key = `${f.insurer_label || 'Assureur'} - ${formulaDisplay}`;
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key)!.push(f);
       });
@@ -1527,7 +1556,9 @@ export const sendMessageToAssistantStream = async (
 
       const grouped = new Map<string, any[]>();
       coverageFacts.forEach((f: any) => {
-        const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+        const fl = f.formula_label || '';
+        const formulaDisplay = /^formule\s/i.test(fl) ? fl : `Formule ${fl}`;
+        const key = `${f.insurer_label || 'Assureur'} - ${formulaDisplay}`;
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key)!.push(f);
       });
