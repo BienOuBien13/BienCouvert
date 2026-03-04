@@ -120,9 +120,17 @@ export async function extractTableFromPageImage(
 
     const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français. Analyse cette image et extrait la matrice complète garanties × formules.
 
+ÉTAPE 0 — LÉGENDE (OBLIGATOIRE avant d'analyser le tableau) :
+Recherce d'abord une légende sur la page (souvent en bas ou en haut). La légende peut associer des symboles personnalisés à leur signification :
+- Symboles classiques : ✓ ● • √ = inclus | ✗ ✘ × x - – = exclu | ○ ◯ = option
+- Symboles personnalisés possibles : chiffres (1,2,3), lettres (A,B,C), icônes colorées, ou textes courts
+Exemple de légende : "1 = inclus, 2 = en option, 3 = exclu" ou "■ = inclus, □ = exclu"
+Si une légende est présente, applique-la STRICTEMENT lors du décodage des cellules.
+
 FORMAT DE SORTIE (JSON strict, aucun autre texte) :
 {
   "has_table": true,
+  "legend": { "1": "included", "2": "optional", "3": "excluded" },
   "headers": ["Garanties", "FORMULE 1", "FORMULE 2", ...],
   "rows": [
     {
@@ -137,23 +145,23 @@ FORMAT DE SORTIE (JSON strict, aucun autre texte) :
   "confidence": 0.95
 }
 
-DÉCODAGE DES CELLULES (règles strictes) :
-- Cellule = "✓" "●" "•" "√" "oui" "yes" "inclus" → valeur JSON : "✓"
-- Cellule = "✗" "✘" "×" "x" "X" "-" "–" "—" "non" "exclu" "néant" "nul" → valeur JSON : "✗"
-- Cellule = "○" "◯" "option" "en option" "en sus" "sur option" → valeur JSON : "○"
-- Cellule = "n/a" "s.o." "sans objet" "" (vide) → valeur JSON : ""
-- Cellule = montant/texte ("1 500 €", "Jusqu'à 3000 €", "Plafond 500€", texte descriptif) → valeur JSON : contenu exact du texte (sera interprété comme "inclus" avec montant)
+DÉCODAGE DES CELLULES (priorité à la légende si présente, sinon règles standard) :
+- Cellule = "✓" "●" "•" "√" "oui" "yes" "inclus" ou équivalent légende → valeur JSON : "✓"
+- Cellule = "✗" "✘" "×" "x" "X" "-" "–" "—" "non" "exclu" "néant" ou équivalent légende → valeur JSON : "✗"
+- Cellule = "○" "◯" "option" "en option" "en sus" "sur option" ou équivalent légende → valeur JSON : "○"
+- Cellule = vide ou "n/a" "s.o." "sans objet" → valeur JSON : ""
+- Cellule = montant/texte ("1 500 €", "Jusqu'à 3000 €", "Plafond 500€") → valeur JSON : contenu exact du texte
 
 NORMALISATION DES CLÉS DE FORMULES (snake_case) :
-- Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés, caractères spéciaux → "_"
-- "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus", "TOUS RISQUES" → "tous_risques"
+- Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés
+- "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus"
 
 INSTRUCTIONS :
-1. Identifie TOUTES les lignes de garanties, y compris les sous-garanties en retrait
-2. Identifie TOUTES les colonnes de formules (ignore la colonne "Garanties")
-3. Utilise le décodage strict ci-dessus — NE PAS deviner
-4. Si une garantie occupe plusieurs lignes, concatène-les en une seule entrée avec " - " comme séparateur
-5. Extrait le tableau complet même s'il est tronqué sur cette page
+1. TOUJOURS chercher une légende en premier
+2. Identifie TOUTES les lignes de garanties, y compris les sous-garanties en retrait
+3. Identifie TOUTES les colonnes de formules
+4. Applique la légende ou le décodage standard — NE PAS deviner
+5. Si une garantie occupe plusieurs lignes, concatène avec " - "
 
 Si pas de tableau visible : {"has_table": false, "confidence": 1.0}
 

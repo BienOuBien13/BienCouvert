@@ -629,6 +629,21 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
         } else {
           console.warn(`${tag}⚠️ Impossible de résoudre CG: insurerCode ou typeCode manquant`);
         }
+
+        // Fallback supplémentaire : policies sans typeCode → chercher par insurerCode seul
+        const policiesInsurerOnly = policiesNoCgId.filter((p: any) => p.insurerCode && !p.typeCode);
+        if (policiesInsurerOnly.length > 0) {
+          const onlyCodes = [...new Set(policiesInsurerOnly.map((p: any) => p.insurerCode))];
+          const cgByInsurer = await dbQuery(
+            `SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`,
+            [onlyCodes]
+          );
+          const foundByInsurer = cgByInsurer.rows.map((r: any) => Number(r.id));
+          if (foundByInsurer.length > 0) {
+            console.log(`${tag}✅ CG trouvés par insurerCode seul: [${foundByInsurer.join(', ')}]`);
+            cgIdsForFacts = [...new Set([...cgIdsForFacts, ...foundByInsurer])];
+          }
+        }
       } catch (e) {
         console.warn(`${tag}⚠️ Échec lookup CG par insurer+type:`, e);
       }
@@ -859,12 +874,12 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       let centralCgIds: number[] = policies.map(p => (p as any).centralCgId).filter(id => id != null).map(Number);
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
 
-      // Fallback: pour les policies sans centralCgId, chercher par insurer_code + insurance_type_code
-      const policiesNoCgId = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
-      if (policiesNoCgId.length > 0) {
+      // Fallback A: policies avec insurerCode + typeCode
+      const policiesWithBoth = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
+      if (policiesWithBoth.length > 0) {
         try {
           const params: any[] = [];
-          const conditions = policiesNoCgId.map((p: any) => {
+          const conditions = policiesWithBoth.map((p: any) => {
             params.push(p.insurerCode, p.typeCode);
             let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
             if (p.subTypeCode) {
@@ -882,7 +897,24 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
           centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
           if (foundIds.length > 0) console.log(`🔍 Fallback CG résolu par insurer+type: [${foundIds.join(', ')}]`);
         } catch (lookupErr) {
-          console.warn('⚠️ Échec fallback CG lookup:', lookupErr);
+          console.warn('⚠️ Échec fallback CG lookup (insurer+type):', lookupErr);
+        }
+      }
+
+      // Fallback B: policies sans typeCode → chercher par insurerCode seul
+      const policiesInsurerOnly = policies.filter((p: any) => !p.centralCgId && p.insurerCode && !p.typeCode);
+      if (policiesInsurerOnly.length > 0) {
+        try {
+          const insurerCodes = [...new Set(policiesInsurerOnly.map((p: any) => p.insurerCode))];
+          const cgByInsurer = await dbQuery(
+            `SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`,
+            [insurerCodes]
+          );
+          const foundByInsurer = cgByInsurer.rows.map((r: any) => Number(r.id));
+          centralCgIds = [...new Set([...centralCgIds, ...foundByInsurer])];
+          if (foundByInsurer.length > 0) console.log(`🔍 Fallback CG résolu par insurerCode seul: [${foundByInsurer.join(', ')}]`);
+        } catch (lookupErr) {
+          console.warn('⚠️ Échec fallback CG lookup (insurer only):', lookupErr);
         }
       }
 
@@ -1380,12 +1412,12 @@ export const sendMessageToAssistantStream = async (
       let centralCgIds: number[] = policies.map(p => (p as any).centralCgId).filter(id => id != null).map(Number);
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
 
-      // Fallback: policies sans centralCgId → chercher par insurer_code + insurance_type_code
-      const policiesNoCgId = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
-      if (policiesNoCgId.length > 0) {
+      // Fallback A: policies avec insurerCode + typeCode
+      const policiesWithBothStream = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
+      if (policiesWithBothStream.length > 0) {
         try {
           const params: any[] = [];
-          const conditions = policiesNoCgId.map((p: any) => {
+          const conditions = policiesWithBothStream.map((p: any) => {
             params.push(p.insurerCode, p.typeCode);
             let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
             if (p.subTypeCode) {
@@ -1401,9 +1433,26 @@ export const sendMessageToAssistantStream = async (
           );
           const foundIds = cgLookup.rows.map((r: any) => Number(r.id));
           centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
-          if (foundIds.length > 0) console.log(`🔍 Stream fallback CG résolu: [${foundIds.join(', ')}]`);
+          if (foundIds.length > 0) console.log(`🔍 Stream fallback CG (insurer+type): [${foundIds.join(', ')}]`);
         } catch (lookupErr) {
-          console.warn('⚠️ Échec fallback CG lookup (stream):', lookupErr);
+          console.warn('⚠️ Échec fallback CG lookup (stream insurer+type):', lookupErr);
+        }
+      }
+
+      // Fallback B: policies sans typeCode → insurerCode seul
+      const policiesInsurerOnlyStream = policies.filter((p: any) => !p.centralCgId && p.insurerCode && !p.typeCode);
+      if (policiesInsurerOnlyStream.length > 0) {
+        try {
+          const insurerCodes = [...new Set(policiesInsurerOnlyStream.map((p: any) => p.insurerCode))];
+          const cgByInsurer = await dbQuery(
+            `SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`,
+            [insurerCodes]
+          );
+          const foundByInsurer = cgByInsurer.rows.map((r: any) => Number(r.id));
+          centralCgIds = [...new Set([...centralCgIds, ...foundByInsurer])];
+          if (foundByInsurer.length > 0) console.log(`🔍 Stream fallback CG (insurer only): [${foundByInsurer.join(', ')}]`);
+        } catch (lookupErr) {
+          console.warn('⚠️ Échec fallback CG lookup (stream insurer only):', lookupErr);
         }
       }
 
