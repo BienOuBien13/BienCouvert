@@ -667,6 +667,101 @@ router.get('/central-cg/:id/vectorization-status', async (req, res) => {
 });
 
 /**
+ * Route POST /api/policies/central-cg/:id/reprocess
+ * Relance la vectorisation d'un CG central existant (utile si le PDF était absent lors de la création).
+ * Utilise le pdf_base64 ou pdf_file_path déjà stocké en DB.
+ */
+router.post('/central-cg/:id/reprocess', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
+
+    // Vérifications préliminaires
+    const cgCheck = await query(
+      `SELECT id, insurer_code, source_url, pdf_base64, pdf_file_path, vectorization_status
+       FROM central_cg WHERE id = $1`,
+      [id]
+    );
+    if (cgCheck.rows.length === 0) {
+      return res.status(404).json({ message: `CG ${id} introuvable` });
+    }
+
+    const cg = cgCheck.rows[0];
+
+    // Si aucun PDF disponible, tenter u téléchargement depuis source_url
+    let pdfBase64: string | null = cg.pdf_base64 || null;
+
+    if (!pdfBase64 && cg.pdf_file_path) {
+      try {
+        const fullPath = path.join(PDF_STORAGE_DIR, cg.pdf_file_path);
+        if (fs.existsSync(fullPath)) {
+          pdfBase64 = fs.readFileSync(fullPath).toString('base64');
+          console.log(`✅ PDF lu depuis disque: ${fullPath}`);
+        }
+      } catch (diskErr) {
+        console.warn(`⚠️ Impossible de lire PDF disque:`, diskErr);
+      }
+    }
+
+    if (!pdfBase64 && cg.source_url) {
+      try {
+        console.log(`📥 Téléchargement PDF depuis: ${cg.source_url}`);
+        const https = await import('https');
+        const http = await import('http');
+        const fetchModule = cg.source_url.startsWith('https') ? https : http;
+        pdfBase64 = await new Promise<string>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          fetchModule.get(cg.source_url, (resp) => {
+            if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode}`));
+            resp.on('data', (chunk: Buffer) => chunks.push(chunk));
+            resp.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+          }).on('error', reject);
+        });
+        await query('UPDATE central_cg SET pdf_base64 = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [pdfBase64, id]);
+        console.log(`✅ PDF téléchargé et stocké pour CG ${id}`);
+      } catch (downloadErr) {
+        console.error(`❌ Échec téléchargement PDF pour CG ${id}:`, downloadErr);
+        return res.status(422).json({ message: `Aucun PDF disponible et téléchargement échoué: ${(downloadErr as Error).message}` });
+      }
+    }
+
+    if (!pdfBase64) {
+      return res.status(422).json({ message: `Impossible de retraiter CG ${id}: aucun PDF disponible` });
+    }
+
+    // Réponse immédiate — traitement en arrière-plan
+    res.json({ message: `Retraitement du CG ${id} lancé en arrière-plan`, status: 'processing' });
+
+    (async () => {
+      try {
+        const pageResult = await vectorizeCgByPages(pool, id, cg.source_url || '', pdfBase64!);
+        console.log(`✅ Retraitement page par page OK pour CG ${id}:`, pageResult);
+
+        const textResult = await query(
+          `SELECT COALESCE(string_agg(content_text, E'\n\n' ORDER BY page_number), '') AS full_text
+           FROM central_cg_pages WHERE central_cg_id = $1`,
+          [id]
+        );
+        const fullText = textResult.rows[0]?.full_text || '';
+        await query('UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [fullText, id]);
+
+        if (fullText.trim().length > 0) {
+          await storage.vectorizeCentralCg(id, fullText);
+          console.log(`✅ Embedding mis à jour pour CG ${id} après retraitement`);
+        } else {
+          console.warn(`⚠️ Texte vide après retraitement pour CG ${id}`);
+        }
+      } catch (e) {
+        console.error(`❌ Erreur retraitement CG ${id}:`, e);
+      }
+    })().catch(err => console.error('❌ Erreur async reprocess:', err));
+  } catch (err) {
+    console.error('❌ Erreur POST /central-cg/:id/reprocess:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
  * Route POST /api/policies/central-cg/:id/stop-vectorization
  * Arrête proprement une vectorisation en cours pour un CG donné.
  */

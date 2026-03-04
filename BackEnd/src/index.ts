@@ -179,6 +179,7 @@ const apiLimiter = rateLimit({
     /\/api\/cg\/user\/status\//.test(req.originalUrl) ||
     /\/api\/auth\/me/.test(req.originalUrl) ||
     /\/api\/policies\/central-cg\/[^/]+\/vectorization-status/.test(req.originalUrl) ||
+    /\/api\/policies\/central-cg\/[^/]+\/reprocess/.test(req.originalUrl) ||
     /\/api\/masterdata\//.test(req.originalUrl)
 });
 
