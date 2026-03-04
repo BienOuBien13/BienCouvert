@@ -912,7 +912,51 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
       // Trier par similarité
       cgChunks.sort((a, b) => b.similarity - a.similarity);
       cgChunks = cgChunks.slice(0, 5);
-      
+
+      // Fallback: si aucun résultat embedding (CG sans vecteur), lire le content_text directement
+      if (cgChunks.length === 0) {
+        if (centralCgIds.length > 0) {
+          try {
+            const fallbackCentral = await dbQuery(
+              `SELECT cg.id, cg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label,
+                      cg.metadata->>'productName' as product_name,
+                      0.5 as similarity
+               FROM central_cg cg
+               LEFT JOIN insurers i ON cg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+               WHERE cg.id = ANY($1) AND cg.content_text IS NOT NULL AND cg.content_text <> ''
+               LIMIT 3`,
+              [centralCgIds]
+            );
+            cgChunks = cgChunks.concat(fallbackCentral.rows);
+            console.log(`📋 Fallback central_cg text: ${fallbackCentral.rows.length} docs (sans embedding)`);
+          } catch (fbErr) {
+            console.warn('⚠️ Échec fallback central_cg text:', fbErr);
+          }
+        }
+        if (userCgIds.length > 0) {
+          try {
+            const fallbackUser = await dbQuery(
+              `SELECT ucg.id, ucg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label,
+                      ucg.metadata->>'productName' as product_name,
+                      0.5 as similarity
+               FROM user_cg ucg
+               LEFT JOIN insurers i ON ucg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+               WHERE ucg.id = ANY($1) AND ucg.content_text IS NOT NULL AND ucg.content_text <> ''
+               LIMIT 3`,
+              [userCgIds]
+            );
+            cgChunks = cgChunks.concat(fallbackUser.rows);
+            console.log(`📋 Fallback user_cg text: ${fallbackUser.rows.length} docs (sans embedding)`);
+          } catch (fbErr) {
+            console.warn('⚠️ Échec fallback user_cg text:', fbErr);
+          }
+        }
+      }
+
       console.log(`✅ Total CG: ${cgChunks.length} documents pertinents`);
       cgChunks.forEach((cg, idx) => {
         console.log(`   ${idx + 1}. ${cg.insurer_label} - ${cg.type_label} (similarité: ${cg.similarity.toFixed(3)})`);

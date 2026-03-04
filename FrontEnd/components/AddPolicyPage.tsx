@@ -634,7 +634,6 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                       className="w-5 h-5 text-blue-600 rounded"
                     />
                     <span className="font-medium text-gray-900">{label}</span>
-                    <span className="text-xs text-gray-400 ml-1">{st.code}</span>
                     {checked && <Check className="w-4 h-4 text-blue-600 ml-auto" />}
                   </label>
                 );

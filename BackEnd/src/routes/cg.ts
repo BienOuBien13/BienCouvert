@@ -130,7 +130,13 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       detail: cg.detail,
       url: cg.url,
       formules: cg.metadata?.formules || cg.metadata?.indexedFormulas || [],
-      options: cg.metadata?.options || cg.metadata?.indexedOptions || { toutes_formules: [] },
+      options: (() => {
+        const rawOpts = cg.metadata?.options || cg.metadata?.indexedOptions || {};
+        if (Array.isArray(rawOpts)) {
+          return rawOpts.length > 0 ? { 'Options': rawOpts } : {};
+        }
+        return rawOpts || {};
+      })(),
       resume_court: cg.metadata?.resume_court || cg.metadata?.description || '',
       insurer_name: cg.metadata?.insurer_name || '',
       insurance_type_name: cg.metadata?.insurance_type_name || ''
