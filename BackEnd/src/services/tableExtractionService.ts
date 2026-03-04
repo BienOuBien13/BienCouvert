@@ -67,36 +67,37 @@ function normalizeFormulaKey(label: string): string {
 }
 
 /**
- * Détermine le statut de couverture à partir d'un symbole
+ * Détermine le statut de couverture à partir d'un symbole ou texte de cellule
  */
 function parseStatus(symbol: string): 'included' | 'optional' | 'excluded' | 'not_applicable' {
-  const s = symbol.trim().toLowerCase();
-  
-  // Inclus
-  if (/^(✓|✔|√|●|•|oui|yes|inclus|included)$/i.test(s)) {
-    return 'included';
-  }
-  
+  const raw = symbol.trim();
+  const s = raw.toLowerCase();
+
+  // Vide
+  if (!s) return 'not_applicable';
+
+  // Inclus — symboles positifs
+  if (/^(✓|✔|√|●|•)$/.test(raw)) return 'included';
+  if (/^(oui|yes|inclus|included|compris|couvert|garanti)$/i.test(s)) return 'included';
+
+  // Exclus — symboles négatifs (AVANT le fallback texte afin d'éviter faux positif)
+  if (/^(✗|✘|×|✕)$/.test(raw)) return 'excluded';          // ballot x (U+2717, U+2718, U+00D7, U+2715)
+  if (/^(x|×)$/.test(s)) return 'excluded';                   // lettre x seule
+  if (/^(-|−|–|—|\.\.\.|--)$/.test(raw)) return 'excluded'; // tirets
+  if (/^(non|no|exclu|excluded|non compris|néant|neant|nul|nulle)$/i.test(s)) return 'excluded';
+  if (/\bexclu/i.test(s) && !/en option/i.test(s)) return 'excluded';
+
   // Optionnel
-  if (/^(○|◯|⊙|option|opt\.|en option)$/i.test(s)) {
-    return 'optional';
-  }
-  
-  // Exclu
-  if (/^(-|−|–|—|non|no|exclu|excluded)$/i.test(s)) {
-    return 'excluded';
-  }
-  
-  // N/A ou vide
-  if (!s || /^(n\/a|na|s\.o\.|sans objet)$/i.test(s)) {
-    return 'not_applicable';
-  }
-  
-  // Par défaut, considérer comme inclus si présence d'un montant/texte
-  if (s.length > 0 && !/exclu|non/i.test(s)) {
-    return 'included';
-  }
-  
+  if (/^(○|◯|⊙|opt)$/.test(raw)) return 'optional';
+  if (/^(option|opt\.|en option|en sus|sur option|optionnel)$/i.test(s)) return 'optional';
+
+  // N/A
+  if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s)) return 'not_applicable';
+
+  // Texte contenant un montant ou description positive → inclus
+  // ex: "1 500 €", "Plafond 500€", "Jusqu'à 3000€"
+  if (/\d/.test(s) || s.length > 3) return 'included';
+
   return 'not_applicable';
 }
 
@@ -116,53 +117,47 @@ export async function extractTableFromPageImage(
     }
 
     const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    
-    const prompt = `Tu es un expert en analyse de documents d'assurance. Analyse cette image de page de conditions générales et extrait le tableau de garanties s'il existe.
 
-OBJECTIF:
-Extraire la matrice garanties × formules avec le statut de chaque couverture.
+    const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français. Analyse cette image et extrait la matrice complète garanties × formules.
 
-FORMAT DE SORTIE (JSON strict):
+FORMAT DE SORTIE (JSON strict, aucun autre texte) :
 {
-  "has_table": true/false,
-  "headers": ["Garanties", "TIERS ECO", "TIERS ESSENTIEL", "TOUS RISQUES CONFORT", ...],
+  "has_table": true,
+  "headers": ["Garanties", "FORMULE 1", "FORMULE 2", ...],
   "rows": [
     {
       "guarantee": "Responsabilité civile",
-      "formulas": {
-        "tiers_eco": "✓",
-        "tiers_essentiel": "✓",
-        "tous_risques_confort": "✓"
-      }
+      "formulas": { "formule_1": "✓", "formule_2": "✓" }
     },
     {
       "guarantee": "Bris de glaces",
-      "formulas": {
-        "tiers_eco": "○",
-        "tiers_essentiel": "✓",
-        "tous_risques_confort": "✓"
-      }
+      "formulas": { "formule_1": "○", "formule_2": "✓" }
     }
   ],
   "confidence": 0.95
 }
 
-LÉGENDE SYMBOLES:
-- ✓ ou ● = garantie incluse
-- ○ = garantie en option
-- - ou vide = garantie exclue
+DÉCODAGE DES CELLULES (règles strictes) :
+- Cellule = "✓" "●" "•" "√" "oui" "yes" "inclus" → valeur JSON : "✓"
+- Cellule = "✗" "✘" "×" "x" "X" "-" "–" "—" "non" "exclu" "néant" "nul" → valeur JSON : "✗"
+- Cellule = "○" "◯" "option" "en option" "en sus" "sur option" → valeur JSON : "○"
+- Cellule = "n/a" "s.o." "sans objet" "" (vide) → valeur JSON : ""
+- Cellule = montant/texte ("1 500 €", "Jusqu'à 3000 €", "Plafond 500€", texte descriptif) → valeur JSON : contenu exact du texte (sera interprété comme "inclus" avec montant)
 
-INSTRUCTIONS:
-1. Identifie s'il y a un tableau de synthèse des garanties
-2. Extrait les en-têtes (noms des formules en colonnes)
-3. Extrait chaque ligne (garantie + statuts par formule)
-4. Normalise les clés de formules en snake_case: espaces→'_', '+'→'_plus', tout en minuscules, sans accents ni caractères spéciaux. Ex: "TIERS ESSENTIEL" → "tiers_essentiel", "TIERS ESSENTIEL+" → "tiers_essentiel_plus", "TOUS RISQUES CONFORT" → "tous_risques_confort"
-5. Préserve les symboles exacts (✓, ○, -)
-6. Indique ta confiance (0-1)
+NORMALISATION DES CLÉS DE FORMULES (snake_case) :
+- Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés, caractères spéciaux → "_"
+- "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus", "TOUS RISQUES" → "tous_risques"
 
-Si pas de tableau: {"has_table": false, "confidence": 1.0}
+INSTRUCTIONS :
+1. Identifie TOUTES les lignes de garanties, y compris les sous-garanties en retrait
+2. Identifie TOUTES les colonnes de formules (ignore la colonne "Garanties")
+3. Utilise le décodage strict ci-dessus — NE PAS deviner
+4. Si une garantie occupe plusieurs lignes, concatène-les en une seule entrée avec " - " comme séparateur
+5. Extrait le tableau complet même s'il est tronqué sur cette page
 
-RÉPONDS UNIQUEMENT AVEC LE JSON, AUCUN TEXTE SUPPLÉMENTAIRE.`;
+Si pas de tableau visible : {"has_table": false, "confidence": 1.0}
+
+RÉPONDS UNIQUEMENT AVEC LE JSON.`;
 
     const result = await model.generateContent([
       prompt,

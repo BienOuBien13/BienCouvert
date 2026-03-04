@@ -1376,8 +1376,36 @@ export const sendMessageToAssistantStream = async (
     }
 
     try {
-      const centralCgIds = policies.map(p => (p as any).centralCgId).filter(id => id != null);
+      // Résolution des centralCgIds (direct + fallback insurer+type)
+      let centralCgIds: number[] = policies.map(p => (p as any).centralCgId).filter(id => id != null).map(Number);
       const userCgIds = policies.map(p => (p as any).userCgId).filter(id => id != null);
+
+      // Fallback: policies sans centralCgId → chercher par insurer_code + insurance_type_code
+      const policiesNoCgId = policies.filter((p: any) => !p.centralCgId && p.insurerCode && p.typeCode);
+      if (policiesNoCgId.length > 0) {
+        try {
+          const params: any[] = [];
+          const conditions = policiesNoCgId.map((p: any) => {
+            params.push(p.insurerCode, p.typeCode);
+            let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
+            if (p.subTypeCode) {
+              params.push(p.subTypeCode);
+              clause += ` AND (cg.insurance_sub_type_code = $${params.length} OR cg.insurance_sub_type_code IS NULL)`;
+            }
+            clause += ')';
+            return clause;
+          }).join(' OR ');
+          const cgLookup = await dbQuery(
+            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            params
+          );
+          const foundIds = cgLookup.rows.map((r: any) => Number(r.id));
+          centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
+          if (foundIds.length > 0) console.log(`🔍 Stream fallback CG résolu: [${foundIds.join(', ')}]`);
+        } catch (lookupErr) {
+          console.warn('⚠️ Échec fallback CG lookup (stream):', lookupErr);
+        }
+      }
 
       if (centralCgIds.length > 0 && questionEmbedding) {
         const centralResults = await dbQuery(
@@ -1399,7 +1427,7 @@ export const sendMessageToAssistantStream = async (
         );
         cgChunks = cgChunks.concat(centralResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
       }
-      
+
       if (userCgIds.length > 0) {
         const userResults = await dbQuery(
           `SELECT 
@@ -1417,6 +1445,43 @@ export const sendMessageToAssistantStream = async (
           [JSON.stringify(questionEmbedding), userCgIds]
         );
         cgChunks = cgChunks.concat(userResults.rows.filter((cg: any) => !isNaN(cg.similarity)));
+      }
+
+      // Sort + dedup
+      cgChunks.sort((a, b) => b.similarity - a.similarity);
+      cgChunks = cgChunks.slice(0, 5);
+
+      // Fallback texte si aucun embedding disponible
+      if (cgChunks.length === 0) {
+        if (centralCgIds.length > 0) {
+          try {
+            const fbCentral = await dbQuery(
+              `SELECT cg.id, cg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label, cg.metadata->>'productName' as product_name, 0.5 as similarity
+               FROM central_cg cg
+               LEFT JOIN insurers i ON cg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+               WHERE cg.id = ANY($1) AND cg.content_text IS NOT NULL AND cg.content_text <> '' LIMIT 3`,
+              [centralCgIds]
+            );
+            cgChunks = cgChunks.concat(fbCentral.rows);
+            if (fbCentral.rows.length > 0) console.log(`📋 Stream fallback text central: ${fbCentral.rows.length} docs`);
+          } catch (_) {}
+        }
+        if (userCgIds.length > 0) {
+          try {
+            const fbUser = await dbQuery(
+              `SELECT ucg.id, ucg.content_text, 'CG Personnalisé' as insurer_label,
+                      it.label_fr as type_label, 0.5 as similarity
+               FROM user_cg ucg
+               LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+               WHERE ucg.id = ANY($1) AND ucg.content_text IS NOT NULL AND ucg.content_text <> '' LIMIT 3`,
+              [userCgIds]
+            );
+            cgChunks = cgChunks.concat(fbUser.rows);
+            if (fbUser.rows.length > 0) console.log(`📋 Stream fallback text user: ${fbUser.rows.length} docs`);
+          } catch (_) {}
+        }
       }
     } catch (cgErr) {
       console.warn('⚠️ Échec recherche CG:', cgErr);

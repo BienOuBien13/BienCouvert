@@ -185,7 +185,9 @@ router.get('/central/available-sub-types', async (req: Request, res: Response) =
       [insurance_type_code, insurer_code]
     );
 
-    res.json(result.rows); // peut être [] si aucun sous-type
+    // Renommer label_fr → labelFr pour correspondre au type frontend { code, labelFr }
+    const subTypes = result.rows.map((r: any) => ({ code: r.code, labelFr: r.label_fr }));
+    res.json(subTypes); // peut être [] si aucun sous-type
   } catch (error: any) {
     console.error('[CG/available-sub-types] ERROR:', error.message);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
