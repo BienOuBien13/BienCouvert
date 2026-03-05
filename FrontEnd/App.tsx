@@ -23,7 +23,7 @@ import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { 
-  ShieldCheck, Database, LogOut, Sparkles, 
+  Database, LogOut, Sparkles, 
   ArrowRight, CheckCircle2, Search, Zap, MessageSquare,
   Rocket, Target, Flag, Info, Settings, Briefcase
 } from 'lucide-react';
@@ -439,7 +439,7 @@ function App() {
 
       <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60]">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView('home')}>
-          <div className="bg-primary-600 p-1.5 rounded-xl shadow-lg shadow-primary-200 group-hover:rotate-12 transition-transform"><ShieldCheck className="w-5 h-5 text-white" /></div>
+          <img src="/petit_logo.png" alt="BienCouvert" className="w-9 h-9 rounded-xl shadow-lg shadow-primary-200 group-hover:rotate-12 transition-transform" />
           <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">BienCouvert</span>
         </div>
         <div className="flex items-center gap-2">

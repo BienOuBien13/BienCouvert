@@ -49,9 +49,10 @@ export default function Footer({ onNavigateToPrivacy, onNavigateToTerms }: Foote
           </div>
 
           {/* Copyright */}
-          <p className="text-slate-500">
-            © {currentYear} BienCouvert
-          </p>
+          <div className="flex items-center gap-2 text-slate-500">
+            <img src="/petit_logo.png" alt="BienCouvert" className="w-5 h-5" />
+            <p>© {currentYear} BienCouvert</p>
+          </div>
 
           {/* Contact */}
           <a 

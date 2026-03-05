@@ -20,6 +20,7 @@ interface ExtractedTable {
     formulas: Record<string, string>; // formula_key -> status ('✓', '○', '-', etc.)
   }>;
   confidence: number;
+  legend?: Record<string, string>; // symbole brut → signification ("included"/"excluded"/"optional")
 }
 
 interface CoverageFact {
@@ -69,26 +70,41 @@ function normalizeFormulaKey(label: string): string {
 /**
  * Détermine le statut de couverture à partir d'un symbole ou texte de cellule
  */
-function parseStatus(symbol: string): 'included' | 'optional' | 'excluded' | 'not_applicable' {
+function parseStatus(
+  symbol: string,
+  legend?: Record<string, string>
+): 'included' | 'optional' | 'excluded' | 'not_applicable' {
   const raw = symbol.trim();
   const s = raw.toLowerCase();
 
   // Vide
   if (!s) return 'not_applicable';
 
+  // ── Légende prioritaire : si le symbole brut correspond à une clé de la légende ──
+  if (legend) {
+    const legendVal = legend[raw] || legend[s] || legend[raw.toUpperCase()];
+    if (legendVal) {
+      const lv = legendVal.toLowerCase();
+      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) return 'included';
+      if (/exclu|non|no|néant|neant|excluded/.test(lv)) return 'excluded';
+      if (/option|en sus|optionnel|optional/.test(lv)) return 'optional';
+      if (/n\/a|sans objet|not.applicable/.test(lv)) return 'not_applicable';
+    }
+  }
+
   // Inclus — symboles positifs
-  if (/^(✓|✔|√|●|•)$/.test(raw)) return 'included';
+  if (/^(✓|✔|√|●|•|■|▪|◆)$/.test(raw)) return 'included';
   if (/^(oui|yes|inclus|included|compris|couvert|garanti)$/i.test(s)) return 'included';
 
   // Exclus — symboles négatifs (AVANT le fallback texte afin d'éviter faux positif)
-  if (/^(✗|✘|×|✕)$/.test(raw)) return 'excluded';          // ballot x (U+2717, U+2718, U+00D7, U+2715)
+  if (/^(✗|✘|×|✕|□|▫)$/.test(raw)) return 'excluded';     // ballot x, carrés vides
   if (/^(x|×)$/.test(s)) return 'excluded';                   // lettre x seule
   if (/^(-|−|–|—|\.\.\.|--)$/.test(raw)) return 'excluded'; // tirets
   if (/^(non|no|exclu|excluded|non compris|néant|neant|nul|nulle)$/i.test(s)) return 'excluded';
   if (/\bexclu/i.test(s) && !/en option/i.test(s)) return 'excluded';
 
   // Optionnel
-  if (/^(○|◯|⊙|opt)$/.test(raw)) return 'optional';
+  if (/^(○|◯|⊙|opt|△)$/.test(raw)) return 'optional';
   if (/^(option|opt\.|en option|en sus|sur option|optionnel)$/i.test(s)) return 'optional';
 
   // N/A
@@ -120,48 +136,64 @@ export async function extractTableFromPageImage(
 
     const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français. Analyse cette image et extrait la matrice complète garanties × formules.
 
-ÉTAPE 0 — LÉGENDE (OBLIGATOIRE avant d'analyser le tableau) :
-Recherce d'abord une légende sur la page (souvent en bas ou en haut). La légende peut associer des symboles personnalisés à leur signification :
-- Symboles classiques : ✓ ● • √ = inclus | ✗ ✘ × x - – = exclu | ○ ◯ = option
-- Symboles personnalisés possibles : chiffres (1,2,3), lettres (A,B,C), icônes colorées, ou textes courts
-Exemple de légende : "1 = inclus, 2 = en option, 3 = exclu" ou "■ = inclus, □ = exclu"
-Si une légende est présente, applique-la STRICTEMENT lors du décodage des cellules.
+═══════ ÉTAPE 1 — DÉTECTER LA LÉGENDE (CRITIQUE) ═══════
+AVANT toute analyse du tableau, cherche PARTOUT sur la page :
+- Un encadré "Légende", "Symboles", "N.B.", "Correspondance"
+- Un texte en bas de page expliquant les symboles utilisés
+- Des annotations sous ou au-dessus du tableau
 
-FORMAT DE SORTIE (JSON strict, aucun autre texte) :
+Les symboles peuvent être TRÈS variés :
+- Couleurs/formes : ● ○ ■ □ ▪ ▫ ◆ ◇ △ ▲
+- Icônes : ✓ ✗ ✔ ✘ × √
+- Chiffres : 1, 2, 3 ("1 = inclus")
+- Lettres : A, B, C, G, E, O, N
+- Abréviations : "inc", "exc", "opt", "G" (garanti), "E" (exclu), "O" (option)
+- Texte court : "Garanti", "Non garanti", "Sur option"
+
+Reporte la légende dans le champ "legend" du JSON — OBLIGATOIRE même si standard.
+Si AUCUNE légende trouvée, mettre "legend": null.
+
+═══════ ÉTAPE 2 — REMPLIR LES CELLULES ═══════
+Pour chaque cellule du tableau :
+1. Si une légende existe : convertir le symbole brut SELON la légende
+2. Sinon, appliquer le décodage standard :
+   - ✓ ● • √ ■ ▪ ◆ oui inclus garanti couvert compris → "✓" (inclus)
+   - ✗ ✘ × x X - – — non exclu néant □ ▫ → "✗" (exclu)
+   - ○ ◯ en option sur option optionnel en sus △ → "○" (option)
+   - vide n/a s.o. sans objet → ""
+   - montant ou texte descriptif → recopier tel quel ("1 500 €", "Plafond 500€")
+
+⚠️ IMPORTANT : Dans la valeur JSON des cellules, mettre LE SYMBOLE BRUT TEL QU'IL APPARAÎT sur la page.
+Le post-traitement utilisera la légende pour interpréter correctement.
+
+═══════ FORMAT JSON (strict, aucun autre texte) ═══════
 {
   "has_table": true,
-  "legend": { "1": "included", "2": "optional", "3": "excluded" },
+  "legend": { "●": "included", "○": "optional", "—": "excluded" },
   "headers": ["Garanties", "FORMULE 1", "FORMULE 2", ...],
   "rows": [
     {
       "guarantee": "Responsabilité civile",
-      "formulas": { "formule_1": "✓", "formule_2": "✓" }
+      "formulas": { "formule_1": "●", "formule_2": "●" }
     },
     {
       "guarantee": "Bris de glaces",
-      "formulas": { "formule_1": "○", "formule_2": "✓" }
+      "formulas": { "formule_1": "○", "formule_2": "●" }
     }
   ],
   "confidence": 0.95
 }
-
-DÉCODAGE DES CELLULES (priorité à la légende si présente, sinon règles standard) :
-- Cellule = "✓" "●" "•" "√" "oui" "yes" "inclus" ou équivalent légende → valeur JSON : "✓"
-- Cellule = "✗" "✘" "×" "x" "X" "-" "–" "—" "non" "exclu" "néant" ou équivalent légende → valeur JSON : "✗"
-- Cellule = "○" "◯" "option" "en option" "en sus" "sur option" ou équivalent légende → valeur JSON : "○"
-- Cellule = vide ou "n/a" "s.o." "sans objet" → valeur JSON : ""
-- Cellule = montant/texte ("1 500 €", "Jusqu'à 3000 €", "Plafond 500€") → valeur JSON : contenu exact du texte
 
 NORMALISATION DES CLÉS DE FORMULES (snake_case) :
 - Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés
 - "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus"
 
 INSTRUCTIONS :
-1. TOUJOURS chercher une légende en premier
-2. Identifie TOUTES les lignes de garanties, y compris les sous-garanties en retrait
+1. Légende = PRIORITÉ ABSOLUE. Ne deviner jamais le sens d'un symbole sans légende.
+2. Identifie TOUTES les lignes de garanties, y compris sous-garanties en retrait
 3. Identifie TOUTES les colonnes de formules
-4. Applique la légende ou le décodage standard — NE PAS deviner
-5. Si une garantie occupe plusieurs lignes, concatène avec " - "
+4. Si une garantie occupe plusieurs lignes, concatène avec " - "
+5. Si un symbole est inconnu et pas dans la légende → mettre le contenu exact
 
 Si pas de tableau visible : {"has_table": false, "confidence": 1.0}
 
@@ -192,11 +224,19 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
     if (!parsed.has_table) {
       return null;
     }
+
+    // Capturer et normaliser la légende détectée par Gemini
+    let legend: Record<string, string> | undefined;
+    if (parsed.legend && typeof parsed.legend === 'object' && Object.keys(parsed.legend).length > 0) {
+      legend = parsed.legend;
+      console.log(`📖 Légende détectée: ${JSON.stringify(legend)}`);
+    }
     
     return {
       headers: parsed.headers || [],
       rows: parsed.rows || [],
-      confidence: parsed.confidence || 0.5
+      confidence: parsed.confidence || 0.5,
+      legend
     };
     
   } catch (error) {
@@ -245,7 +285,7 @@ export function tableToFacts(
         }
       }
 
-      const coverageStatus = parseStatus(symbol);
+      const coverageStatus = parseStatus(symbol, table.legend);
 
       facts.push({
         guarantee_key: guaranteeKey,

@@ -730,15 +730,42 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
           const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
           if (table && Array.isArray(table.rows)) {
             const headers: string[] = Array.isArray(table.headers) ? table.headers : [];
+            // Récupérer la légende si présente dans le table_json
+            const legend: Record<string, string> | null = (table.legend && typeof table.legend === 'object') ? table.legend : null;
+            if (legend) console.log(`${tag}📖 Légende table_json page ${row.page_number}: ${JSON.stringify(legend)}`);
+
             table.rows.forEach((tableRow: any) => {
               Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
                 const fKey = normalizeKey(geminiKey);
                 const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
-                const s = String(sym).trim().toLowerCase();
-                const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
-                  : /○|option/.test(s) ? 'optional'
-                  : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
-                  : s.length > 0 ? 'included' : 'not_applicable';
+                const rawSym = String(sym).trim();
+                const s = rawSym.toLowerCase();
+
+                // 1. Vérifier la légende en priorité
+                let status: string = '';
+                if (legend) {
+                  const legendVal = legend[rawSym] || legend[s] || legend[rawSym.toUpperCase()];
+                  if (legendVal) {
+                    const lv = legendVal.toLowerCase();
+                    if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) status = 'included';
+                    else if (/exclu|non|no|néant|neant|excluded/.test(lv)) status = 'excluded';
+                    else if (/option|en sus|optionnel|optional/.test(lv)) status = 'optional';
+                    else if (/n\/a|sans objet|not.applicable/.test(lv)) status = 'not_applicable';
+                  }
+                }
+
+                // 2. Si pas résolu par la légende, appliquer les règles standard
+                if (!status) {
+                  status = /✓|✔|●|•|√|■|▪|◆|oui|inclus|included|garanti|compris|couvert/.test(s) ? 'included'
+                    : /✗|✘|×|✕|□|▫/.test(rawSym) ? 'excluded'  // symboles négatifs (test sur RAW, pas lowercase)
+                    : /^x$/.test(s) ? 'excluded'               // lettre x seule
+                    : /^(-|−|–|—|\.\.\.|--)$/.test(rawSym) ? 'excluded'  // tirets seuls
+                    : /\bexclu|\bnon\b|\bnéant\b|\bneant\b|\bnul\b/.test(s) ? 'excluded'
+                    : /○|◯|△|option|en sus|optionnel/.test(s) ? 'optional'
+                    : /^(n\/a|na|s\.o\.|sans objet)$/i.test(s) ? 'not_applicable'
+                    : s.length > 0 ? 'included' : 'not_applicable';
+                }
+
                 coverageFacts.push({
                   guarantee_label: tableRow.guarantee || '',
                   guarantee_key: normalizeKey(tableRow.guarantee || ''),
