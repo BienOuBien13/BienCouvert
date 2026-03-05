@@ -140,9 +140,9 @@ Analyse cette image de page PDF et extrait la matrice complète garanties × for
 ═══ ÉTAPE 1 — LÉGENDE (CRITIQUE — faire AVANT toute extraction) ═══
 Cherche PARTOUT sur la page une légende, un encadré "Légende", "Symboles", une note de bas de page ou un texte explicatif des symboles.
 Exemples fréquents :
-- "● = garanti" / "○ = en option" / "— = non garanti"
+- "● = garanti" / "○ = en option" / "— = non garanti"  
 - "G = garanti" / "O = option" / "E = exclu"
-- Icones colorées, symboles géométriques, chiffres
+- Icones colorées, symboles géométriques, chiffres codés
 
 Reporte la légende dans le champ "legend" : { "symbole_brut": "included|excluded|optional" }
 Si aucune légende trouvée : "legend": null
@@ -152,23 +152,38 @@ Pour chaque cellule, APPLIQUE la légende pour déterminer le statut et normalis
 - Inclus (légende = "garanti"/"inclus"/"oui") → mettre "✓"
 - Exclu (légende = "non garanti"/"exclu"/"non") → mettre "✗"
 - Option (légende = "en option"/"sur option"/"optionnel") → mettre "○"
-- Vide / néant / s.o. → mettre ""
+- Cellule VIDE (vraiment vide, rien du tout) → mettre ""
 - Montant ou texte descriptif → mettre le texte exact ("1 500 €", "Jusqu'à 3000 €")
 
-Si PAS de légende, décodage standard :
-- ✓ ✔ ● • √ ■ Oui Inclus Garanti → "✓"
-- ✗ ✘ × x X - – — Non Exclu Néant □ → "✗"
-- ○ ◯ Option En option En sus △ → "○"
+Si PAS de légende, applique ce décodage standard :
+- ✓ ✔ ● • √ ■ ▪ ◆ "Oui" "Inclus" "Garanti" "Compris" → "✓"
+- ✗ ✘ × "Non" "Exclu" "Néant" □ ▫ → "✗"
+- X ou x seul (lettre, pas symbole) → "✗"
+- – — - (tiret seul) → "✗"  
+- ○ ◯ "Option" "En option" "En sus" △ → "○"
+
+⚠️ RÈGLES IMPORTANTES :
+1. LÉGENDE = PRIORITÉ ABSOLUE sur tout autre interprétation.
+2. Une cellule VIDE (pas de symbole) ≠ "exclu" : mets "" (chaîne vide).
+3. Les TITRES DE SECTION (lignes en gras/italique sans symboles dans les colonnes) : inclure le titre comme garantie mais mettre "" dans toutes les cellules.
+4. PAGE DE CONTINUATION : si les en-têtes de colonnes ne sont pas visibles sur cette page, déduis le nom des formules depuis le contexte visuel (alignement identique à d'autres pages).
+5. Identifie TOUTES les lignes (y compris sous-garanties en retrait ou à la ligne suivante).
+6. Identifie TOUTES les colonnes de formules.
+7. Symbole inconnu non présent dans la légende → mets le symbole exact tel quel.
 
 ═══ FORMAT JSON STRICT (aucun autre texte) ═══
 {
   "has_table": true,
   "legend": { "●": "included", "○": "optional", "—": "excluded" },
-  "headers": ["Garanties", "FORMULE 1", "FORMULE 2", ...],
+  "headers": ["Garanties", "FORMULE 1", "FORMULE 2", "FORMULE 3"],
   "rows": [
     {
       "guarantee": "Responsabilité civile",
-      "formulas": { "formule_1": "✓", "formule_2": "✓" }
+      "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" }
+    },
+    {
+      "guarantee": "Assistance dépannage (serrurerie, plomberie)",
+      "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" }
     }
   ],
   "confidence": 0.95
@@ -177,13 +192,6 @@ Si PAS de légende, décodage standard :
 CLÉS DE FORMULES en snake_case :
 - Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés
 - "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus"
-
-RÈGLES :
-1. LÉGENDE = PRIORITÉ ABSOLUE.
-2. Identifie TOUTES les lignes, y compris sous-garanties en retrait.
-3. Identifie TOUTES les colonnes de formules.
-4. Lignes multi-lignes : concatène avec " - ".
-5. Symbole inconnu hors légende : mettre le contenu exact.
 
 Si aucun tableau visible : {"has_table": false, "confidence": 1.0}
 
@@ -221,10 +229,21 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
       legend = parsed.legend;
       console.log(`📖 Légende détectée: ${JSON.stringify(legend)}`);
     }
+
+    // Log complet de la structure extraite pour diagnostic
+    const headers = parsed.headers || [];
+    const rows = parsed.rows || [];
+    console.log(`📊 Tableau Gemini: ${headers.length} colonnes × ${rows.length} lignes`);
+    console.log(`   En-têtes: [${headers.join(' | ')}]`);
+    rows.slice(0, 5).forEach((r: any) => {
+      const cells = Object.entries(r.formulas || {}).map(([k, v]) => `${k}="${v}"`).join(', ');
+      console.log(`   • "${r.guarantee}" → {${cells}}`);
+    });
+    if (rows.length > 5) console.log(`   ... (${rows.length - 5} lignes supplémentaires)`);
     
     return {
-      headers: parsed.headers || [],
-      rows: parsed.rows || [],
+      headers,
+      rows,
       confidence: parsed.confidence || 0.5,
       legend
     };
@@ -276,6 +295,11 @@ export function tableToFacts(
       }
 
       const coverageStatus = parseStatus(symbol, table.legend);
+
+      // Log détaillé pour diagnostiquer le mapping symbole → statut
+      if (coverageStatus === 'excluded') {
+        console.log(`   ⚠️  [tableToFacts] "${guaranteeLabel}" × "${formulaLabel}" : symbole="${symbol}" → ${coverageStatus}`);
+      }
 
       facts.push({
         guarantee_key: guaranteeKey,
