@@ -262,21 +262,22 @@ function tableToFacts(tableData, centralCgId, pageId, pageNumber, insurerCode, i
     return facts;
   }
   
-  // Les headers sont les formules (sauf la première colonne qui contient les garanties)
-  const formulas = tableData.headers.slice(1); // Ignorer la première colonne
+  const formulas = tableData.headers.slice(1);
+  const legend = tableData.legend || null;
   
-  // Parcourir chaque ligne (garantie)
   tableData.rows.forEach(row => {
-    const guaranteeLabel = row[0]; // Première colonne = nom de la garantie
+    const guaranteeLabel = row[0] ? String(row[0]).trim() : '';
+    if (!guaranteeLabel) return; // ignorer lignes vides / titres de section
     const guaranteeKey = normalizeKey(guaranteeLabel);
     
-    // Parcourir chaque formule
     formulas.forEach((formulaLabel, idx) => {
-      const cellValue = row[idx + 1]; // +1 car on a ignoré la première colonne
+      const cellValue = row[idx + 1];
       const formulaKey = normalizeKey(formulaLabel);
       
-      // Analyser la valeur de la cellule
-      const coverageInfo = parseStatus(cellValue);
+      const coverageInfo = parseStatus(cellValue, legend);
+      if (coverageInfo.status === 'excluded') {
+        log(`      ⚠️  [tableToFacts] "${guaranteeLabel}" × "${formulaLabel}" : cellule="${cellValue}" → ${coverageInfo.status}`);
+      }
       
       facts.push({
         insurer_code: insurerCode,
@@ -314,36 +315,64 @@ function normalizeKey(label) {
 
 /**
  * Parse le statut d'une cellule de tableau
+ * Supporte les symboles Unicode, la légende optionnelle, et tous les formats Gemini
  */
-function parseStatus(cellValue) {
-  if (!cellValue) {
+function parseStatus(cellValue, legend) {
+  if (cellValue === null || cellValue === undefined || cellValue === '') {
+    return { status: 'not_applicable', amount: null, franchise: null };
+  }
+
+  const raw = cellValue.toString().trim();
+  const s   = raw.toLowerCase();
+
+  if (!raw) return { status: 'not_applicable', amount: null, franchise: null };
+
+  // 1. Légende prioritaire
+  if (legend) {
+    const legendVal = legend[raw] || legend[s] || legend[raw.toUpperCase()];
+    if (legendVal) {
+      const lv = legendVal.toLowerCase();
+      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv))
+        return { status: 'included', amount: extractAmount(s), franchise: extractFranchise(s) };
+      if (/exclu|non|no|néant|neant|excluded/.test(lv))
+        return { status: 'excluded', amount: null, franchise: null };
+      if (/option|en sus|optionnel|optional/.test(lv))
+        return { status: 'optional', amount: extractAmount(s), franchise: extractFranchise(s) };
+      if (/n\/a|sans objet|not.applicable/.test(lv))
+        return { status: 'not_applicable', amount: null, franchise: null };
+    }
+  }
+
+  // 2. Symboles inclus (Unicode + texte)
+  if (/[\u2713\u2714\u25cb\u25cf\u2022\u221a\u25a0\u25aa\u25c6]/.test(raw)
+      || /^(oui|inclus|included|compris|couvert|garanti)$/i.test(s)) {
+    return { status: 'included', amount: extractAmount(s), franchise: extractFranchise(s) };
+  }
+
+  // 3. Symboles exclus
+  if (/[\u2717\u2718\u00d7\u2715\u25a1\u25ab]/.test(raw) // ✗✘×✕□▫
+      || /^(-|−|–|—|\.\.\.|--)$/.test(raw)         // tirets seuls
+      || /^x$/.test(s)                                    // lettre x seule
+      || /^(non|no|exclu|excluded|néant|neant|nul|nulle)$/i.test(s)) {
     return { status: 'excluded', amount: null, franchise: null };
   }
-  
-  const value = cellValue.toString().toLowerCase();
-  
-  // Inclus
-  if (value.includes('✓') || value.includes('included') || value.includes('oui')) {
-    return { status: 'included', amount: extractAmount(value), franchise: extractFranchise(value) };
+
+  // 4. Symboles option
+  if (/[\u25cb\u25ef\u2299\u25b3]/.test(raw)
+      || /^(option|opt\.|en option|en sus|sur option|optionnel)$/i.test(s)) {
+    return { status: 'optional', amount: extractAmount(s), franchise: extractFranchise(s) };
   }
-  
-  // Option
-  if (value.includes('○') || value.includes('optional') || value.includes('option')) {
-    return { status: 'optional', amount: extractAmount(value), franchise: extractFranchise(value) };
-  }
-  
-  // Exclu
-  if (value.includes('-') || value.includes('excluded') || value.includes('non')) {
-    return { status: 'excluded', amount: null, franchise: null };
-  }
-  
-  // Si montant présent, considéré comme inclus
-  const amount = extractAmount(value);
-  if (amount) {
-    return { status: 'included', amount, franchise: extractFranchise(value) };
-  }
-  
-  return { status: 'excluded', amount: null, franchise: null };
+
+  // 5. N/A
+  if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s))
+    return { status: 'not_applicable', amount: null, franchise: null };
+
+  // 6. Montant ou texte descriptif long → inclus
+  const amount = extractAmount(s);
+  if (amount) return { status: 'included', amount, franchise: extractFranchise(s) };
+  if (raw.length > 2) return { status: 'included', amount: null, franchise: null };
+
+  return { status: 'not_applicable', amount: null, franchise: null };
 }
 
 /**
@@ -473,25 +502,58 @@ async function extractPageWithCanvas(pdfDoc, pageNum) {
 /**
  * Extraction tableau via Vision Gemini — identique à extractTableFromPageImage()
  * dans tableExtractionService.ts.
- * Retourne au format Vision : { headers, rows: [{guarantee, formulas{}}], confidence, _isVision:true }
+ * Retourne au format Vision : { headers, rows: [{guarantee, formulas{}}], confidence, legend, _isVision:true }
  */
 async function extractTableFromPageVision(imageBase64, insurerCode, insuranceTypeCode) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const prompt = `Tu es un expert en analyse de documents d'assurance. Analyse cette image de page de conditions générales et extrait le tableau de garanties s'il existe.
+    const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français.
+Analyse cette image de page PDF et extrait la matrice complète garanties × formules.
 
-FORMAT DE SORTIE (JSON strict):
+═══ ÉTAPE 1 — LÉGENDE (CRITIQUE — faire AVANT toute extraction) ═══
+Cherche PARTOUT sur la page une légende, un encadré "Légende", "Symboles", une note de bas de page ou un texte explicatif des symboles.
+Exemples fréquents :
+- "● = garanti" / "○ = en option" / "— = non garanti"
+- "G = garanti" / "O = option" / "E = exclu"
+- Icones colorées, symboles géométriques, chiffres codés
+
+Reporte la légende dans le champ "legend" : { "symbole_brut": "included|excluded|optional" }
+Si aucune légende trouvée : "legend": null
+
+═══ ÉTAPE 2 — EXTRACTION DU TABLEAU ═══
+Pour chaque cellule, APPLIQUE la légende pour déterminer le statut et normalise la valeur :
+- Inclus (légende = "garanti"/"inclus"/"oui") → mettre "✓"
+- Exclu (légende = "non garanti"/"exclu"/"non") → mettre "✗"
+- Option (légende = "en option"/"sur option"/"optionnel") → mettre "○"
+- Cellule VIDE (vraiment vide) → mettre ""
+- Montant ou texte descriptif → mettre le texte exact ("1 500 €", "Jusqu'à 3000 €")
+
+Si PAS de légende :
+- ✓ ✔ ● • √ ■ ▪ ◆ "Oui" "Inclus" "Garanti" → "✓"
+- ✗ ✘ × "Non" "Exclu" "Néant" □ ▫ → "✗"
+- X ou x seul (lettre) → "✗"
+- – — - (tiret seul) → "✗"
+- ○ ◯ "Option" "En option" "En sus" △ → "○"
+
+⚠️ RÈGLES :
+1. LÉGENDE = PRIORITÉ ABSOLUE.
+2. Cellule VIDE (pas de symbole) ≠ exclu : mets "".
+3. Identifie TOUTES les lignes (y compris sous-garanties en retrait).
+4. Identifie TOUTES les colonnes de formules.
+
+FORMAT JSON STRICT (aucun autre texte) :
 {
-  "has_table": true/false,
-  "headers": ["Garanties", "TIERS ECO", "TIERS ESSENTIEL", ...],
+  "has_table": true,
+  "legend": { "●": "included", "○": "optional", "—": "excluded" },
+  "headers": ["Garanties", "FORMULE 1", "FORMULE 2", "FORMULE 3"],
   "rows": [
-    { "guarantee": "Responsabilité civile", "formulas": { "tiers_eco": "✓", "tiers_essentiel": "✓" } }
+    { "guarantee": "Responsabilité civile", "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" } }
   ],
   "confidence": 0.95
 }
 
-LÉGENDE: ✓/● = inclus, ○ = option, - = exclu. Clés formules en snake_case (espaces→'_', '+'→'_plus').
-Si pas de tableau: {"has_table":false,"confidence":1.0}
+CLÉS DE FORMULES en snake_case : espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés.
+Si aucun tableau visible : {"has_table": false, "confidence": 1.0}
 RÉPONDS UNIQUEMENT AVEC LE JSON.`;
 
     const result = await model.generateContent([
@@ -504,7 +566,40 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
     if (!jsonMatch) return null;
     const parsed = JSON.parse(jsonMatch[0]);
     if (!parsed.has_table || !parsed.rows || parsed.rows.length === 0) return null;
-    return { headers: parsed.headers || [], rows: parsed.rows, confidence: parsed.confidence || 0.5, _isVision: true };
+
+    // Capturer la légende
+    const legend = (parsed.legend && typeof parsed.legend === 'object' && Object.keys(parsed.legend).length > 0)
+      ? parsed.legend : null;
+    if (legend) log(`      📖 Légende détectée: ${JSON.stringify(legend)}`);
+
+    const headers = parsed.headers || [];
+    const formulaHeaders = headers.slice(1);
+
+    // Normaliser les lignes : array ou objet → toujours objet {guarantee, formulas}
+    const rows = (parsed.rows || [])
+      .filter(r => r !== null && r !== undefined)
+      .map(r => {
+        if (Array.isArray(r)) {
+          const guarantee = String(r[0] || '');
+          const formulas = {};
+          formulaHeaders.forEach((h, i) => {
+            const fk = normalizeKey(h.replace(/\+/g, '_plus'));
+            formulas[fk] = String(r[i + 1] ?? '');
+          });
+          return { guarantee, formulas };
+        }
+        return r;
+      })
+      .filter(r => r.guarantee && r.guarantee.trim());
+
+    log(`      📊 Vision: ${headers.length} colonnes × ${rows.length} lignes`);
+    rows.slice(0, 3).forEach(r => {
+      const cells = Object.entries(r.formulas || {}).map(([k, v]) => `${k}="${v}"`).join(', ');
+      log(`         • "${r.guarantee}" → {${cells}}`);
+    });
+    if (rows.length > 3) log(`         ... (${rows.length - 3} lignes supplémentaires)`);
+
+    return { headers, rows, confidence: parsed.confidence || 0.5, legend, _isVision: true };
   } catch (err) {
     log(`      ⚠️  Vision table: ${err.message}`);
     return null;
@@ -519,25 +614,34 @@ function tableToFactsVision(tableData, centralCgId, pageId, pageNumber, insurerC
   const facts = [];
   if (!tableData?.headers || !tableData?.rows) return facts;
   const formulaHeaders = tableData.headers.slice(1); // ignorer la 1ère colonne "Garanties"
+  const legend = tableData.legend || null;
   tableData.rows.forEach(row => {
-    const guaranteeLabel = row.guarantee || '';
-    if (!guaranteeLabel) return;
+    // Support des deux formats : objet {guarantee, formulas} ET tableau [label, sym1, sym2]
+    const isArrayRow = Array.isArray(row);
+    const guaranteeLabel = isArrayRow ? String(row[0] || '') : (row.guarantee || '');
+    if (!guaranteeLabel.trim()) return;
     const guaranteeKey = normalizeKey(guaranteeLabel);
     formulaHeaders.forEach((formulaLabel, idx) => {
       const formulaKey = normalizeKey(formulaLabel.replace(/\+/g, '_plus'));
-      // Multi-stratégie lookup (même logique que tableExtractionService.ts)
       let symbol = '';
-      const fmls = row.formulas || {};
-      if (fmls[formulaKey] !== undefined) {
-        symbol = String(fmls[formulaKey]);
+      if (isArrayRow) {
+        symbol = row[idx + 1] !== undefined ? String(row[idx + 1]) : '';
       } else {
-        const geminiKeys = Object.keys(fmls);
-        const matchKey = geminiKeys.find(gk => normalizeKey(gk.replace(/\+/g, '_plus')) === formulaKey);
-        symbol = matchKey !== undefined
-          ? String(fmls[matchKey])
-          : (idx < geminiKeys.length ? String(fmls[geminiKeys[idx]]) : '');
+        const fmls = row.formulas || {};
+        if (fmls[formulaKey] !== undefined) {
+          symbol = String(fmls[formulaKey]);
+        } else {
+          const geminiKeys = Object.keys(fmls);
+          const matchKey = geminiKeys.find(gk => normalizeKey(gk.replace(/\+/g, '_plus')) === formulaKey);
+          symbol = matchKey !== undefined
+            ? String(fmls[matchKey])
+            : (idx < geminiKeys.length ? String(fmls[geminiKeys[idx]]) : '');
+        }
       }
-      const coverageInfo = parseStatus(symbol);
+      const coverageInfo = parseStatus(symbol, legend);
+      if (coverageInfo.status === 'excluded') {
+        log(`      ⚠️  [tableToFactsVision] "${guaranteeLabel}" × "${formulaLabel}" : symbole="${symbol}" → ${coverageInfo.status}`);
+      }
       facts.push({
         insurer_code:        insurerCode,
         insurance_type_code: insuranceTypeCode,
@@ -789,7 +893,15 @@ async function insertCoverageFacts(facts) {
     DO UPDATE SET
       guarantee_label = EXCLUDED.guarantee_label,
       formula_label = EXCLUDED.formula_label,
-      coverage_status = EXCLUDED.coverage_status,
+      -- Stratégie "meilleur statut gagne" : inclus > optionnel > exclu > non_applicable
+      coverage_status = CASE
+        WHEN coverage_facts.coverage_status = 'included'      THEN 'included'
+        WHEN EXCLUDED.coverage_status       = 'included'      THEN 'included'
+        WHEN coverage_facts.coverage_status = 'optional'      THEN 'optional'
+        WHEN EXCLUDED.coverage_status       = 'optional'      THEN 'optional'
+        WHEN coverage_facts.coverage_status = 'excluded'      THEN EXCLUDED.coverage_status
+        ELSE EXCLUDED.coverage_status
+      END,
       coverage_amount = EXCLUDED.coverage_amount,
       coverage_notes  = EXCLUDED.coverage_notes,
       franchise = EXCLUDED.franchise,
