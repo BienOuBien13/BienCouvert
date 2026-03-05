@@ -134,39 +134,33 @@ export async function extractTableFromPageImage(
 
     const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français. Analyse cette image et extrait la matrice complète garanties × formules.
+    const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français.
+Analyse cette image de page PDF et extrait la matrice complète garanties × formules.
 
-═══════ ÉTAPE 1 — DÉTECTER LA LÉGENDE (CRITIQUE) ═══════
-AVANT toute analyse du tableau, cherche PARTOUT sur la page :
-- Un encadré "Légende", "Symboles", "N.B.", "Correspondance"
-- Un texte en bas de page expliquant les symboles utilisés
-- Des annotations sous ou au-dessus du tableau
+═══ ÉTAPE 1 — LÉGENDE (CRITIQUE — faire AVANT toute extraction) ═══
+Cherche PARTOUT sur la page une légende, un encadré "Légende", "Symboles", une note de bas de page ou un texte explicatif des symboles.
+Exemples fréquents :
+- "● = garanti" / "○ = en option" / "— = non garanti"
+- "G = garanti" / "O = option" / "E = exclu"
+- Icones colorées, symboles géométriques, chiffres
 
-Les symboles peuvent être TRÈS variés :
-- Couleurs/formes : ● ○ ■ □ ▪ ▫ ◆ ◇ △ ▲
-- Icônes : ✓ ✗ ✔ ✘ × √
-- Chiffres : 1, 2, 3 ("1 = inclus")
-- Lettres : A, B, C, G, E, O, N
-- Abréviations : "inc", "exc", "opt", "G" (garanti), "E" (exclu), "O" (option)
-- Texte court : "Garanti", "Non garanti", "Sur option"
+Reporte la légende dans le champ "legend" : { "symbole_brut": "included|excluded|optional" }
+Si aucune légende trouvée : "legend": null
 
-Reporte la légende dans le champ "legend" du JSON — OBLIGATOIRE même si standard.
-Si AUCUNE légende trouvée, mettre "legend": null.
+═══ ÉTAPE 2 — EXTRACTION DU TABLEAU ═══
+Pour chaque cellule, APPLIQUE la légende pour déterminer le statut et normalise la valeur :
+- Inclus (légende = "garanti"/"inclus"/"oui") → mettre "✓"
+- Exclu (légende = "non garanti"/"exclu"/"non") → mettre "✗"
+- Option (légende = "en option"/"sur option"/"optionnel") → mettre "○"
+- Vide / néant / s.o. → mettre ""
+- Montant ou texte descriptif → mettre le texte exact ("1 500 €", "Jusqu'à 3000 €")
 
-═══════ ÉTAPE 2 — REMPLIR LES CELLULES ═══════
-Pour chaque cellule du tableau :
-1. Si une légende existe : convertir le symbole brut SELON la légende
-2. Sinon, appliquer le décodage standard :
-   - ✓ ● • √ ■ ▪ ◆ oui inclus garanti couvert compris → "✓" (inclus)
-   - ✗ ✘ × x X - – — non exclu néant □ ▫ → "✗" (exclu)
-   - ○ ◯ en option sur option optionnel en sus △ → "○" (option)
-   - vide n/a s.o. sans objet → ""
-   - montant ou texte descriptif → recopier tel quel ("1 500 €", "Plafond 500€")
+Si PAS de légende, décodage standard :
+- ✓ ✔ ● • √ ■ Oui Inclus Garanti → "✓"
+- ✗ ✘ × x X - – — Non Exclu Néant □ → "✗"
+- ○ ◯ Option En option En sus △ → "○"
 
-⚠️ IMPORTANT : Dans la valeur JSON des cellules, mettre LE SYMBOLE BRUT TEL QU'IL APPARAÎT sur la page.
-Le post-traitement utilisera la légende pour interpréter correctement.
-
-═══════ FORMAT JSON (strict, aucun autre texte) ═══════
+═══ FORMAT JSON STRICT (aucun autre texte) ═══
 {
   "has_table": true,
   "legend": { "●": "included", "○": "optional", "—": "excluded" },
@@ -174,28 +168,24 @@ Le post-traitement utilisera la légende pour interpréter correctement.
   "rows": [
     {
       "guarantee": "Responsabilité civile",
-      "formulas": { "formule_1": "●", "formule_2": "●" }
-    },
-    {
-      "guarantee": "Bris de glaces",
-      "formulas": { "formule_1": "○", "formule_2": "●" }
+      "formulas": { "formule_1": "✓", "formule_2": "✓" }
     }
   ],
   "confidence": 0.95
 }
 
-NORMALISATION DES CLÉS DE FORMULES (snake_case) :
+CLÉS DE FORMULES en snake_case :
 - Espaces → "_", "+" → "_plus", majuscules → minuscules, accents supprimés
 - "Formule 2" → "formule_2", "TIERS ESSENTIEL+" → "tiers_essentiel_plus"
 
-INSTRUCTIONS :
-1. Légende = PRIORITÉ ABSOLUE. Ne deviner jamais le sens d'un symbole sans légende.
-2. Identifie TOUTES les lignes de garanties, y compris sous-garanties en retrait
-3. Identifie TOUTES les colonnes de formules
-4. Si une garantie occupe plusieurs lignes, concatène avec " - "
-5. Si un symbole est inconnu et pas dans la légende → mettre le contenu exact
+RÈGLES :
+1. LÉGENDE = PRIORITÉ ABSOLUE.
+2. Identifie TOUTES les lignes, y compris sous-garanties en retrait.
+3. Identifie TOUTES les colonnes de formules.
+4. Lignes multi-lignes : concatène avec " - ".
+5. Symbole inconnu hors légende : mettre le contenu exact.
 
-Si pas de tableau visible : {"has_table": false, "confidence": 1.0}
+Si aucun tableau visible : {"has_table": false, "confidence": 1.0}
 
 RÉPONDS UNIQUEMENT AVEC LE JSON.`;
 

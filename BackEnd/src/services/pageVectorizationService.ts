@@ -189,15 +189,64 @@ function extractArticleRef(text: string): string | null {
 
 /**
  * Détecte si une page contient un tableau de garanties
+ * Approche large : détecte formules ET garanties, pour tous types d'assurance
  */
 function detectTable(text: string): boolean {
-  // Heuristiques améliorées: plus permissives pour capturer plus de pages avec tableau
-  const hasFormulas = /tiers[\s-]*(eco|essentiel|\+)?|tous[\s-]*risques|confort|essentiel\+?|leasing|integral|plenitude|plénitude|bronze|silver|gold/i.test(text);
-  const hasGuarantees = /responsabilit|bris[\s-]*de[\s-]*glac|vitrage|pare[\s-]*brise|\bvol\b|incendie|dommages|assistance|conducteur/i.test(text);
-  const hasSymbols = /[\u2713\u2714\u25cb\u25cf\u2022]/g.test(text) || /\b(inclus|option|exclu|oui|non)\b/i.test(text);
-  const hasMultipleLines = text.split('\n').length > 5;
+  const t = text.toLowerCase();
 
-  return hasFormulas && hasGuarantees && (hasSymbols || hasMultipleLines);
+  // ── Colonnes de formules (noms de formules / niveaux / options) ──
+  const hasFormulas =
+    // Auto : tiers, tous risques, confort, etc.
+    /tiers[\s-]*(eco|essentiel|\+)?|tous[\s-]*risques|leasing|confort|int[eé]gral|pl[eé]nitude/i.test(text)
+    // Habitation : formule 1/2/3, essentiel, premium, intégral
+    || /formule\s*\d|formule\s+[a-z]/i.test(text)
+    || /niveau\s*\d|option\s*\d|pack\s/i.test(text)
+    || /\bessentiel\b|\bconfort\b|\bpremium\b|\boptimum\b|\bzenith\b|\bs[eé]r[eé]nit[eé]\b/i.test(text)
+    // Bancaire / protection : bourso protect, visa, mastercard
+    || /bourso\s*protect|visa\s|mastercard|formule\s*(plus|\+)/i.test(text)
+    // Santé, prévoyance : base, renforcé, surcomplémentaire
+    || /\bbase\b.*\brenforcé|\brenforcé\b.*\bbase\b|\bsurcompl[eé]mentaire\b/i.test(text)
+    // Générique : bronze/silver/gold, économique/standard/premium
+    || /bronze|silver|gold|platinum|standard|[eé]conomique/i.test(text)
+    // Au moins 2 colonnes numériques ou nommées détectées
+    || (text.match(/formule/gi) || []).length >= 2;
+
+  // ── Lignes de garanties ──
+  const hasGuarantees =
+    /responsabilit[eé]|bris[\s-]*de[\s-]*glac|vitrage|pare[\s-]*brise/i.test(text)
+    || /\bvol\b|incendie|dommages|assistance|conducteur/i.test(text)
+    // Habitation spécifique
+    || /d[eé]g[aâ]ts?\s*des\s*eaux|catastrophe|tempête|grêle|neige|foudre/i.test(text)
+    || /serrurerie|plomberie|[eé]lectricit[eé]|chauffage/i.test(text)
+    || /d[eé]pannage|relogement|gardiennage|objets\s*de\s*valeur/i.test(text)
+    // Bancaire / carte
+    || /protection.*paiement|moyens?\s*de\s*paiement|vol\s*d.esp[eè]ces/i.test(text)
+    || /cl[eé]s|papiers|maroquinerie|spectacle|voyage/i.test(text)
+    // Santé
+    || /hospitalisation|optique|dentaire|consultation|m[eé]decine/i.test(text)
+    // Générique
+    || /garantie|couverture|franchise|plafond|sinistre/i.test(text);
+
+  // ── Symboles visuels OR mots-clés de statut ──
+  const hasSymbols =
+    /[\u2713\u2714\u25cb\u25cf\u2022\u2717\u2718\u00d7\u25a0\u25a1\u25aa\u25ab\u25c6\u25c7\u25b3]/g.test(text)
+    || /\b(inclus|option|exclu|oui|non|garanti|non garanti)\b/i.test(text);
+
+  // ── Structure tabulaire (beaucoup de lignes courtes = probable tableau) ──
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  const hasMultipleLines = lines.length > 5;
+  const hasTableStructure = lines.filter(l => l.trim().length < 80).length > 8;
+
+  // Détection principale : formules + garanties + (symboles OU structure)
+  if (hasFormulas && hasGuarantees && (hasSymbols || hasMultipleLines)) return true;
+
+  // Détection secondaire : si beaucoup de garanties + structure tabulaire
+  if (hasGuarantees && hasTableStructure && hasSymbols) return true;
+
+  // Détection tertiaire : mots-clés très forts (légende explicite sur la page)
+  if (/l[eé]gende|symbole.*:|correspond/i.test(text) && hasGuarantees) return true;
+
+  return false;
 }
 
 /**
@@ -308,15 +357,23 @@ export async function vectorizeCgByPages(
       // Détecter tableau
       const hasTable = detectTable(pageData.contentText);
 
+      // Détection secondaire : pages avec mots-clés de garantie → tenter Vision même si pas sûr
+      const maybeTable = !hasTable && /garantie|formule|couverture|franchise|plafond/i.test(pageData.contentText)
+        && pageData.contentText.split('\n').filter((l: string) => l.trim().length > 0).length > 8;
+
       // ── Phase 1 : Classification sémantique du chunk ──
       const classification = classifyPage(pageData.contentText, hasTable);
-      console.log(`   🏷️  Type: ${classification.chunkType} | Garanties: [${classification.guaranteeCodes.join(', ')}] | Art: ${classification.articleRef || '-'}`);
+      console.log(`   🏷️  Type: ${classification.chunkType} | Garanties: [${classification.guaranteeCodes.join(', ')}] | Art: ${classification.articleRef || '-'}${maybeTable ? ' | ⚡ maybe-table' : ''}`);
       
       let tableJson = null;
       let extractionConfidence = null;
       
-      if (hasTable) {
-        console.log(`   📊 Tableau détecté, extraction Vision...`);
+      if (hasTable || maybeTable) {
+        console.log(`   📊 ${hasTable ? 'Tableau détecté' : 'Possible tableau'}, extraction Vision...`);
+        
+        // Rate-limit supplémentaire avant appel Vision
+        await new Promise(r => setTimeout(r, 500));
+        
         const table = await extractTableFromPageImage(
           pageData.imageBase64,
           cg.insurer_code,
@@ -329,9 +386,14 @@ export async function vectorizeCgByPages(
           tablesExtracted++;
           
           console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties × ${table.headers.length - 1} formules`);
+        } else if (maybeTable) {
+          console.log(`   ℹ️ Pas de tableau trouvé par Vision (faux positif maybe-table)`);
         }
       }
       
+      // Mettre à jour has_table : true si tableau trouvé par Vision, même si heuristique initiale = false
+      const finalHasTable = hasTable || (tableJson !== null);
+
       // Sauvegarder la page avec les nouvelles colonnes de classification
       const pageInsert = await pool.query(
         `INSERT INTO central_cg_pages (
@@ -365,7 +427,7 @@ export async function vectorizeCgByPages(
           pageData.imageBase64,
           pageData.width,
           pageData.height,
-          hasTable,
+          finalHasTable,
           tableJson ? JSON.stringify(tableJson) : null,
           extractionConfidence,
           classification.chunkType,
@@ -593,6 +655,8 @@ export async function vectorizeUserCgByPages(
         }
       }
 
+      const finalHasTable = hasTable || (tableJson !== null);
+
       // Sauvegarder dans user_cg_pages
       const pageInsert = await pool.query(
         `INSERT INTO user_cg_pages (
@@ -626,7 +690,7 @@ export async function vectorizeUserCgByPages(
           pageData.imageBase64,
           pageData.width,
           pageData.height,
-          hasTable,
+          finalHasTable,
           tableJson ? JSON.stringify(tableJson) : null,
           extractionConfidence,
           classification.chunkType,
