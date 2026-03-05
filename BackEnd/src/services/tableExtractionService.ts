@@ -345,7 +345,16 @@ export async function saveCoverageFacts(
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
-          coverage_status = EXCLUDED.coverage_status,
+          -- Stratégie "meilleur statut gagne" : inclus > optionnel > exclu > non_applicable
+          -- Évite qu'une table secondaire (exclusions, section vide) écrase un statut positif
+          coverage_status = CASE
+            WHEN coverage_facts.coverage_status = 'included'         THEN 'included'
+            WHEN EXCLUDED.coverage_status      = 'included'         THEN 'included'
+            WHEN coverage_facts.coverage_status = 'optional'         THEN 'optional'
+            WHEN EXCLUDED.coverage_status      = 'optional'         THEN 'optional'
+            WHEN coverage_facts.coverage_status = 'excluded'         THEN EXCLUDED.coverage_status
+            ELSE EXCLUDED.coverage_status
+          END,
           source_page_id = EXCLUDED.source_page_id,
           source_page_number = EXCLUDED.source_page_number,
           extraction_confidence = EXCLUDED.extraction_confidence,
@@ -410,7 +419,14 @@ export async function saveUserCoverageFacts(
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
-          coverage_status = EXCLUDED.coverage_status,
+          coverage_status = CASE
+            WHEN user_coverage_facts.coverage_status = 'included'    THEN 'included'
+            WHEN EXCLUDED.coverage_status             = 'included'    THEN 'included'
+            WHEN user_coverage_facts.coverage_status = 'optional'    THEN 'optional'
+            WHEN EXCLUDED.coverage_status             = 'optional'    THEN 'optional'
+            WHEN user_coverage_facts.coverage_status = 'excluded'    THEN EXCLUDED.coverage_status
+            ELSE EXCLUDED.coverage_status
+          END,
           source_page_id = EXCLUDED.source_page_id,
           source_page_number = EXCLUDED.source_page_number,
           extraction_confidence = EXCLUDED.extraction_confidence,
