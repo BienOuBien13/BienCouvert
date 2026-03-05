@@ -734,8 +734,19 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
             const legend: Record<string, string> | null = (table.legend && typeof table.legend === 'object') ? table.legend : null;
             if (legend) console.log(`${tag}📖 Légende table_json page ${row.page_number}: ${JSON.stringify(legend)}`);
 
+            const formulaHeaders = headers.slice(1); // colonnes de formules
+
             table.rows.forEach((tableRow: any) => {
-              Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
+              const isArrayRow = Array.isArray(tableRow);
+              const guaranteeLabel: string = isArrayRow ? String(tableRow[0] || '') : (tableRow.guarantee || '');
+              if (!guaranteeLabel.trim()) return; // ignorer lignes vides / sections
+
+              // Itérer sur les formules (par position pour arrays, par clé pour objets)
+              const entries: Array<[string, string]> = isArrayRow
+                ? formulaHeaders.map((h: string, i: number) => [h, String(tableRow[i + 1] ?? '')] as [string, string])
+                : Object.entries(tableRow.formulas || {});
+
+              entries.forEach(([geminiKey, sym]) => {
                 const fKey = normalizeKey(geminiKey);
                 const fLabel = headers.find((h: string) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
                 const rawSym = String(sym).trim();
@@ -767,8 +778,8 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
                 }
 
                 coverageFacts.push({
-                  guarantee_label: tableRow.guarantee || '',
-                  guarantee_key: normalizeKey(tableRow.guarantee || ''),
+                  guarantee_label: guaranteeLabel,
+                  guarantee_key: normalizeKey(guaranteeLabel),
                   formula_label: fLabel,
                   formula_key: fKey,
                   coverage_status: status,

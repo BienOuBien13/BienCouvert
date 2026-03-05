@@ -230,10 +230,30 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
       console.log(`📖 Légende détectée: ${JSON.stringify(legend)}`);
     }
 
-    // Log complet de la structure extraite pour diagnostic
-    const headers = parsed.headers || [];
-    const rows = parsed.rows || [];
-    console.log(`📊 Tableau Gemini: ${headers.length} colonnes × ${rows.length} lignes`);
+    const headers: string[] = parsed.headers || [];
+    const formulaHeaders = headers.slice(1); // col 0 = "Garanties"
+
+    // Normaliser les lignes en format objet {guarantee, formulas} quel que soit le format Gemini
+    const rawRows: any[] = parsed.rows || [];
+    const rows = rawRows
+      .filter((r: any) => r !== null && r !== undefined)
+      .map((r: any) => {
+        if (Array.isArray(r)) {
+          // Format tableau Gemini [guarantee, symbol1, symbol2, ...]
+          const guarantee = String(r[0] || '');
+          const formulas: Record<string, string> = {};
+          formulaHeaders.forEach((h: string, i: number) => {
+            formulas[normalizeFormulaKey(h)] = String(r[i + 1] ?? '');
+          });
+          return { guarantee, formulas };
+        }
+        // Format objet déjà correct
+        return r;
+      })
+      .filter((r: any) => r.guarantee && r.guarantee.trim());
+
+    // Log complet pour diagnostic
+    console.log(`📊 Tableau Gemini: ${headers.length} colonnes × ${rows.length} lignes (${rawRows.length} brutes)`);
     console.log(`   En-têtes: [${headers.join(' | ')}]`);
     rows.slice(0, 5).forEach((r: any) => {
       const cells = Object.entries(r.formulas || {}).map(([k, v]) => `${k}="${v}"`).join(', ');
@@ -270,27 +290,42 @@ export function tableToFacts(
   // Les headers commencent après "Garanties" (première colonne)
   const formulaHeaders = table.headers.slice(1);
   
-  table.rows.forEach((row, rowIndex) => {
-    const guaranteeLabel = row.guarantee;
+  table.rows.forEach((row: any, rowIndex) => {
+    // Support dual format:
+    // Object format: { guarantee: "...", formulas: { formule_1: "●", ... } }  ← nouveau
+    // Array format:  ["guarantee_label", "●", "○", "✗"]                      ← ancien Gemini
+    const isArrayRow = Array.isArray(row);
+    const guaranteeLabel: string = isArrayRow ? String(row[0] || '') : (row.guarantee || '');
     const guaranteeKey = normalizeGuaranteeKey(guaranteeLabel);
-    
+
+    // Ignorer les lignes vides ou de titre (aucun symbole dans les colonnes de formule)
+    if (!guaranteeLabel.trim()) return;
+
     formulaHeaders.forEach((formulaLabel, colIndex) => {
       const formulaKey = normalizeFormulaKey(formulaLabel);
 
-      // Multi-stratégie de lookup pour gérer les variantes de normalisation de Gemini
       let symbol = '';
-      if (row.formulas[formulaKey] !== undefined) {
-        // Stratégie 1: clé exacte (notre normalisation de l'en-tête)
-        symbol = String(row.formulas[formulaKey]);
+
+      if (isArrayRow) {
+        // Format tableau : row[0]=garantie, row[1]=col1, row[2]=col2, ...
+        const rawCell = row[colIndex + 1];
+        symbol = rawCell !== undefined ? String(rawCell) : '';
       } else {
-        const geminiKeys = Object.keys(row.formulas);
-        // Stratégie 2: clé Gemini qui normalise vers la même valeur (ex: "tiers_essentiel_" → "tiers_essentiel")
-        const matchingKey = geminiKeys.find(gk => normalizeFormulaKey(gk) === formulaKey);
-        if (matchingKey !== undefined) {
-          symbol = String(row.formulas[matchingKey]);
-        } else if (colIndex < geminiKeys.length) {
-          // Stratégie 3: fallback positionnel (même colonne)
-          symbol = String(row.formulas[geminiKeys[colIndex]]);
+        // Format objet : { guarantee, formulas: { key: symbol } }
+        const formulas = row.formulas || {};
+        if (formulas[formulaKey] !== undefined) {
+          // Stratégie 1: clé exacte (notre normalisation de l'en-tête)
+          symbol = String(formulas[formulaKey]);
+        } else {
+          const geminiKeys = Object.keys(formulas);
+          // Stratégie 2: clé Gemini qui normalise vers la même valeur
+          const matchingKey = geminiKeys.find(gk => normalizeFormulaKey(gk) === formulaKey);
+          if (matchingKey !== undefined) {
+            symbol = String(formulas[matchingKey]);
+          } else if (colIndex < geminiKeys.length) {
+            // Stratégie 3: fallback positionnel
+            symbol = String(formulas[geminiKeys[colIndex]]);
+          }
         }
       }
 
