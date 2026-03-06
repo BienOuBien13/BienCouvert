@@ -1099,6 +1099,7 @@ async function processDocument(row, index, total) {
     let pagesProcessed = 0;
     let tablesFound = 0;
     let factsCreated = 0;
+    const discoveredFormulaLabels = new Set(); // Formules détectées dans les en-têtes de tableaux
 
     // Traiter chaque page : texte + canvas image + Vision/texte table + embedding
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
@@ -1170,6 +1171,12 @@ async function processDocument(row, index, total) {
         
         // Coverage facts
         if (tableJson) {
+          // Capturer les labels de formules depuis les en-têtes du tableau
+          if (tableJson.headers && tableJson.headers.length > 1) {
+            tableJson.headers.slice(1).forEach(h => {
+              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+            });
+          }
           const facts = tableIsVision
             ? tableToFactsVision(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type)
             : tableToFacts(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type);
@@ -1190,6 +1197,25 @@ async function processDocument(row, index, total) {
     log(`     - ${pagesProcessed} pages traitées`);
     log(`     - ${tablesFound} tableaux extraits`);
     log(`     - ${factsCreated} faits de couverture créés`);
+
+    // Mettre à jour indexedFormulas si des formules ont été détectées dans les tableaux
+    // (enrichedMeta ne lit que les 12 000 premiers chars ; les formules peuvent être à la page 10-20)
+    if (discoveredFormulaLabels.size > 0) {
+      const allFormulas = [...new Set([
+        ...enrichedMeta.indexedFormulas,
+        ...discoveredFormulaLabels
+      ])];
+      if (allFormulas.length > enrichedMeta.indexedFormulas.length) {
+        log(`  🔄 Mise à jour indexedFormulas: ${allFormulas.length} formules (${enrichedMeta.indexedFormulas.length} Gemini + ${discoveredFormulaLabels.size} tableaux)`);
+        try {
+          await pool.query(
+            `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ indexedFormulas: allFormulas }), cgId]
+          );
+          log(`  ✅ indexedFormulas mis à jour: ${allFormulas.join(', ')}`);
+        } catch (fErr) { log(`  ⚠️  Mise à jour indexedFormulas (non bloquant): ${fErr.message}`); }
+      }
+    }
 
     // Marquer la vectorisation comme terminée (identique à pageVectorizationService)
     try {

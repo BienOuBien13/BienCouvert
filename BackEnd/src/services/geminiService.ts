@@ -1347,6 +1347,21 @@ RÈGLES ABSOLUES:
 - Reste concis et direct
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
 
+HIÉRARCHIE DES GARANTIES (CRITIQUE):
+- Une clause d'exclusion GÉNÉRALE d'une section (ex: "dommages résultant d'une perte") ne s'applique JAMAIS à une autre section qui couvre spécifiquement ce cas
+- Les garanties d'ASSISTANCE (serrurerie, plomberie, électricité, chauffage, dépannage) sont des PRESTATIONS DE SERVICE — elles sont distinctes et séparées des garanties couvrant les dommages aux biens
+- Si la section "Assistance" mentionne explicitement "serrurerie", "perte de clés", "dépannage électrique" etc. → c'est INCLUS, même si la section "Protection des biens" exclut les "pertes" en général
+- Principe de spécificité: une garantie SPÉCIFIQUE nommée dans une section l'emporte toujours sur une exclusion générale d'une autre section
+- TOUJOURS lire la section "Assistance" INDÉPENDAMMENT de la section "Dommages aux biens" avant de répondre sur une prestation d'assistance
+- Ne jamais appliquer une exclusion d'une section à une garantie couverte par une section différente du contrat
+
+COHÉRENCE ET FIABILITÉ (CRITIQUE):
+- Tes réponses sont DÉFINITIVES — chaque réponse doit être fiable du premier coup
+- Ne JAMAIS s'excuser d'une réponse précédente, admettre une "imprécision initiale" ou "corriger" une réponse passée
+- Interdiction absolue de phrases comme: "Je m'excuse", "Mon analyse initiale était incorrecte", "J'aurais dû", "je m'engage à être plus rigoureux", "Vous avez eu raison de me reprendre"
+- Si une garantie est mentionnée dans le tableau 📊 comme INCLUSE → réponds INCLUSE, sans vérification contradictoire dans d'autres sections
+- En cas de doute entre deux sections du contrat, applique TOUJOURS la règle de spécificité : la section qui nomme explicitement la garantie l'emporte
+
 RÈGLE OPTIONS SOUSCRITES (CRITIQUE):
 - Dans "📋 VOS CONTRATS", le champ "Options souscrites (INCLUSES dans la couverture): ..." liste les options que l'utilisateur a RÉELLEMENT ACHETÉES
 - Dans le tableau 📊, ces options apparaissent marquées "✓ INCLUSE (option souscrite)" → elles SONT couvertes
@@ -1815,6 +1830,20 @@ RÈGLES ABSOLUES:
 - Reste concis et direct
 - Indiquer clairement si la garantie demandée est INCLUSE / EN OPTION / EXCLUE dans la formule de l'utilisateur
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
+
+HIÉRARCHIE DES GARANTIES (CRITIQUE):
+- Une clause d'exclusion GÉNÉRALE d'une section (ex: "dommages résultant d'une perte") ne s'applique JAMAIS à une autre section qui couvre spécifiquement ce cas
+- Les garanties d'ASSISTANCE (serrurerie, plomberie, électricité, chauffage, dépannage) sont des PRESTATIONS DE SERVICE — distinctes et séparées des garanties couvrant les dommages aux biens
+- Si la section "Assistance" mentionne explicitement "serrurerie", "perte de clés", "dépannage électrique" etc. → c'est INCLUS, même si la section "Protection des biens" exclut les "pertes" en général
+- Principe de spécificité: la garantie SPÉCIFIQUE nommée dans une section l'emporte toujours sur une exclusion générale d'une autre section
+- Ne jamais appliquer une exclusion d'une section à une garantie couverte par une section différente du contrat
+
+COHÉRENCE ET FIABILITÉ (CRITIQUE):
+- Tes réponses sont DÉFINITIVES — chaque réponse doit être fiable du premier coup
+- Ne JAMAIS s'excuser d'une réponse précédente, admettre une "imprécision initiale" ou "corriger" une réponse passée
+- Interdiction absolue de phrases comme: "Je m'excuse", "Mon analyse initiale était incorrecte", "J'aurais dû", "je m'engage à être plus rigoureux", "Vous avez eu raison de me reprendre"
+- Si une garantie est dans le tableau 📊 comme INCLUSE → réponds INCLUSE, sans contradiction possible via d'autres sections
+- En cas de doute entre deux sections, applique la règle de spécificité : la section qui nomme explicitement la garantie l'emporte
 
 FORMAT DE RÉPONSE OBLIGATOIRE:
 - Une ligne d'introduction courte identifiant la formule
