@@ -2474,6 +2474,9 @@ export const chatClaim = async (
   insurerName: string,
   policyContext: string = ''
 ): Promise<string> => {
+  const ai = getAiClient();
+  if (!ai) return 'Service IA non disponible. Vérifiez la configuration GEMINI_API_KEY.';
+
   const claimSummary = [
     `Événement : ${claimData.evenement || '?'}`,
     `Date : ${claimData.dateIncident || '?'}`,
