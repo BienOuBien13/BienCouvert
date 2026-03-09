@@ -290,7 +290,7 @@ function App() {
                   {/* Bénéfice 1 : Assistant */}
                   <div 
                     onClick={() => setActiveView('chat')}
-                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                    className="p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(99,102,241,0.15)] hover:border-primary-100 cursor-pointer active:scale-[0.98] transition-all duration-200 group"
                   >
                     <div className="flex items-center gap-5">
                       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-indigo-500 text-white flex items-center justify-center shadow-lg">
@@ -307,7 +307,7 @@ function App() {
                   {/* Bénéfice 2 : Optimisation */}
                   <div 
                     onClick={() => setActiveView('analysis')}
-                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                    className="p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(16,185,129,0.15)] hover:border-emerald-100 cursor-pointer active:scale-[0.98] transition-all duration-200 group"
                   >
                     <div className="flex items-center gap-5">
                       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-lg">
@@ -324,7 +324,7 @@ function App() {
                   {/* Bénéfice 3 : Courtier */}
                   <div 
                     onClick={() => setActiveView('experts')}
-                    className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm hover:shadow-lg cursor-pointer active:scale-[0.98] transition-all group"
+                    className="p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(245,158,11,0.15)] hover:border-amber-100 cursor-pointer active:scale-[0.98] transition-all duration-200 group"
                   >
                     <div className="flex items-center gap-5">
                       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-lg">
@@ -421,7 +421,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 md:bg-slate-50 pb-32 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-white via-slate-50 to-slate-100/60 pb-32 flex flex-col">
       {/* Modal d'édition (mode classique) */}
       {editingPolicy && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -437,10 +437,9 @@ function App() {
         </div>
       )}
 
-      <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60]">
-        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView('home')}>
-          <img src="/petit_logo.png" alt="BienCouvert" className="w-9 h-9 rounded-xl shadow-lg shadow-primary-200 group-hover:rotate-12 transition-transform" />
-          <span className="font-black text-slate-900 uppercase tracking-tighter text-lg">BienCouvert</span>
+      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100">
+        <div className="flex items-center cursor-pointer group" onClick={() => setActiveView('home')}>
+          <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-9 w-auto object-contain group-hover:scale-105 transition-transform duration-200" />
         </div>
         <div className="flex items-center gap-2">
            {user?.isAdmin && (

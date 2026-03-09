@@ -237,7 +237,15 @@ export const AdminView: React.FC = () => {
     const meta = (entry as any).metadata || {};
     setEditingEntry(entry);
     setEditFormulas(Array.isArray(meta.indexedFormulas) ? [...meta.indexedFormulas] : []);
-    setEditOptions(meta.indexedOptions || {});
+    // Normalize indexedOptions: must be Record<string, string[]>, never a flat array
+    const rawOpts = meta.indexedOptions;
+    let normalizedOpts: Record<string, string[]> = {};
+    if (rawOpts && typeof rawOpts === 'object' && !Array.isArray(rawOpts)) {
+      normalizedOpts = Object.fromEntries(
+        Object.entries(rawOpts).map(([k, v]) => [k, Array.isArray(v) ? v : [String(v)]])
+      );
+    }
+    setEditOptions(normalizedOpts);
     setNewFormulaInput('');
   };
 
@@ -575,7 +583,8 @@ export const AdminView: React.FC = () => {
                   {/* Formules indexées */}
                   <td className="px-6 py-4 max-w-[200px]">
                     {(() => {
-                      const formulas: string[] = (entry as any).metadata?.indexedFormulas || [];
+                      const raw = (entry as any).metadata?.indexedFormulas;
+                      const formulas: string[] = Array.isArray(raw) ? raw : [];
                       return formulas.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {formulas.slice(0, 3).map(f => (
