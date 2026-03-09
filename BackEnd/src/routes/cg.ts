@@ -790,4 +790,74 @@ router.get('/files/user/:id', async (req: Request, res: Response) => {
   }
 });
 
+// -----------------------------------------------------------------------------
+// GET /api/cg/coverage-facts/:centralCgId
+// Retourne tous les coverage_facts pour un document CG central
+// Groupés par guarantee_label × formula_key pour la vue admin
+// -----------------------------------------------------------------------------
+router.get('/coverage-facts/:centralCgId', async (req: Request, res: Response) => {
+  try {
+    const { centralCgId } = req.params;
+    const result = await query(
+      `SELECT id, guarantee_key, guarantee_label, formula_key, formula_label,
+              coverage_status, coverage_amount, coverage_notes, franchise,
+              source_page_number, extraction_confidence
+       FROM coverage_facts
+       WHERE central_cg_id = $1
+       ORDER BY guarantee_label, formula_key`,
+      [centralCgId]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[CG/coverage-facts GET]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// PATCH /api/cg/coverage-fact/:id
+// Met à jour le coverage_status (et notes/amount optionnels) d'un fait de couverture
+// Body: { coverage_status: 'included'|'optional'|'excluded'|'not_applicable', coverage_notes?: string, coverage_amount?: string }
+// -----------------------------------------------------------------------------
+router.patch('/coverage-fact/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { coverage_status, coverage_notes, coverage_amount } = req.body;
+
+    const VALID = ['included', 'optional', 'excluded', 'not_applicable'];
+    if (!VALID.includes(coverage_status)) {
+      return res.status(400).json({ error: `coverage_status doit être l'un de : ${VALID.join(', ')}` });
+    }
+
+    await query(
+      `UPDATE coverage_facts
+       SET coverage_status = $1,
+           coverage_notes  = COALESCE($2, coverage_notes),
+           coverage_amount = COALESCE($3, coverage_amount),
+           updated_at      = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [coverage_status, coverage_notes ?? null, coverage_amount ?? null, id]
+    );
+
+    console.log(`[CG/coverage-fact PATCH] id=${id} → ${coverage_status}`);
+    res.json({ success: true, id, coverage_status });
+  } catch (err: any) {
+    console.error('[CG/coverage-fact PATCH]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// DELETE /api/cg/coverage-fact/:id
+// Supprime un fait de couverture individuel (ex: doublon ou extraction erronée)
+// -----------------------------------------------------------------------------
+router.delete('/coverage-fact/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM coverage_facts WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 export default router;

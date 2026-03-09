@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { storage } from '../storage';
-import { analyzeClaim, generateClaimLetter, ClaimContext } from '../services/geminiService';
+import { analyzeClaim, generateClaimLetter, chatClaim, ClaimContext, ChatMessage } from '../services/geminiService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes /api/sinistre — Assistant Sinistre BienCouvert
@@ -22,6 +22,7 @@ const mapSessionRow = (row: any) => ({
   analysis: row.analysis,
   actionPlan: row.action_plan,
   letterContent: row.letter_content,
+  messages: row.messages || [],
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -65,6 +66,77 @@ router.get('/session/:id', async (req: Request, res: Response) => {
     res.json(mapSessionRow(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/sinistre/session/:id/chat
+// Envoyer un message et obtenir une réponse IA contextuelle
+// L'historique est persisté dans le champ messages de claim_sessions
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/session/:id/chat', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: 'message requis' });
+
+    // Charger la session
+    const sessionResult = await query(
+      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type,
+              cg.insurer_code, cg.insurance_type_code
+       FROM claim_sessions cs
+       LEFT JOIN policies p ON p.id = cs.policy_id
+       LEFT JOIN central_cg cg ON cg.id = p.central_cg_id
+       WHERE cs.id = $1`,
+      [id]
+    );
+    if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+    const session = sessionResult.rows[0];
+
+    const claimData: ClaimContext = session.claim_data || {};
+    const analysis = session.analysis || null;
+    const policyMeta = session.policy_metadata || {};
+    const existingMessages: ChatMessage[] = session.messages || [];
+
+    // Construire le contexte du contrat
+    let policyContext = '';
+    if (policyMeta.summary) policyContext += `Résumé : ${policyMeta.summary}\n`;
+    if (policyMeta.description) policyContext += `Description : ${policyMeta.description}\n`;
+    // Chercher CG si dispo
+    if (policyMeta.centralCgId || policyMeta.central_cg_id) {
+      const cgRow = await query(`SELECT content_text FROM central_cg WHERE id = $1`, [policyMeta.centralCgId || policyMeta.central_cg_id]).catch(() => ({ rows: [] }));
+      if (cgRow.rows[0]?.content_text) policyContext += `\nConditions générales :\n${cgRow.rows[0].content_text.slice(0, 2000)}`;
+    }
+
+    // Appel Gemini
+    const reply = await chatClaim(
+      message.trim(),
+      existingMessages,
+      claimData,
+      analysis,
+      policyMeta.name || `Contrat #${session.policy_id}`,
+      session.insurer || 'Votre assureur',
+      policyContext
+    );
+
+    // Construire les nouveaux messages
+    const now = new Date().toISOString();
+    const newMessages: ChatMessage[] = [
+      ...existingMessages,
+      { role: 'user', content: message.trim(), ts: now },
+      { role: 'assistant', content: reply, ts: new Date().toISOString() },
+    ];
+
+    // Sauvegarder en DB
+    await query(
+      `UPDATE claim_sessions SET messages = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(newMessages), id]
+    );
+
+    res.json({ reply, messages: newMessages });
+  } catch (err: any) {
+    console.error('[sinistre] chat error:', err.message);
+    res.status(500).json({ error: 'Erreur chat IA', details: err.message });
   }
 });
 
@@ -136,9 +208,10 @@ router.post('/session/:id/analyze', async (req: Request, res: Response) => {
     // Charger la session
     const sessionResult = await query(
       `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type,
-              p.insurer_code, p.insurance_type_code
+              cg.insurer_code, cg.insurance_type_code
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
+       LEFT JOIN central_cg cg ON cg.id = p.central_cg_id
        WHERE cs.id = $1`,
       [id]
     );

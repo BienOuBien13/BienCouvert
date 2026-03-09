@@ -2456,6 +2456,66 @@ Réponds en JSON : {"letter": "...", "emailSubject": "..."} — texte plain (pas
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Chat contextuel dans une session sinistre
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  ts: string;
+}
+
+export const chatClaim = async (
+  userMessage: string,
+  history: ChatMessage[],
+  claimData: ClaimContext,
+  analysis: ClaimAnalysisResult | null,
+  policyName: string,
+  insurerName: string,
+  policyContext: string = ''
+): Promise<string> => {
+  const claimSummary = [
+    `Événement : ${claimData.evenement || '?'}`,
+    `Date : ${claimData.dateIncident || '?'}`,
+    claimData.lieu ? `Lieu : ${claimData.lieu}` : '',
+    (claimData.dommages || []).length ? `Dommages : ${claimData.dommages!.join(', ')}` : '',
+    claimData.tiers ? 'Tiers impliqué.' : '',
+  ].filter(Boolean).join(' | ');
+
+  const analysisSummary = analysis
+    ? `Couverture estimée : ${analysis.isCovered === true ? 'OUI' : analysis.isCovered === false ? 'NON' : 'INCERTAINE'}. Délai déclaration : ${analysis.declarationDeadlineDays}j. Franchise : ${analysis.franchise || 'inconnue'}.`
+    : 'Analyse IA non encore effectuée.';
+
+  const historyText = history
+    .slice(-8) // Keep last 8 messages for context window
+    .map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.content}`)
+    .join('\n');
+
+  const systemPrompt = `Tu es un assistant expert en assurance française, spécialisé dans l'accompagnement des assurés lors de sinistres.
+Contrat concerné : ${policyName} (${insurerName}).
+Sinistre déclaré : ${claimSummary}.
+${analysisSummary}
+${policyContext ? `Contexte contrat :\n${policyContext.slice(0, 2000)}` : ''}
+
+Règles :
+- Réponds en français, de façon concise et pédagogique
+- Tu aides à préparer la déclaration, tu n'es pas l'assureur
+- Si tu n'es pas sûr, dis-le clairement
+- En cas d'urgence réelle, conseille d'appeler le 15/17/18 ou l'assureur directement
+- Ne donne pas de conseils juridiques qui nécessiteraient un avocat`;
+
+  const fullPrompt = `${systemPrompt}\n\nHistorique :\n${historyText}\n\nUtilisateur: ${userMessage}\nAssistant:`;
+
+  try {
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'chatClaim');
+    const result = await model.generateContent([fullPrompt]);
+    const text = (await result.response).text().trim();
+    return text || 'Désolé, je n\'ai pas pu générer une réponse. Veuillez réessayer.';
+  } catch {
+    return 'Une erreur est survenue. Veuillez réessayer ou contacter directement votre assureur.';
+  }
+};
+
 function getBasicDocs(ctx: ClaimContext): string[] {
   const docs: string[] = [];
   if (ctx.tiers) docs.push('Coordonnées du tiers impliqué');

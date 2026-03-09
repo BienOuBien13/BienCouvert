@@ -415,10 +415,21 @@ function parseStatus(cellValue, legend) {
   if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s))
     return { status: 'not_applicable', amount: null, franchise: null };
 
-  // 6. Montant ou texte descriptif long → inclus
+  // Exclus — catch-all textuel AVANT le fallback inclusif
+  // Patterns explicites d'exclusion en texte long
+  if (/\b(non\s+inclus|non\s+couvert|non\s+compris|non\s+garanti|non\s+pris\s+en\s+charge|pas\s+inclus|pas\s+couvert|exclue?|exclusion)\b/i.test(s))
+    return { status: 'excluded', amount: null, franchise: null };
+  if (/^non[\s.,;:!]*$/i.test(s))
+    return { status: 'excluded', amount: null, franchise: null };
+  // Dash/tiret seul = non couvert pour cette formule
+  if (/^[-–—.]{1,5}$/.test(raw))
+    return { status: 'excluded', amount: null, franchise: null };
+
+  // 6. Montant ou texte positif (plafond, capital, remboursement…) → inclus
   const amount = extractAmount(s);
-  if (amount) return { status: 'included', amount, franchise: extractFranchise(s) };
-  if (raw.length > 2) return { status: 'included', amount: null, franchise: null };
+  if (amount && !/\b(non|exclu|sans)\b/i.test(s)) return { status: 'included', amount, franchise: extractFranchise(s) };
+  if (/\b(jusqu'?à|jusqu.a|plafond|forfait|capital|rente|indemnit|prise\s+en\s+charge|remboursement)\b/i.test(s))
+    return { status: 'included', amount: null, franchise: extractFranchise(s) };
 
   return { status: 'not_applicable', amount: null, franchise: null };
 }
@@ -950,13 +961,12 @@ async function insertCoverageFacts(facts) {
     DO UPDATE SET
       guarantee_label = EXCLUDED.guarantee_label,
       formula_label = EXCLUDED.formula_label,
-      -- Stratégie "meilleur statut gagne" : inclus > optionnel > exclu > non_applicable
+      -- Stratégie : la dernière extraction valide l'emporte.
+      -- Exception : not_applicable ne peut pas écraser un statut réel (inclus/optionnel/exclu).
       coverage_status = CASE
-        WHEN coverage_facts.coverage_status = 'included'      THEN 'included'
-        WHEN EXCLUDED.coverage_status       = 'included'      THEN 'included'
-        WHEN coverage_facts.coverage_status = 'optional'      THEN 'optional'
-        WHEN EXCLUDED.coverage_status       = 'optional'      THEN 'optional'
-        WHEN coverage_facts.coverage_status = 'excluded'      THEN EXCLUDED.coverage_status
+        WHEN EXCLUDED.coverage_status = 'not_applicable'
+          AND coverage_facts.coverage_status != 'not_applicable'
+          THEN coverage_facts.coverage_status
         ELSE EXCLUDED.coverage_status
       END,
       coverage_amount = EXCLUDED.coverage_amount,

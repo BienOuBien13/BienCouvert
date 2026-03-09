@@ -3,8 +3,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save
 } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Types pour la gestion des faits de couverture (coverage_facts)
+// ---------------------------------------------------------------------------
+interface CoverageFact {
+  id: number;
+  guarantee_key: string;
+  guarantee_label: string;
+  formula_key: string;
+  formula_label: string;
+  coverage_status: 'included' | 'optional' | 'excluded' | 'not_applicable';
+  coverage_amount?: string;
+  coverage_notes?: string;
+  franchise?: string;
+  source_page_number?: number;
+  extraction_confidence?: number;
+}
 import { CentralCgEntry, PolicyType } from '../types';
 import { storageService } from '../services/storageService';
 import { indexCgDocument } from '../services/geminiService';
@@ -61,6 +78,59 @@ export const AdminView: React.FC = () => {
   const [editOptions, setEditOptions] = useState<Record<string, string[]>>({});
   const [newFormulaInput, setNewFormulaInput] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // --- État du modal coverage_facts ---
+  const [factsDocId, setFactsDocId] = useState<number | null>(null);
+  const [factsDocLabel, setFactsDocLabel] = useState('');
+  const [facts, setFacts] = useState<CoverageFact[]>([]);
+  const [factsLoading, setFactsLoading] = useState(false);
+  const [factsPatchLoading, setFactsPatchLoading] = useState<Record<number, boolean>>({});
+
+  // Fête les faits de couverture d'un document
+  const loadCoverageFacts = async (centralCgId: number, label: string) => {
+    setFactsDocId(centralCgId);
+    setFactsDocLabel(label);
+    setFacts([]);
+    setFactsLoading(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/coverage-facts/${centralCgId}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }
+      );
+      const data = await res.json();
+      setFacts(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('[coverage-facts]', e);
+      setFacts([]);
+    } finally {
+      setFactsLoading(false);
+    }
+  };
+
+  // Met à jour le statut d'un fait
+  const handlePatchFact = async (factId: number, newStatus: CoverageFact['coverage_status']) => {
+    setFactsPatchLoading(prev => ({ ...prev, [factId]: true }));
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/coverage-fact/${factId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+          },
+          body: JSON.stringify({ coverage_status: newStatus })
+        }
+      );
+      if (res.ok) {
+        setFacts(prev => prev.map(f => f.id === factId ? { ...f, coverage_status: newStatus } : f));
+      }
+    } catch (e) {
+      console.error('[coverage-fact PATCH]', e);
+    } finally {
+      setFactsPatchLoading(prev => ({ ...prev, [factId]: false }));
+    }
+  };
 
   // Charger les types de document au montage
   useEffect(() => {
@@ -637,6 +707,16 @@ export const AdminView: React.FC = () => {
                   <td className="px-6 py-4 text-center">
                     <div className="flex items-center justify-center gap-1">
                       <button
+                        onClick={() => loadCoverageFacts(
+                          entry.id,
+                          `${(entry as any).insurer || entry.insurerCode} · ${(entry as any).productName || entry.insuranceTypeCode}`
+                        )}
+                        className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
+                        title="Voir / corriger les faits de couverture"
+                      >
+                        <BarChart2 className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => handleOpenEdit(entry)}
                         className="p-2 text-slate-300 hover:text-primary-600 transition-colors"
                         title="Éditer les formules / options"
@@ -795,6 +875,143 @@ export const AdminView: React.FC = () => {
               >
                 {isSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                 {isSavingEdit ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL : Faits de couverture (coverage_facts) — visualisation + correction
+      ===================================================================== */}
+      {factsDocId !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-8"
+          onClick={() => setFactsDocId(null)}
+        >
+          <div
+            className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* En-tête */}
+            <div className="flex items-center justify-between px-8 pt-8 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <BarChart2 className="w-6 h-6 text-emerald-600" />
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tight">Faits de couverture</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{factsDocLabel}</p>
+                </div>
+              </div>
+              <button onClick={() => setFactsDocId(null)} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Corps */}
+            <div className="flex-1 overflow-auto px-8 py-6">
+              {factsLoading ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-3">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                  <p className="text-sm text-slate-400 font-medium">Chargement des faits…</p>
+                </div>
+              ) : facts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-3">
+                  <AlertCircle className="w-8 h-8 text-slate-300" />
+                  <p className="text-sm text-slate-400 font-medium">Aucun fait de couverture extrait pour ce document.</p>
+                  <p className="text-xs text-slate-300">Lancez une vectorisation complète pour générer les données.</p>
+                </div>
+              ) : (() => {
+                // Construire la matrice guarantee × formula
+                const guaranteeMap = new Map<string, { key: string; label: string }>();
+                const formulaMap = new Map<string, { key: string; label: string }>();
+                facts.forEach(f => {
+                  if (!guaranteeMap.has(f.guarantee_key)) guaranteeMap.set(f.guarantee_key, { key: f.guarantee_key, label: f.guarantee_label });
+                  if (!formulaMap.has(f.formula_key)) formulaMap.set(f.formula_key, { key: f.formula_key, label: f.formula_label });
+                });
+                const guarantees = Array.from(guaranteeMap.values());
+                const formulas = Array.from(formulaMap.values());
+                const factsByCell = new Map<string, CoverageFact>();
+                facts.forEach(f => factsByCell.set(`${f.guarantee_key}|${f.formula_key}`, f));
+
+                const statusConfig: Record<string, { label: string; bg: string; text: string; dot: string }> = {
+                  included: { label: 'Inclus', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+                  optional: { label: 'Option', bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-400' },
+                  excluded: { label: 'Exclu', bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-400' },
+                  not_applicable: { label: 'N/A', bg: 'bg-slate-50', text: 'text-slate-400', dot: 'bg-slate-300' },
+                };
+
+                return (
+                  <div className="overflow-x-auto">
+                    <p className="text-xs text-slate-400 mb-4 font-medium">{facts.length} faits · {guarantees.length} garanties · {formulas.length} formules</p>
+                    <table className="text-xs w-full border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="px-3 py-2 bg-slate-50 text-left text-[10px] font-black uppercase text-slate-400 tracking-widest rounded-tl-xl sticky left-0 z-10 min-w-[180px]">Garantie</th>
+                          {formulas.map(f => (
+                            <th key={f.key} className="px-3 py-2 bg-slate-50 text-center text-[10px] font-bold text-slate-600 max-w-[120px] whitespace-nowrap overflow-hidden text-ellipsis">
+                              {f.label || f.key}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {guarantees.map((g, gi) => (
+                          <tr key={g.key} className={gi % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                            <td className="px-3 py-2 font-semibold text-slate-700 sticky left-0 z-10 bg-inherit border-b border-slate-100 text-[11px] leading-tight">
+                              {g.label || g.key}
+                            </td>
+                            {formulas.map(f => {
+                              const fact = factsByCell.get(`${g.key}|${f.key}`);
+                              if (!fact) return (
+                                <td key={f.key} className="px-2 py-1 text-center border-b border-slate-100">
+                                  <span className="text-slate-200 text-[10px]">—</span>
+                                </td>
+                              );
+                              const sc = statusConfig[fact.coverage_status] ?? statusConfig.not_applicable;
+                              const isPatching = factsPatchLoading[fact.id];
+                              return (
+                                <td key={f.key} className="px-2 py-1 text-center border-b border-slate-100">
+                                  <div className="relative inline-block">
+                                    {isPatching ? (
+                                      <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin mx-auto" />
+                                    ) : (
+                                      <select
+                                        value={fact.coverage_status}
+                                        onChange={e => handlePatchFact(fact.id, e.target.value as CoverageFact['coverage_status'])}
+                                        title={fact.coverage_amount ? `Montant: ${fact.coverage_amount}` : undefined}
+                                        className={`appearance-none text-[10px] font-bold px-2 py-1 pr-5 rounded-lg border-0 cursor-pointer outline-none focus:ring-2 focus:ring-offset-1 focus:ring-emerald-400 ${sc.bg} ${sc.text}`}
+                                      >
+                                        <option value="included">✅ Inclus</option>
+                                        <option value="optional">🟡 Option</option>
+                                        <option value="excluded">❌ Exclu</option>
+                                        <option value="not_applicable">⬜ N/A</option>
+                                      </select>
+                                    )}
+                                    {fact.coverage_amount && !isPatching && (
+                                      <span className="block text-[9px] text-slate-400 truncate max-w-[100px] mx-auto mt-0.5">
+                                        {fact.coverage_amount}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Pied */}
+            <div className="px-8 py-4 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setFactsDocId(null)}
+                className="px-6 py-2.5 bg-slate-100 text-slate-700 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-colors"
+              >
+                Fermer
               </button>
             </div>
           </div>

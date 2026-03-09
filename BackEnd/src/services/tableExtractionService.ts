@@ -110,9 +110,18 @@ function parseStatus(
   // N/A
   if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s)) return 'not_applicable';
 
-  // Texte contenant un montant ou description positive → inclus
-  // ex: "1 500 €", "Plafond 500€", "Jusqu'à 3000€"
-  if (/\d/.test(s) || s.length > 3) return 'included';
+  // Exclus — catch-all textuel AVANT le fallback inclusif
+  // Patterns explicites d'exclusion en texte long ("non inclus", "non couvert"…)
+  if (/\b(non\s+inclus|non\s+couvert|non\s+compris|non\s+garanti|non\s+pris\s+en\s+charge|pas\s+inclus|pas\s+couvert|exclue?|exclusion)\b/i.test(s)) return 'excluded';
+  // Cellule contenant uniquement «non» suivi éventuellement d'une ponctuation
+  if (/^non[\s.,;:!]*$/i.test(s)) return 'excluded';
+  // Dash/tiret ou point de suspension seul (cellule vide de sens = non couvert pour cette formule)
+  if (/^[-–—.]{1,5}$/.test(raw)) return 'excluded';
+
+  // Texte positif : montant, plafond, pourcentage → inclus
+  // On n'utilise PAS s.length > 3 ici pour éviter de classer n'importe quel texte comme inclus
+  if (/\d/.test(s) && !/\b(non|exclu|sans)\b/i.test(s)) return 'included'; // contient un chiffre et pas de mot d'exclusion
+  if (/\b(jusqu'?à|jusqu.a|plafond|forfait|remboursement|capital|rente|indemnit|cotisation|prime|prise\s+en\s+charge)\b/i.test(s)) return 'included';
 
   return 'not_applicable';
 }
@@ -380,14 +389,12 @@ export async function saveCoverageFacts(
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
-          -- Stratégie "meilleur statut gagne" : inclus > optionnel > exclu > non_applicable
-          -- Évite qu'une table secondaire (exclusions, section vide) écrase un statut positif
+          -- Stratégie : la dernière extraction valide l'emporte.
+          -- Exception : not_applicable ne peut pas écraser un statut réel (inclus/optionnel/exclu).
           coverage_status = CASE
-            WHEN coverage_facts.coverage_status = 'included'         THEN 'included'
-            WHEN EXCLUDED.coverage_status      = 'included'         THEN 'included'
-            WHEN coverage_facts.coverage_status = 'optional'         THEN 'optional'
-            WHEN EXCLUDED.coverage_status      = 'optional'         THEN 'optional'
-            WHEN coverage_facts.coverage_status = 'excluded'         THEN EXCLUDED.coverage_status
+            WHEN EXCLUDED.coverage_status = 'not_applicable'
+              AND coverage_facts.coverage_status != 'not_applicable'
+              THEN coverage_facts.coverage_status
             ELSE EXCLUDED.coverage_status
           END,
           source_page_id = EXCLUDED.source_page_id,
@@ -454,12 +461,12 @@ export async function saveUserCoverageFacts(
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
+          -- Stratégie : la dernière extraction valide l'emporte.
+          -- Exception : not_applicable ne peut pas écraser un statut réel.
           coverage_status = CASE
-            WHEN user_coverage_facts.coverage_status = 'included'    THEN 'included'
-            WHEN EXCLUDED.coverage_status             = 'included'    THEN 'included'
-            WHEN user_coverage_facts.coverage_status = 'optional'    THEN 'optional'
-            WHEN EXCLUDED.coverage_status             = 'optional'    THEN 'optional'
-            WHEN user_coverage_facts.coverage_status = 'excluded'    THEN EXCLUDED.coverage_status
+            WHEN EXCLUDED.coverage_status = 'not_applicable'
+              AND user_coverage_facts.coverage_status != 'not_applicable'
+              THEN user_coverage_facts.coverage_status
             ELSE EXCLUDED.coverage_status
           END,
           source_page_id = EXCLUDED.source_page_id,

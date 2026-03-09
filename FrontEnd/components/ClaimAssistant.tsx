@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ShieldAlert, ArrowLeft, ArrowRight, CheckCircle, ClipboardList,
   FileText, AlertTriangle, Loader2, Copy, Check, Trash2,
   ChevronRight, Calendar, Clock, BookOpen, AlertCircle,
-  Shield, Sparkles, RefreshCw, Plus, CircleCheck
+  Shield, Sparkles, RefreshCw, Plus, CircleCheck,
+  MessageCircle, Send, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Policy, User } from '../types';
 import {
@@ -12,6 +13,7 @@ import {
   ClaimContext,
   ClaimAnalysis,
   ClaimAction,
+  ChatMessage,
 } from '../services/claimService';
 
 // ─── Types helpers ────────────────────────────────────────────────────────────
@@ -105,6 +107,13 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
   const [letterContent, setLetterContent] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
 
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   // Form state
   const [selectedPolicyId, setSelectedPolicyId] = useState<number | null>(null);
   const [claimForm, setClaimForm] = useState<Partial<ClaimContext>>({
@@ -129,6 +138,11 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, chatOpen]);
+
   // ── Start new sinistre ──────────────────────────────────────────────────────
   const handleStartNew = () => {
     setCurrentSession(null);
@@ -138,6 +152,8 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
     setCheckedActions(new Set());
     setLetterContent('');
     setEmailSubject('');
+    setChatMessages([]);
+    setChatOpen(false);
     setView('wizard');
   };
 
@@ -147,6 +163,8 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
     setSelectedPolicyId(session.policyId || null);
     setClaimForm(session.claimData || {});
     setLetterContent(session.letterContent || '');
+    setChatMessages(session.messages || []);
+    setChatOpen((session.messages || []).length > 0);
     // Determine wizard step from status
     const stepMap: Record<string, number> = { qualification: 2, analyzing: 3, plan: 4, letter: 5, done: 5 };
     setWizardStep(stepMap[session.status] ?? 2);
@@ -227,6 +245,28 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
     setTimeout(() => setCopiedLetter(false), 2500);
   };
 
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || !currentSession || chatLoading) return;
+    const msg = chatInput.trim();
+    setChatInput('');
+    setChatLoading(true);
+    // Optimistic update
+    const optimistic: ChatMessage = { role: 'user', content: msg, ts: new Date().toISOString() };
+    setChatMessages(prev => [...prev, optimistic]);
+    try {
+      const { messages: updated } = await claimService.chat(currentSession.id, msg);
+      setChatMessages(updated);
+      setCurrentSession(prev => prev ? { ...prev, messages: updated } : null);
+    } catch (err: any) {
+      setChatMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `⚠️ Erreur: ${err.message}`, ts: new Date().toISOString() },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   const toggleAction = (step: number) => {
     setCheckedActions(prev => {
       const next = new Set(prev);
@@ -240,6 +280,91 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
   const dommagesOptions = DOMMAGES_BY_EVENT[claimForm.evenement || ''] || DEFAULT_DOMMAGES;
   const completedActions = checkedActions.size;
   const totalActions = currentSession?.analysis?.actions?.length ?? 0;
+
+  // Chat panel (shown from step 2+ when session exists)
+  const renderChatPanel = () => {
+    if (!currentSession || wizardStep < 2) return null;
+    const unread = chatMessages.length;
+    return (
+      <div className="mt-3 border border-slate-200 rounded-3xl overflow-hidden bg-white shadow-[0_2px_12px_rgba(0,0,0,0.05)]">
+        {/* Toggle header */}
+        <button
+          onClick={() => setChatOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-rose-500" />
+            <span className="font-black text-sm text-slate-800">Questions à l'IA</span>
+            {unread > 0 && (
+              <span className="text-[9px] font-black px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full">
+                {unread} message{unread > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          {chatOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </button>
+
+        {chatOpen && (
+          <div className="border-t border-slate-100">
+            {/* Message list */}
+            <div className="max-h-72 overflow-y-auto p-4 space-y-3 bg-slate-50">
+              {chatMessages.length === 0 ? (
+                <div className="text-center py-6 space-y-2">
+                  <MessageCircle className="w-8 h-8 text-slate-200 mx-auto" />
+                  <p className="text-xs text-slate-400">Posez vos questions sur votre sinistre, vos garanties ou les démarches à suivre</p>
+                </div>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-rose-600 text-white rounded-br-sm'
+                        : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm'
+                    }`}>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <p className={`text-[9px] mt-1 ${
+                        msg.role === 'user' ? 'text-rose-200' : 'text-slate-400'
+                      }`}>
+                        {new Date(msg.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2 shadow-sm">
+                    <Loader2 className="w-3.5 h-3.5 text-rose-500 animate-spin" />
+                    <span className="text-xs text-slate-500">Réflexion en cours…</span>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="flex items-end gap-2 p-3 border-t border-slate-100 bg-white">
+              <textarea
+                rows={2}
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
+                placeholder="Posez une question sur votre sinistre…"
+                className="flex-1 resize-none text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-rose-400"
+              />
+              <button
+                onClick={handleSendChat}
+                disabled={!chatInput.trim() || chatLoading}
+                className="p-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 disabled:opacity-40 transition-colors shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER: History (list of sessions)
@@ -856,6 +981,9 @@ const ClaimAssistant: React.FC<Props> = ({ user, policies }) => {
           </button>
         </div>
       )}
+
+      {/* ── Chat contextuel (visible dès l'étape 2) ──────────────────────── */}
+      {renderChatPanel()}
     </div>
   );
 };

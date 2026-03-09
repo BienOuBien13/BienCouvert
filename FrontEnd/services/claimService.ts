@@ -19,6 +19,12 @@ export interface ClaimContext {
   details?: string;
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  ts: string;
+}
+
 export interface ClaimAction {
   step: number;
   label: string;
@@ -52,6 +58,7 @@ export interface ClaimSession {
   analysis?: ClaimAnalysis;
   actionPlan?: ClaimAction[];
   letterContent?: string;
+  messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
 }
@@ -135,5 +142,13 @@ export const claimService = {
   /** Supprime une session */
   deleteSession: async (id: number): Promise<void> => {
     await apiFetch(`/sinistre/session/${id}`, { method: 'DELETE' });
+  },
+
+  /** Envoie un message et récupère la réponse IA avec historique persisté */
+  chat: async (sessionId: number, message: string): Promise<{ reply: string; messages: ChatMessage[] }> => {
+    return apiFetch(`/sinistre/session/${sessionId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
   },
 };
