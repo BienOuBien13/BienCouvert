@@ -269,6 +269,7 @@ export const AdminView: React.FC = () => {
   });
 
   return (
+    <>
     <div className="max-w-full mx-auto space-y-8 animate-fadeIn pb-20 px-2">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
@@ -790,6 +791,6 @@ export const AdminView: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
