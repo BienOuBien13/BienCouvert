@@ -473,7 +473,7 @@ function App() {
       </header>
 
       <main className="p-4 md:p-8 flex-1">
-        <div className="max-w-xl mx-auto">{renderContent()}</div>
+        <div className={`${activeView === 'admin' || activeView === 'partner' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
       </main>
 
       {/* Overlay détail des garanties d'une formule */}

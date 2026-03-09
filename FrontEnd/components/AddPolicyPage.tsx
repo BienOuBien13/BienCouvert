@@ -514,13 +514,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 }`}
               >
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden"
+                  className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden"
                   style={{ backgroundColor: bgColor }}
                 >
                   <img
                     src={imgUrl}
                     alt={type.labelFr}
-                    className="w-10 h-10 object-contain"
+                    className="w-14 h-14 object-contain"
                     onError={(e) => {
                       // Fallback : masquer l'img et afficher l'icône Lucide
                       const target = e.currentTarget;

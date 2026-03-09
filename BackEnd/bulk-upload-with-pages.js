@@ -1156,7 +1156,7 @@ async function processDocument(row, index, total) {
     let pagesProcessed = 0;
     let tablesFound = 0;
     let factsCreated = 0;
-    const discoveredFormulaLabels = new Set(); // Formules détectées dans les en-têtes de tableaux
+    const discoveredFormulaLabels = new Map(); // label → nb de pages où il apparaît comme en-tête tableau
 
     // Traiter chaque page : texte + canvas image + Vision/texte table + embedding
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
@@ -1234,7 +1234,10 @@ async function processDocument(row, index, total) {
           // Capturer les labels de formules depuis les en-têtes du tableau
           if (tableJson.headers && tableJson.headers.length > 1) {
             tableJson.headers.slice(1).forEach(h => {
-              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+              if (h && h.trim().length > 1) {
+                const label = h.trim();
+                discoveredFormulaLabels.set(label, (discoveredFormulaLabels.get(label) || 0) + 1);
+              }
             });
           }
           // Capturer aussi depuis les clés de formulas dans les rows (Vision)
@@ -1272,7 +1275,6 @@ async function processDocument(row, index, total) {
     // qui peut rater des formules quand le texte pdfjs est incomplet (accents, styling…)
     {
       const geminiFormulas = enrichedMeta.indexedFormulas || [];
-      const visionFormulas = [...discoveredFormulaLabels];
 
       // Filtrer les en-têtes non-formule :
       // - mots de structure du tableau (Garanties, Prestations…)
@@ -1290,8 +1292,12 @@ async function processDocument(row, index, total) {
       };
       // Normalisation : retirer le préfixe "Formule " avant comparaison 
       const canonicalize = (f) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
+      // Noms canoniques trouvés par Gemini texte (pour cross-validation Vision 1 occurrence)
+      const geminiCanonicals = new Set(geminiFormulas.map(canonicalize));
 
-      const cleanVisionFormulas = visionFormulas.filter(f => !isNotFormulaName(f));
+      const cleanVisionFormulas = [...discoveredFormulaLabels.entries()]
+        .filter(([label, count]) => !isNotFormulaName(label) && (count >= 2 || geminiCanonicals.has(canonicalize(label))))
+        .map(([label]) => label);
       const cleanGeminiFormulas = geminiFormulas.filter(f => !isNotFormulaName(f));
 
       // Fusionner : Vision prioritaire, Gemini en complément — dédoublonnage canonique

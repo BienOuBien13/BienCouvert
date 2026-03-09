@@ -311,9 +311,7 @@ export async function vectorizeCgByPages(
     let pagesProcessed = 0;
     let tablesExtracted = 0;
     let factsCreated = 0;
-    const discoveredFormulaLabels = new Set<string>(); // Formules découvertes dans les en-têtes de tableaux Vision
-
-    // Nettoyer un éventuel flag stop résiduel
+    const discoveredFormulaLabels = new Map<string, number>(); // label → nb de pages où il apparaît comme en-tête
     clearStopVectorization(centralCgId);
 
     // Traiter chaque page
@@ -389,7 +387,10 @@ export async function vectorizeCgByPages(
           // Capturer les labels de formules depuis les en-têtes du tableau Vision
           if (table.headers && table.headers.length > 1) {
             table.headers.slice(1).forEach((h: string) => {
-              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+              if (h && h.trim().length > 1) {
+                const label = h.trim();
+                discoveredFormulaLabels.set(label, (discoveredFormulaLabels.get(label) || 0) + 1);
+              }
             });
           }
           
@@ -500,7 +501,12 @@ export async function vectorizeCgByPages(
         };
         const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
 
-        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !isNotFormulaName(f));
+        // Garder les labels Vision qui apparaissent sur ≥2 pages,
+        // OU qui apparaissent sur 1 page mais sont aussi trouvés par Gemini texte
+        const geminiCanonicals = new Set(existingFormulas.map(canonicalize));
+        const cleanVisionFormulas = [...discoveredFormulaLabels.entries()]
+          .filter(([label, count]) => !isNotFormulaName(label) && (count >= 2 || geminiCanonicals.has(canonicalize(label))))
+          .map(([label]) => label);
         const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
 
         // Fusionner : Vision prioritaire, existant en complément (dédoublonnage canonique)
@@ -676,7 +682,7 @@ export async function vectorizeUserCgByPages(
     let pagesProcessed = 0;
     let tablesExtracted = 0;
     let factsCreated = 0;
-    const discoveredFormulaLabels = new Set<string>(); // Formules découvertes dans les en-têtes de tableaux Vision
+    const discoveredFormulaLabels = new Map<string, number>(); // label → nb de pages où il apparaît comme en-tête
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       console.log(`\n📄 [user_cg ${userCgId}] Page ${pageNum}/${numPages}...`);
@@ -718,11 +724,14 @@ export async function vectorizeUserCgByPages(
           // Capturer les labels de formules depuis les en-têtes du tableau Vision
           if (table.headers && table.headers.length > 1) {
             table.headers.slice(1).forEach((h: string) => {
-              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+              if (h && h.trim().length > 1) {
+                const label = h.trim();
+                discoveredFormulaLabels.set(label, (discoveredFormulaLabels.get(label) || 0) + 1);
+              }
             });
           }
 
-          console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties × ${table.headers.length - 1} formules`);
+          console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties, user_cg`);
         } else if (maybeTable) {
           console.log(`   ℹ️ Pas de tableau trouvé par Vision (faux positif maybe-table)`);
         }
@@ -826,7 +835,12 @@ export async function vectorizeUserCgByPages(
         };
         const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
 
-        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !isNotFormulaName(f));
+        // Garder les labels Vision qui apparaissent sur ≥2 pages,
+        // OU qui apparaissent sur 1 page mais sont aussi trouvés par Gemini (existingFormulas)
+        const geminiCanonicals = new Set(existingFormulas.map(canonicalize));
+        const cleanVisionFormulas = [...discoveredFormulaLabels.entries()]
+          .filter(([label, count]) => !isNotFormulaName(label) && (count >= 2 || geminiCanonicals.has(canonicalize(label))))
+          .map(([label]) => label);
         const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
 
         // Fusionner : Vision prioritaire, existant en complément
