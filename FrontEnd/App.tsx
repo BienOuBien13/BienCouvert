@@ -14,6 +14,7 @@ import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
 import PartnerDashboard from './components/PartnerDashboard';
+import ClaimAssistant from './components/ClaimAssistant';
 import { PolicyStats } from './components/PolicyStats';
 import CoverageDetailPage from './components/CoverageDetailPage';
 import Footer from './components/Footer';
@@ -23,7 +24,7 @@ import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { 
-  Database, LogOut, Sparkles, 
+  Database, LogOut, Sparkles, ShieldAlert,
   ArrowRight, CheckCircle2, Search, Zap, MessageSquare,
   Rocket, Target, Flag, Info, Settings, Briefcase
 } from 'lucide-react';
@@ -410,6 +411,8 @@ function App() {
         return <AdminView />;
       case 'partner':
         return <div className="animate-fadeIn"><PartnerDashboard /></div>;
+      case 'sinistre':
+        return <div className="animate-fadeIn"><ClaimAssistant user={user} policies={policies} /></div>;
       default: return null;
     }
   };
@@ -462,6 +465,14 @@ function App() {
              <span className="text-sm font-bold hidden sm:inline">Partenaire</span>
            </button>
            )}
+           <button
+             onClick={() => setActiveView('sinistre')}
+             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'sinistre' ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'}`}
+             title="Assistant Sinistre"
+           >
+             <ShieldAlert className="w-4 h-4" />
+             <span className="text-sm font-bold hidden sm:inline">Sinistre</span>
+           </button>
            <button onClick={() => setActiveView('profile')} className={`p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
              <Settings className="w-5 h-5" />
            </button>
@@ -472,7 +483,7 @@ function App() {
       </header>
 
       <main className="p-4 md:p-8 flex-1">
-        <div className={`${activeView === 'admin' || activeView === 'partner' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
+        <div className={`${activeView === 'admin' || activeView === 'partner' || activeView === 'sinistre' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
       </main>
 
       {/* Overlay détail des garanties d'une formule */}

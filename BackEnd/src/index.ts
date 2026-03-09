@@ -13,6 +13,7 @@ import masterDataRoutes from './routes/masterdata';
 import cgRoutes from './routes/cg';
 import contactRoutes from './routes/contact';
 import partnerRoutes from './routes/partner';
+import sinistreRoutes from './routes/sinistre';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initTelemetry } from './telemetry';
@@ -242,6 +243,7 @@ app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                
 app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // 📄 Conditions Générales avec CSRF
 app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // 📧 Prise de RDV avec CSRF
 app.use('/api/partner', doubleCsrfProtection, partnerRoutes);               // 🤝 Vue partenaire
+app.use('/api/sinistre', doubleCsrfProtection, sinistreRoutes);             // 🛡️ Assistant Sinistre
 
 // ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
 /**

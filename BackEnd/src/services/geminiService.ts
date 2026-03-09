@@ -2204,3 +2204,276 @@ export const generateShareableReport = async (policies: Policy[], findings: any[
     return "J'ai fait mon bilan AssurClair !";
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Assistant Sinistre — Analyse de couverture et génération du plan d'actions
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ClaimContext {
+  typeAssurance: string;
+  evenement: string;
+  dateIncident: string;
+  lieu?: string;
+  tiers: boolean;
+  dommages: string[];
+  urgence: boolean;
+  details?: string;
+}
+
+export interface ClaimAnalysisResult {
+  isCovered: boolean | null;       // null = incertain
+  confidence: 'high' | 'medium' | 'low';
+  franchise?: string;
+  declarationDeadlineDays: number;
+  declarationDeadlineDate: string; // calculé côté front
+  requiredDocs: string[];
+  obligations: string[];
+  actions: Array<{ step: number; label: string; priority: 'urgent' | 'important' | 'normal'; deadline?: string }>;
+  reasoning: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  insurerContact?: string;
+  disclaimer: string;
+}
+
+export interface ClaimLetterResult {
+  letter: string;
+  emailSubject: string;
+}
+
+const CLAIM_RULES: Record<string, { deadlineDays: number; volDeadlineDays: number; docs: string[] }> = {
+  AUTO: {
+    deadlineDays: 5,
+    volDeadlineDays: 2,
+    docs: ['Constat amiable ou rapport de police', 'Photos des dommages', 'Certificat d\'immatriculation', 'Permis de conduire'],
+  },
+  AUT01: {
+    deadlineDays: 5,
+    volDeadlineDays: 2,
+    docs: ['Constat amiable ou rapport de police', 'Photos des dommages', 'Certificat d\'immatriculation', 'Permis de conduire'],
+  },
+  HAB01: {
+    deadlineDays: 5,
+    volDeadlineDays: 2,
+    docs: ['Photos des dommages', 'Rapport artisan ou plombier', 'Factures de réparation', 'Liste des objets endommagés avec estimations'],
+  },
+  SAN01: {
+    deadlineDays: 365,
+    volDeadlineDays: 365,
+    docs: ['Feuille de soins', 'Ordonnance médicale', 'Factures acquittées'],
+  },
+  VIE01: {
+    deadlineDays: 30,
+    volDeadlineDays: 30,
+    docs: ['Certificat médical', 'Arrêt de travail', 'Justificatifs revenus'],
+  },
+  EMP01: {
+    deadlineDays: 30,
+    volDeadlineDays: 30,
+    docs: ['Certificat médical', 'Arrêt de travail', 'Attestation employeur'],
+  },
+  JUR01: {
+    deadlineDays: 30,
+    volDeadlineDays: 30,
+    docs: ['Description détaillée des faits', 'Documents contractuels litigieux', 'Correspondances'],
+  },
+};
+
+const getClaimRules = (typeCode: string) =>
+  CLAIM_RULES[typeCode] || CLAIM_RULES[(typeCode || '').replace(/[0-9]/g, '')] || { deadlineDays: 5, volDeadlineDays: 2, docs: [] };
+
+export const analyzeClaim = async (
+  claimCtx: ClaimContext,
+  policyContext: string,   // résumé ou texte CG de la police
+  policyName: string,
+  insurerName: string,
+  typeCode: string
+): Promise<ClaimAnalysisResult> => {
+  const ai = getAiClient();
+  const rules = getClaimRules(typeCode);
+  const isVol = /vol|theft|stolen/i.test(claimCtx.evenement);
+  const deadlineDays = isVol ? rules.volDeadlineDays : rules.deadlineDays;
+
+  const fallback: ClaimAnalysisResult = {
+    isCovered: null,
+    confidence: 'low',
+    franchise: undefined,
+    declarationDeadlineDays: deadlineDays,
+    declarationDeadlineDate: '',
+    requiredDocs: [...rules.docs, ...getBasicDocs(claimCtx)],
+    obligations: [
+      'Déclarer le sinistre dans les délais contractuels',
+      'Ne pas aggraver les dommages avant expertise',
+      'Conserver tous les documents et justificatifs',
+    ],
+    actions: buildDefaultActions(claimCtx, deadlineDays, rules.docs),
+    reasoning: 'Analyse IA indisponible — se référer aux conditions générales du contrat.',
+    riskLevel: 'medium',
+    disclaimer: '⚠️ Cet assistant est un outil d\'aide à la préparation. Il ne remplace pas les conseils de votre assureur ou d\'un professionnel.',
+  };
+
+  if (!ai) return fallback;
+
+  const prompt = `Tu es un expert en droit des assurances français. Analyse ce sinistre et réponds en JSON strict.
+
+CONTRAT : "${policyName}" chez ${insurerName} (type: ${typeCode})
+INFORMATIONS CONTRAT :
+${policyContext || '(aucune information disponible — base-toi sur les règles générales du marché français)'}
+
+SINISTRE DÉCLARÉ :
+- Événement : ${claimCtx.evenement}
+- Date : ${claimCtx.dateIncident}
+- Lieu : ${claimCtx.lieu || 'non précisé'}
+- Tiers impliqué : ${claimCtx.tiers ? 'Oui' : 'Non'}
+- Dommages : ${claimCtx.dommages.join(', ') || 'non précisés'}
+- Urgence : ${claimCtx.urgence ? 'Oui' : 'Non'}
+- Détails : ${claimCtx.details || 'aucun'}
+
+Réponds UNIQUEMENT en JSON valide, sans markdown ni texte autour :
+{
+  "isCovered": true | false | null,
+  "confidence": "high" | "medium" | "low",
+  "franchise": "montant ou description ou null",
+  "declarationDeadlineDays": ${deadlineDays},
+  "requiredDocs": ["doc1", "doc2", ...],
+  "obligations": ["obligation1", ...],
+  "actions": [
+    {"step": 1, "label": "action claire et concrète", "priority": "urgent" | "important" | "normal", "deadline": "délai optionnel"},
+    ...
+  ],
+  "reasoning": "explication courte et claire pour l'assuré (max 3 phrases)",
+  "riskLevel": "low" | "medium" | "high",
+  "insurerContact": "numéro ou adresse si connu ou null"
+}
+
+Règles :
+- isCovered = null si incertain faute d'information suffisante
+- Limite à 7 actions maximum, ordonnées par priorité
+- reasoning en français, simple, compréhensible par un non-expert
+- Si urgence = true, mettre "Appeler immédiatement le numéro d'urgence de votre assureur" en step 1
+`;
+
+  try {
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'analyzeClaim');
+    const result = await model.generateContent([prompt]);
+    const text = (await result.response).text().trim();
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      isCovered: parsed.isCovered ?? null,
+      confidence: parsed.confidence || 'medium',
+      franchise: parsed.franchise || undefined,
+      declarationDeadlineDays: deadlineDays,
+      declarationDeadlineDate: '',
+      requiredDocs: Array.isArray(parsed.requiredDocs) ? parsed.requiredDocs : rules.docs,
+      obligations: Array.isArray(parsed.obligations) ? parsed.obligations : fallback.obligations,
+      actions: Array.isArray(parsed.actions) ? parsed.actions : fallback.actions,
+      reasoning: parsed.reasoning || fallback.reasoning,
+      riskLevel: parsed.riskLevel || 'medium',
+      insurerContact: parsed.insurerContact || undefined,
+      disclaimer: '⚠️ Cet assistant est un outil d\'aide à la préparation. Il ne remplace pas les conseils de votre assureur ou d\'un professionnel.',
+    };
+  } catch (err) {
+    console.error('[analyzeClaim] JSON parse error:', err);
+    return fallback;
+  }
+};
+
+export const generateClaimLetter = async (
+  claimCtx: ClaimContext,
+  analysis: ClaimAnalysisResult,
+  policyName: string,
+  insurerName: string,
+  userFirstName: string,
+  userLastName: string,
+  userEmail?: string
+): Promise<ClaimLetterResult> => {
+  const ai = getAiClient();
+
+  const dateFr = claimCtx.dateIncident
+    ? new Date(claimCtx.dateIncident).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+    : 'date du sinistre';
+  const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const fallbackLetter = `${userFirstName} ${userLastName}
+${userEmail || ''}
+
+[Ville], le ${today}
+
+Objet : Déclaration de sinistre — Contrat "${policyName}"
+
+Madame, Monsieur,
+
+Je soussigné(e) ${userFirstName} ${userLastName}, titulaire du contrat d'assurance "${policyName}" souscrit auprès de ${insurerName}, ai l'honneur de vous informer d'un sinistre survenu le ${dateFr}.
+
+Nature du sinistre : ${claimCtx.evenement}
+Lieu : ${claimCtx.lieu || 'à préciser'}
+${claimCtx.tiers ? `Un tiers est impliqué dans ce sinistre.` : ''}
+Dommages constatés : ${claimCtx.dommages.join(', ') || 'à décrire'}
+
+${claimCtx.details ? `Circonstances détaillées :\n${claimCtx.details}\n` : ''}
+Je vous transmets ci-joint les justificatifs suivants :
+${analysis.requiredDocs.map(d => `- ${d}`).join('\n')}
+
+Je reste à votre disposition pour tout renseignement complémentaire et vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+${userFirstName} ${userLastName}`;
+
+  if (!ai) {
+    return {
+      letter: fallbackLetter,
+      emailSubject: `Déclaration de sinistre — ${policyName} — ${dateFr}`,
+    };
+  }
+
+  const prompt = `Rédige une lettre de déclaration de sinistre professionnelle en français pour :
+- Assuré : ${userFirstName} ${userLastName}${userEmail ? ` — ${userEmail}` : ''}
+- Assureur : ${insurerName}
+- Contrat : "${policyName}"
+- Sinistre : ${claimCtx.evenement} survenu le ${dateFr}
+- Lieu : ${claimCtx.lieu || 'non précisé'}
+- Tiers impliqué : ${claimCtx.tiers ? 'Oui' : 'Non'}
+- Dommages : ${claimCtx.dommages.join(', ')}
+- Détails : ${claimCtx.details || 'aucun'}
+- Documents joints à mentionner : ${analysis.requiredDocs.join(', ')}
+- Date de rédaction : ${today}
+
+Rédige une lettre formelle complète (courrier postal), prête à envoyer. Inclus un objet clair.
+Réponds en JSON : {"letter": "...", "emailSubject": "..."} — texte plain (pas de markdown dans la lettre).`;
+
+  try {
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'generateClaimLetter');
+    const result = await model.generateContent([prompt]);
+    const text = (await result.response).text().trim();
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      letter: parsed.letter || fallbackLetter,
+      emailSubject: parsed.emailSubject || `Déclaration de sinistre — ${policyName}`,
+    };
+  } catch {
+    return { letter: fallbackLetter, emailSubject: `Déclaration de sinistre — ${policyName} — ${dateFr}` };
+  }
+};
+
+function getBasicDocs(ctx: ClaimContext): string[] {
+  const docs: string[] = [];
+  if (ctx.tiers) docs.push('Coordonnées du tiers impliqué');
+  if (/vol|theft/i.test(ctx.evenement)) docs.push('Dépôt de plainte (récépissé)');
+  if (ctx.urgence) docs.push('Rapport des secours ou pompiers');
+  return docs;
+}
+
+function buildDefaultActions(ctx: ClaimContext, deadlineDays: number, docs: string[]): any[] {
+  const actions = [];
+  let step = 1;
+  if (ctx.urgence) actions.push({ step: step++, label: 'Appeler le numéro d\'urgence de votre assureur', priority: 'urgent', deadline: 'Immédiatement' });
+  actions.push({ step: step++, label: 'Prendre des photos des dommages', priority: 'urgent', deadline: 'Dès que possible' });
+  if (/dégât des eaux|fuite|inondation/i.test(ctx.evenement)) actions.push({ step: step++, label: 'Couper l\'eau et prévenir l\'aggravation', priority: 'urgent', deadline: 'Immédiatement' });
+  if (/vol/i.test(ctx.evenement)) actions.push({ step: step++, label: 'Déposer plainte auprès des forces de l\'ordre', priority: 'urgent', deadline: 'Dans les 24h' });
+  if (ctx.tiers) actions.push({ step: step++, label: 'Récupérer les coordonnées du tiers et établir un constat amiable', priority: 'urgent' });
+  actions.push({ step: step++, label: `Déclarer le sinistre à votre assureur (délai légal : ${deadlineDays} jours ouvrés)`, priority: 'important', deadline: `Sous ${deadlineDays} jours` });
+  if (docs.length > 0) actions.push({ step: step++, label: `Rassembler les pièces justificatives : ${docs.slice(0, 2).join(', ')}${docs.length > 2 ? '…' : ''}`, priority: 'important' });
+  return actions;
+}
+

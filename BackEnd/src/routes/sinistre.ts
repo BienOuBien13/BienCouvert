@@ -1,0 +1,275 @@
+import { Router, Request, Response } from 'express';
+import { query } from '../db';
+import { storage } from '../storage';
+import { analyzeClaim, generateClaimLetter, ClaimContext } from '../services/geminiService';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Routes /api/sinistre — Assistant Sinistre BienCouvert
+// Document-Driven Claim Assistant : qualification → analyse → plan → lettre
+// ─────────────────────────────────────────────────────────────────────────────
+
+const router = Router();
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const mapSessionRow = (row: any) => ({
+  id: row.id,
+  userId: row.user_id,
+  policyId: row.policy_id,
+  status: row.status,
+  title: row.title,
+  claimData: row.claim_data,
+  analysis: row.analysis,
+  actionPlan: row.action_plan,
+  letterContent: row.letter_content,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/sinistre/sessions/:userId
+// Liste toutes les sessions sinistre d'un utilisateur
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/sessions/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const result = await query(
+      `SELECT cs.*, p.metadata->>'name' AS policy_name,
+              p.insurer, p.type AS policy_type
+       FROM claim_sessions cs
+       LEFT JOIN policies p ON p.id = cs.policy_id
+       WHERE cs.user_id = $1
+       ORDER BY cs.updated_at DESC`,
+      [userId]
+    );
+    res.json(result.rows.map(mapSessionRow));
+  } catch (err: any) {
+    console.error('[sinistre] GET sessions error:', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/sinistre/session/:id
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/session/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT cs.*, p.metadata->>'name' AS policy_name, p.insurer, p.type AS policy_type
+       FROM claim_sessions cs
+       LEFT JOIN policies p ON p.id = cs.policy_id
+       WHERE cs.id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+    res.json(mapSessionRow(result.rows[0]));
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/sinistre/sessions
+// Créer une nouvelle session sinistre (étape 1 : qualification)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/sessions', async (req: Request, res: Response) => {
+  try {
+    const { userId, policyId, claimData, title } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const result = await query(
+      `INSERT INTO claim_sessions (user_id, policy_id, claim_data, title, status)
+       VALUES ($1, $2, $3::jsonb, $4, 'qualification')
+       RETURNING *`,
+      [userId, policyId || null, JSON.stringify(claimData || {}), title || 'Nouveau sinistre']
+    );
+    res.status(201).json(mapSessionRow(result.rows[0]));
+  } catch (err: any) {
+    console.error('[sinistre] POST sessions error:', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/sinistre/session/:id
+// Mettre à jour la qualification (claim_data, policy, title, status)
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/session/:id', async (req: Request, res: Response) => {
+  try {
+    const { claimData, policyId, title, status } = req.body;
+    const { id } = req.params;
+
+    const existing = await query('SELECT id FROM claim_sessions WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (claimData !== undefined) { updates.push(`claim_data = $${idx++}::jsonb`); values.push(JSON.stringify(claimData)); }
+    if (policyId !== undefined)  { updates.push(`policy_id = $${idx++}`);          values.push(policyId); }
+    if (title !== undefined)     { updates.push(`title = $${idx++}`);              values.push(title); }
+    if (status !== undefined)    { updates.push(`status = $${idx++}`);             values.push(status); }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'Rien à mettre à jour' });
+
+    values.push(id);
+    const result = await query(
+      `UPDATE claim_sessions SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    res.json(mapSessionRow(result.rows[0]));
+  } catch (err: any) {
+    console.error('[sinistre] PATCH session error:', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/sinistre/session/:id/analyze
+// Analyser le sinistre avec l'IA et sauvegarder le résultat
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/session/:id/analyze', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Charger la session
+    const sessionResult = await query(
+      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type,
+              p.insurer_code, p.insurance_type_code
+       FROM claim_sessions cs
+       LEFT JOIN policies p ON p.id = cs.policy_id
+       WHERE cs.id = $1`,
+      [id]
+    );
+    if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+    const session = sessionResult.rows[0];
+    const claimData: ClaimContext = session.claim_data || {};
+    const policyMeta = session.policy_metadata || {};
+
+    // Construire le contexte du contrat : résumé + formules + options
+    let policyContext = '';
+    const localMeta = policyMeta;
+    if (localMeta.summary) policyContext += `Résumé : ${localMeta.summary}\n`;
+    if (localMeta.indexedFormulas?.length) policyContext += `Formules : ${localMeta.indexedFormulas.join(', ')}\n`;
+    if (localMeta.description) policyContext += `Description : ${localMeta.description}\n`;
+    if (localMeta.name) policyContext += `Contrat : ${localMeta.name}\n`;
+
+    // Chercher le texte de la CG centrale si disponible
+    if (localMeta.centralCgId || localMeta.central_cg_id) {
+      const cgId = localMeta.centralCgId || localMeta.central_cg_id;
+      try {
+        const cgRow = await query(
+          `SELECT content_text, metadata FROM central_cg WHERE id = $1`,
+          [cgId]
+        );
+        if (cgRow.rows[0]?.content_text) {
+          policyContext += `\nExtraits conditions générales :\n${cgRow.rows[0].content_text.slice(0, 4000)}`;
+        }
+      } catch (_) { /* pas bloquant */ }
+    }
+
+    // Mettre à jour en "analyzing"
+    await query(`UPDATE claim_sessions SET status = 'analyzing' WHERE id = $1`, [id]);
+
+    const analysis = await analyzeClaim(
+      claimData,
+      policyContext,
+      localMeta.name || `Contrat #${session.policy_id}`,
+      session.insurer || 'Votre assureur',
+      session.policy_type || claimData.typeAssurance || ''
+    );
+
+    // Calcul date limite déclaration
+    const incidentDate = claimData.dateIncident ? new Date(claimData.dateIncident) : new Date();
+    const deadline = new Date(incidentDate);
+    deadline.setDate(deadline.getDate() + (analysis.declarationDeadlineDays * 1.4)); // jours ouvrés ~ 7/5
+    analysis.declarationDeadlineDate = deadline.toLocaleDateString('fr-FR');
+
+    // Sauvegarder l'analyse
+    await query(
+      `UPDATE claim_sessions SET analysis = $1::jsonb, status = 'plan' WHERE id = $2`,
+      [JSON.stringify(analysis), id]
+    );
+
+    res.json({ analysis });
+  } catch (err: any) {
+    console.error('[sinistre] analyze error:', err.message);
+    // Remettre status precédent si erreur
+    await query(`UPDATE claim_sessions SET status = 'qualification' WHERE id = $1`, [req.params.id]).catch(() => {});
+    res.status(500).json({ error: 'Erreur analyse IA', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/sinistre/session/:id/letter
+// Générer la lettre de déclaration de sinistre
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/session/:id/letter', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    // Charger session + utilisateur
+    const sessionResult = await query(
+      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type
+       FROM claim_sessions cs
+       LEFT JOIN policies p ON p.id = cs.policy_id
+       WHERE cs.id = $1`,
+      [id]
+    );
+    if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+    const session = sessionResult.rows[0];
+
+    if (!session.analysis) return res.status(400).json({ error: 'Analyse requise avant génération lettre' });
+
+    // Charger les infos utilisateur
+    let userFirstName = 'Prénom';
+    let userLastName = 'Nom';
+    let userEmail = '';
+    if (userId) {
+      const users = await storage.readUsers<any>();
+      const usr = users.find((u: any) => String(u.id) === String(userId));
+      if (usr) { userFirstName = usr.firstName; userLastName = usr.lastName; userEmail = usr.email; }
+    }
+
+    const claimData: ClaimContext = session.claim_data || {};
+    const analysis = session.analysis;
+    const policyMeta = session.policy_metadata || {};
+
+    const letterResult = await generateClaimLetter(
+      claimData,
+      analysis,
+      policyMeta.name || `Contrat #${session.policy_id}`,
+      session.insurer || 'Votre assureur',
+      userFirstName,
+      userLastName,
+      userEmail
+    );
+
+    // Sauvegarder la lettre et passer au statut done
+    await query(
+      `UPDATE claim_sessions SET letter_content = $1, status = 'done' WHERE id = $2`,
+      [letterResult.letter, id]
+    );
+
+    res.json(letterResult);
+  } catch (err: any) {
+    console.error('[sinistre] letter error:', err.message);
+    res.status(500).json({ error: 'Erreur génération lettre', details: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/sinistre/session/:id
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/session/:id', async (req: Request, res: Response) => {
+  try {
+    await query('DELETE FROM claim_sessions WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+export default router;
