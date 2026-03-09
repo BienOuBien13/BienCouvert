@@ -235,7 +235,7 @@ export const AdminView: React.FC = () => {
   });
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 animate-fadeIn pb-20">
+    <div className="max-w-full mx-auto space-y-8 animate-fadeIn pb-20 px-2">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter flex items-center gap-3">
@@ -498,7 +498,7 @@ export const AdminView: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full text-left" style={{ minWidth: '1000px' }}>
             <thead>
               <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100">
                 <th className="px-4 py-4">ID</th>

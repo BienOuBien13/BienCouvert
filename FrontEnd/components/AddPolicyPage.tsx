@@ -26,6 +26,7 @@ interface Insurer {
 
 interface CGData {
   id: number;
+  url?: string;
   formules: string[];
   options: {
     [key: string]: string[];
@@ -473,7 +474,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               : 'text-gray-600'
           }`}
         >
-          📋 CG Standards
+          📋 Contrats disponibles centraux
         </button>
         <button
           onClick={() => setMode('custom')}
@@ -483,7 +484,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               : 'text-gray-600'
           }`}
         >
-          📄 CG Personnalisées
+          📄 Ajout de conditions
         </button>
       </div>
 
@@ -572,18 +573,17 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               >
                 <div className="flex items-center gap-3">
                   <div 
-                    className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden bg-white border border-gray-100 shadow-sm"
+                    className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden bg-white border border-gray-100 shadow-sm"
                     style={{ backgroundColor: insurer.logoUrl ? 'white' : insurer.color }}
                   >
                     {insurer.logoUrl ? (
-                      <img src={insurer.logoUrl} alt={insurer.label} className="w-10 h-10 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                      <img src={insurer.logoUrl} alt={insurer.label} className="w-14 h-14 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
                     ) : (
-                      <span className="text-white font-bold text-lg">{insurer.label.substring(0, 2)}</span>
+                      <span className="text-white font-bold text-xl">{insurer.label.substring(0, 2)}</span>
                     )}
                   </div>
                   <div>
                     <h3 className="font-bold text-gray-900">{insurer.label}</h3>
-                    <p className="text-sm text-gray-600">{insurer.fullName}</p>
                   </div>
                 </div>
               </button>
@@ -835,6 +835,22 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           {isNoCgMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
               ℹ️ Aucune Condition Générale trouvée dans le référentiel pour cet assureur/type. Vous pouvez tout de même ajouter le contrat en saisissant votre formule manuellement.
+            </div>
+          )}
+
+          {/* URL des Conditions Générales */}
+          {cgData?.url && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-2">
+              <LinkIcon className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="text-xs text-blue-700 font-medium mr-1">Conditions Générales :</span>
+              <a
+                href={cgData.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 hover:underline truncate"
+              >
+                {cgData.url.replace(/^https?:\/\//, '').substring(0, 60)}{cgData.url.length > 67 ? '…' : ''}
+              </a>
             </div>
           )}
 

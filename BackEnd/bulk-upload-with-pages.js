@@ -45,11 +45,17 @@ function logTokenSummary() {
     totalOut   += s.outputTokens;
     totalCalls += s.calls;
   }
-  // Tarif Gemini 2.5 Flash (estimatif Mars 2026)
-  const costEur = ((totalIn / 1e6) * 0.075 + (totalOut / 1e6) * 0.30) * 0.92;
+  // Tarif Gemini 2.5 Flash (estimatif 2026)
+  // - Input  : $0.075/1M tokens (≤200k tokens par appel ; $0.15/1M au-delà — nos appels sont bien en dessous)
+  // - Output : $0.30/1M tokens
+  // - Note   : pour les appels Vision, les tokens image sont inclus dans promptTokenCount
+  //            (l'API Gemini les reporte déjà dans ce champ, donc la formule est correcte).
+  // - Taux EUR/USD : 0.92 (approximation mars 2026 — à ajuster selon le cours réel)
+  const costUsd = (totalIn / 1e6) * 0.075 + (totalOut / 1e6) * 0.30;
+  const costEur = costUsd * 0.92;
   log(`   ─────────────────────────────────────────────────`);
   log(`   TOTAL : ${totalCalls} appels — in=${totalIn.toLocaleString()} out=${totalOut.toLocaleString()} tokens`);
-  log(`   Coût estimé : ${costEur.toFixed(4)} EUR (tarif Flash 2.5)`);
+  log(`   Coût estimé : $${costUsd.toFixed(4)} USD ≈ ${costEur.toFixed(4)} EUR (tarif Flash 2.5, taux 0.92)`);
   log('');
 }
 const { Pool } = pkg;

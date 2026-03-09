@@ -56,6 +56,48 @@ const upload = multer({
 });
 
 // -----------------------------------------------------------------------------
+// Utilitaire : dédoublonner et nettoyer la liste des formules
+// - Dédoublonnage insensible à la casse
+// - Si des formules sémantiques (non-génériques) coexistent avec des entrées
+//   de type "FORMULE 1 / 2 / 3" ou "F1/F2...", on garde uniquement les sémantiques.
+// - On retire aussi les entrées trop longues qui ressemblent à des phrases
+//   (probablement du texte extrait par erreur, genre "Standard / Autres Formules")
+//   quand des noms courts existent.
+// -----------------------------------------------------------------------------
+function deduplicateFormulas(rawFormulas: string[]): string[] {
+  if (!rawFormulas || rawFormulas.length === 0) return [];
+
+  // 1. Dédoublonnage case-insensitive tout en gardant l'ordre et la casse d'origine
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const f of rawFormulas) {
+    const key = f.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      deduped.push(f.trim());
+    }
+  }
+
+  // 2. Séparer les formules génériques (FORMULE 1, F1, Formule n°2 …)
+  //    des formules sémantiques (Économique, Tiers, Tous Risques, Confort …)
+  const isGeneric = (f: string) =>
+    /^formule\s*\d+$/i.test(f) ||
+    /^f\s*\d+$/i.test(f) ||
+    /^formule\s+n[°o]?\s*\d+$/i.test(f) ||
+    /^formule\s+\d+\s*\//i.test(f);
+
+  const genericOnes  = deduped.filter(f => isGeneric(f));
+  const semanticOnes = deduped.filter(f => !isGeneric(f));
+
+  // Si on a des noms sémantiques, on jette les génériques
+  if (semanticOnes.length > 0 && genericOnes.length > 0) {
+    return semanticOnes;
+  }
+
+  return deduped;
+}
+
+// -----------------------------------------------------------------------------
 // GET /api/cg/central/by-type-and-insurer
 // Récupère la CG principale (document_type_code = 'CG') depuis central_cg
 // pour un type, un assureur, et optionnellement un sous-type.
@@ -129,7 +171,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       version: cg.version,
       detail: cg.detail,
       url: cg.url,
-      formules: cg.metadata?.formules || cg.metadata?.indexedFormulas || [],
+      formules: deduplicateFormulas(cg.metadata?.indexedFormulas || cg.metadata?.formules || []),
       options: (() => {
         const rawOpts = cg.metadata?.options || cg.metadata?.indexedOptions || {};
         if (Array.isArray(rawOpts)) {
