@@ -488,17 +488,28 @@ export async function vectorizeCgByPages(
         const currentMeta = metaResult.rows[0]?.metadata || {};
         const existingFormulas: string[] = currentMeta.indexedFormulas || currentMeta.formules || [];
 
-        // Filtrer les en-têtes génériques non-formule
-        const nonFormulaHeaders = /^(garanties?|prestations?|coverage|guarantee|nature|objet)$/i;
-        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !nonFormulaHeaders.test(f.trim()));
+        // Filtrer les en-têtes non-formule (zones géo, catégories, trop long, combos slash)
+        const isNotFormulaName = (f: string): boolean => {
+          const s = f.trim();
+          if (s.length < 2 || s.length > 55) return true;
+          if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
+          if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
+          if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
+          if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+          return false;
+        };
+        const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
 
-        // Fusionner : Vision prioritaire, existant en complément (dédoublonnage insensible casse)
-        const seen = new Set<string>();
+        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !isNotFormulaName(f));
+        const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
+
+        // Fusionner : Vision prioritaire, existant en complément (dédoublonnage canonique)
+        const seen = new Map<string, boolean>();
         const allFormulas: string[] = [];
-        for (const f of [...cleanVisionFormulas, ...existingFormulas]) {
-          const key = f.trim().toLowerCase();
+        for (const f of [...cleanVisionFormulas, ...cleanExisting]) {
+          const key = canonicalize(f);
           if (key.length > 1 && !seen.has(key)) {
-            seen.add(key);
+            seen.set(key, true);
             allFormulas.push(f.trim());
           }
         }
@@ -803,17 +814,28 @@ export async function vectorizeUserCgByPages(
         const currentMeta = metaResult.rows[0]?.metadata || {};
         const existingFormulas: string[] = currentMeta.formules || currentMeta.indexedFormulas || [];
 
-        // Filtrer les en-têtes génériques non-formule
-        const nonFormulaHeaders = /^(garanties?|prestations?|coverage|guarantee|nature|objet)$/i;
-        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !nonFormulaHeaders.test(f.trim()));
+        // Filtrer les en-têtes non-formule (zones géo, catégories, trop long, combos slash)
+        const isNotFormulaName = (f: string): boolean => {
+          const s = f.trim();
+          if (s.length < 2 || s.length > 55) return true;
+          if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
+          if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
+          if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
+          if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+          return false;
+        };
+        const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
+
+        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !isNotFormulaName(f));
+        const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
 
         // Fusionner : Vision prioritaire, existant en complément
-        const seen = new Set<string>();
+        const seen = new Map<string, boolean>();
         const allFormulas: string[] = [];
-        for (const f of [...cleanVisionFormulas, ...existingFormulas]) {
-          const key = f.trim().toLowerCase();
+        for (const f of [...cleanVisionFormulas, ...cleanExisting]) {
+          const key = canonicalize(f);
           if (key.length > 1 && !seen.has(key)) {
-            seen.add(key);
+            seen.set(key, true);
             allFormulas.push(f.trim());
           }
         }

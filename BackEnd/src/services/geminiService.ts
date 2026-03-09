@@ -2022,11 +2022,16 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
 
 Extrais du texte :
-1. Les formules commerciales mentionnées.
-   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
-   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
-   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
-   Cherche dans TOUT le texte, y compris les titres de colonnes et en-têtes de sections.
+1. Les formules commerciales du contrat (les niveaux de couverture vendus par l'assureur).
+   RÈGLES STRICTES — une formule est un EN-TÊTE DE COLONNE dans le tableau principal des garanties :
+   • Exemples valides : Économique, Élargie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver
+   • NOMS COURTS : 1 à 5 mots maximum.
+   • Si la formule s'appelle "Formule Économique", retourne "Économique" (sans le préfixe "Formule").
+   • EXCLURE absolument : zones géographiques (France métropolitaine, Monaco, Corse, DROM, COM…)
+   • EXCLURE : catégories produit ou segments clients (Appareils neufs, reconditionnés, Individu, Famille…)
+   • EXCLURE : noms de garanties = lignes du tableau (Responsabilité Civile, Vol, Incendie, Bris de glace…)
+   • EXCLURE : combinaisons avec "/" (ex : "Éco/Éq/Confort", "Standard / Autres Formules")
+   • MAXIMUM 8 formules. En cas de doute, ne PAS inclure l'élément. Tableau vide [] si aucune formule certaine.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
@@ -2034,7 +2039,7 @@ Si une information n'est pas présente, laisse le tableau vide ou indique "Non s
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
-  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedFormulas": ["Économique", "Confort"],
   "indexedOptions": ["Option 1", "Option 2"],
   "semanticSummary": "Résumé des garanties principales..."
 }
@@ -2095,12 +2100,17 @@ ${contentText.slice(0, 25000)}`;
 
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu réel du document PDF fourni. N'invente AUCUNE information.
 
-Extrais du document : 
-1. Les formules commerciales mentionnées.
-   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
-   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
-   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
-   Cherche dans TOUT le document, y compris les titres de colonnes et en-têtes de tableaux.
+Extrais du document :
+1. Les formules commerciales du contrat (les niveaux de couverture vendus par l'assureur).
+   RÈGLES STRICTES — une formule est un EN-TÊTE DE COLONNE dans le tableau principal des garanties :
+   • Exemples valides : Économique, Élargie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver
+   • NOMS COURTS : 1 à 5 mots maximum.
+   • Si la formule s'appelle "Formule Économique", retourne "Économique" (sans le préfixe "Formule").
+   • EXCLURE absolument : zones géographiques (France métropolitaine, Monaco, Corse, DROM, COM…)
+   • EXCLURE : catégories produit ou segments clients (Appareils neufs, reconditionnés, Individu, Famille…)
+   • EXCLURE : noms de garanties = lignes du tableau (Responsabilité Civile, Vol, Incendie, Bris de glace…)
+   • EXCLURE : combinaisons avec "/" (ex : "Éco/Éq/Confort", "Standard / Autres Formules")
+   • MAXIMUM 8 formules. En cas de doute, ne PAS inclure l'élément. Tableau vide [] si aucune formule certaine.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
@@ -2108,7 +2118,7 @@ Si une information n'est pas présente dans le document, laisse le tableau vide 
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
-  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedFormulas": ["Économique", "Confort"],
   "indexedOptions": ["Option 1", "Option 2"],
   "semanticSummary": "Résumé des garanties principales..."
 }`;

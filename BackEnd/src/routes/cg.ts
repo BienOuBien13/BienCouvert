@@ -56,40 +56,81 @@ const upload = multer({
 });
 
 // -----------------------------------------------------------------------------
-// Utilitaire : dédoublonner et nettoyer la liste des formules
-// - Dédoublonnage insensible à la casse
-// - Si des formules sémantiques (non-génériques) coexistent avec des entrées
-//   de type "FORMULE 1 / 2 / 3" ou "F1/F2...", on garde uniquement les sémantiques.
-// - On retire aussi les entrées trop longues qui ressemblent à des phrases
-//   (probablement du texte extrait par erreur, genre "Standard / Autres Formules")
-//   quand des noms courts existent.
+// Utilitaire partagé : nettoyer et dédoublonner une liste de formules issues de
+// l'extraction IA (Gemini texte, Gemini Vision, bulk-upload, admin, user CP).
+//
+// Problèmes fréquents traités ici :
+//  1. Doublons sémantiques : "Formule Économique" + "Économique" → garder "Économique"
+//  2. Zones géographiques captées par erreur : "France métropolitaine", "Monaco"…
+//  3. Entrées trop longues (phrases, descriptions, "RC Résidence principale (RP) ou RS")
+//  4. Combinaisons multi-slash : "Éco/Éq/Confort", "Standard / Autres Formules"
+//  5. Formules génériques (FORMULE 1/2/3) cohabitant avec noms sémantiques
+//  6. Catégories de produits : "Appareils neufs", "Appareils reconditionnés"…
 // -----------------------------------------------------------------------------
-function deduplicateFormulas(rawFormulas: string[]): string[] {
-  if (!rawFormulas || rawFormulas.length === 0) return [];
 
-  // 1. Dédoublonnage case-insensitive tout en gardant l'ordre et la casse d'origine
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const f of rawFormulas) {
-    const key = f.trim().toLowerCase();
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      deduped.push(f.trim());
-    }
-  }
+/** Retourne true si l'entrée n'est clairement PAS un nom de formule commerciale. */
+function isNotAFormulaName(f: string): boolean {
+  const s = f.trim();
+  // Entrée vide ou trop courte
+  if (s.length < 2) return true;
+  // Trop long → phrase/description, pas un nom de formule (seuil : 55 caractères)
+  if (s.length > 55) return true;
+  // Mots-clés de structure de tableau
+  if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
+  // Zones géographiques (présence dans la chaîne, pas seulement en recherche exacte)
+  if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|dom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|nouvelle[\s-]?z[eé]lande|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
+  // Catégories produits ou segments clients (pas des formules)
+  if (/\b(appareils?\s+(?:neufs?|reconditionnés?)|individu\b|famille\b)\b/i.test(s)) return true;
+  // Combinaisons multi-slash (3 segments ou plus = combo de formules, pas une formule unique)
+  if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+  return false;
+}
 
-  // 2. Séparer les formules génériques (FORMULE 1, F1, Formule n°2 …)
-  //    des formules sémantiques (Économique, Tiers, Tous Risques, Confort …)
-  const isGeneric = (f: string) =>
+/** Forme canonique pour détecter les doublons avec/sans préfixe "Formule". */
+function canonicalizeFormula(f: string): string {
+  return f.trim()
+    .replace(/^formules?\s+/i, '')   // Strip "Formule " / "Formules " prefix
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+/** Retourne true si la formule est générique (Formule 1, F1, Formule n°2…). */
+function isGenericFormulaName(f: string): boolean {
+  return (
     /^formule\s*\d+$/i.test(f) ||
     /^f\s*\d+$/i.test(f) ||
     /^formule\s+n[°o]?\s*\d+$/i.test(f) ||
-    /^formule\s+\d+\s*\//i.test(f);
+    /^formule\d+$/i.test(f)
+  );
+}
 
-  const genericOnes  = deduped.filter(f => isGeneric(f));
-  const semanticOnes = deduped.filter(f => !isGeneric(f));
+function deduplicateFormulas(rawFormulas: string[]): string[] {
+  if (!rawFormulas || rawFormulas.length === 0) return [];
 
-  // Si on a des noms sémantiques, on jette les génériques
+  // 1. Nettoyer les entrées invalides (géographie, trop long, catégories…)
+  const cleaned = rawFormulas.map(f => f.trim()).filter(f => !isNotAFormulaName(f));
+
+  // 2. Regrouper par forme canonique — préférer la version SANS préfixe "Formule "
+  const byCanon = new Map<string, string[]>();
+  for (const f of cleaned) {
+    const key = canonicalizeFormula(f);
+    if (!byCanon.has(key)) byCanon.set(key, []);
+    byCanon.get(key)!.push(f);
+  }
+  const deduped: string[] = [];
+  for (const variants of byCanon.values()) {
+    if (variants.length === 1) {
+      deduped.push(variants[0]);
+    } else {
+      // Parmi les doublons, préférer celui sans préfixe "Formule " (plus court/simple)
+      const withoutPrefix = variants.filter(v => !/^formules?\s+/i.test(v));
+      deduped.push(withoutPrefix.length > 0 ? withoutPrefix[0] : variants[0]);
+    }
+  }
+
+  // 3. Supprimer les génériques (Formule 1, F1…) si des noms sémantiques existent
+  const genericOnes  = deduped.filter(f => isGenericFormulaName(f));
+  const semanticOnes = deduped.filter(f => !isGenericFormulaName(f));
   if (semanticOnes.length > 0 && genericOnes.length > 0) {
     return semanticOnes;
   }
@@ -299,7 +340,7 @@ router.get('/central/documents', async (req: Request, res: Response) => {
       detail: row.detail,
       url: row.url,
       target_filename: row.target_filename,
-      formules: row.metadata?.formules || row.metadata?.indexedFormulas || [],
+      formules: deduplicateFormulas(row.metadata?.indexedFormulas || row.metadata?.formules || []),
       resume_court: row.metadata?.resume_court || row.metadata?.description || '',
       insurer_name: row.metadata?.insurer_name || '',
       insurance_type_name: row.metadata?.insurance_type_name || ''
@@ -608,12 +649,16 @@ Extrais et structure les informations suivantes au format JSON strict (pas de ma
   "resume_court": "résumé en 2-3 phrases des garanties principales"
 }
 
-ATTENTION pour les formules :
-- Les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
-- Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
-  Tiers Essentiel, Tiers Confort, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
-- Cherche dans TOUT le texte, y compris les titres de colonnes, en-têtes de tableaux et sections.
-- Ne confonds PAS les noms de garanties (lignes) avec les noms de formules (colonnes).
+ATTENTION pour les formules \u2014 R\u00c8GLES STRICTES :
+- Une formule = EN-T\u00caTE DE COLONNE du tableau principal des garanties.
+- Exemples valides : \u00c9conomique, \u00c9largie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver.
+- NOMS COURTS : 1 \u00e0 5 mots maximum.
+- Si la formule s'appelle "Formule \u00c9conomique", retourne "\u00c9conomique" (sans le pr\u00e9fixe "Formule").
+- EXCLURE absolument : zones g\u00e9ographiques (France m\u00e9tropolitaine, Monaco, Corse, DROM, COM\u2026)
+- EXCLURE : cat\u00e9gories produit ou segments clients (Appareils neufs, reconditionn\u00e9s, Individu, Famille\u2026)
+- EXCLURE : noms de garanties = lignes du tableau (Responsabilit\u00e9 Civile, Vol, Incendie, Bris de glace\u2026)
+- EXCLURE : combinaisons avec "/" (ex : "\u00c9co/\u00c9q/Confort", "Standard / Autres Formules")
+- MAXIMUM 8 formules. En cas de doute, ne PAS inclure. Tableau vide [] si aucune formule certaine.
 
 Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 

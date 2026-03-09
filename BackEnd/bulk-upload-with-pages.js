@@ -723,16 +723,21 @@ async function extractEnrichedMetadataBulk(text, insurerCode, insuranceTypeCode)
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
 
 Extrais du texte :
-1. Les formules commerciales mentionnées.
-   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
-   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
-   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, etc.
-   Cherche dans TOUT le texte, y compris les titres de colonnes et en-têtes de sections.
+1. Les formules commerciales du contrat (les niveaux de couverture vendus par l'assureur).
+   RÈGLES STRICTES — une formule est un EN-TÊTE DE COLONNE dans le tableau principal des garanties :
+   • Exemples valides : Économique, Élargie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver
+   • NOMS COURTS : 1 à 5 mots maximum.
+   • Si la formule s'appelle "Formule Économique", retourne "Économique" (sans le préfixe "Formule").
+   • EXCLURE absolument : zones géographiques (France métropolitaine, Monaco, Corse, DROM, COM…)
+   • EXCLURE : catégories produit ou segments clients (Appareils neufs, reconditionnés, Individu, Famille…)
+   • EXCLURE : noms de garanties = lignes du tableau (Responsabilité Civile, Vol, Incendie, Bris de glace…)
+   • EXCLURE : combinaisons avec "/" (ex : "Éco/Éq/Confort", "Standard / Autres Formules")
+   • MAXIMUM 8 formules. En cas de doute, ne PAS inclure l'élément. Tableau vide [] si aucune formule certaine.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
 Réponds UNIQUEMENT en JSON strict, sans texte ni markdown supplémentaire :
-{"indexedFormulas":["Formule 1","Formule 2"],"indexedOptions":["Option 1"],"semanticSummary":"Résumé..."}
+{"indexedFormulas":["Économique","Confort"],"indexedOptions":["Option 1"],"semanticSummary":"Résumé..."}
 
 Texte (tronqué à 25 000 chars) :
 ${text.slice(0, 25000)}`;
@@ -1269,26 +1274,42 @@ async function processDocument(row, index, total) {
       const geminiFormulas = enrichedMeta.indexedFormulas || [];
       const visionFormulas = [...discoveredFormulaLabels];
 
-      // Filtrer les en-têtes génériques non-formule ("Garanties", "Garantie", "Prestations"…)
-      const nonFormulaHeaders = /^(garantie|garanties|prestations?|coverage|guarantee|nature|objet)$/i;
-      const cleanVisionFormulas = visionFormulas.filter(f => !nonFormulaHeaders.test(f.trim()));
+      // Filtrer les en-têtes non-formule :
+      // - mots de structure du tableau (Garanties, Prestations…)
+      // - zones géographiques (France métropol, Monaco, DROM, Corse…)
+      // - entrées trop longues (> 55 car.) = descriptions
+      // - combinaisons multi-slash (Éco/Éq/Confort, ...)
+      const isNotFormulaName = (f) => {
+        const s = f.trim();
+        if (s.length < 2 || s.length > 55) return true;
+        if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
+        if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
+        if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
+        if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+        return false;
+      };
+      // Normalisation : retirer le préfixe "Formule " avant comparaison 
+      const canonicalize = (f) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
 
-      // Fusionner : Vision prioritaire, Gemini en complément (dédoublonnage insensible casse)
-      const seen = new Set();
+      const cleanVisionFormulas = visionFormulas.filter(f => !isNotFormulaName(f));
+      const cleanGeminiFormulas = geminiFormulas.filter(f => !isNotFormulaName(f));
+
+      // Fusionner : Vision prioritaire, Gemini en complément — dédoublonnage canonique
+      const seen = new Map(); // canonical key -> preferred label
       const allFormulas = [];
-      for (const f of [...cleanVisionFormulas, ...geminiFormulas]) {
-        const key = f.trim().toLowerCase();
+      for (const f of [...cleanVisionFormulas, ...cleanGeminiFormulas]) {
+        const key = canonicalize(f);
         if (key.length > 1 && !seen.has(key)) {
-          seen.add(key);
+          seen.set(key, f.trim());
           allFormulas.push(f.trim());
         }
       }
 
       if (allFormulas.length > 0) {
-        log(`  🔄 Mise à jour indexedFormulas: ${allFormulas.length} formules (${cleanVisionFormulas.length} Vision + ${geminiFormulas.length} Gemini, dédoublonné)`);
-        log(`     Vision: [${cleanVisionFormulas.join(', ')}]`);
-        log(`     Gemini: [${geminiFormulas.join(', ')}]`);
-        log(`     Final:  [${allFormulas.join(', ')}]`);
+        log(`  🔄 Mise à jour indexedFormulas: ${allFormulas.length} formules (${cleanVisionFormulas.length} Vision + ${cleanGeminiFormulas.length} Gemini filtrés, dédoublonné)`);
+        log(`     Vision (filtré): [${cleanVisionFormulas.join(', ')}]`);
+        log(`     Gemini (filtré): [${cleanGeminiFormulas.join(', ')}]`);
+        log(`     Final:           [${allFormulas.join(', ')}]`);
         try {
           await pool.query(
             `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
@@ -1296,8 +1317,9 @@ async function processDocument(row, index, total) {
           );
           log(`  ✅ indexedFormulas mis à jour: ${allFormulas.join(', ')}`);
         } catch (fErr) { log(`  ⚠️  Mise à jour indexedFormulas (non bloquant): ${fErr.message}`); }
-      } else if (geminiFormulas.length > 0) {
-        log(`  ℹ️  indexedFormulas from Gemini only: [${geminiFormulas.join(', ')}]`);
+      } else if (cleanGeminiFormulas.length > 0 || geminiFormulas.length > 0) {
+        // Tous filtrés ou aucun passé — log uniquement
+        log(`  ⚠️  Aucune formule retenue après filtrage (Vision: ${cleanVisionFormulas.length}, Gemini brut: ${geminiFormulas.length})`);
       } else {
         log(`  ⚠️  Aucune formule détectée (ni Vision, ni Gemini)`);
       }
