@@ -558,13 +558,20 @@ ${text.substring(0, 50000)}
 Extrais et structure les informations suivantes au format JSON strict (pas de markdown, juste le JSON) :
 
 {
-  "formules": ["liste des formules/niveaux de garantie proposés, ex: Tiers, Intermédiaire, Tous risques"],
+  "formules": ["liste des formules/niveaux de garantie proposés"],
   "options": {
     "formule1": ["options spécifiques à cette formule"],
     "toutes_formules": ["options communes à toutes les formules"]
   },
   "resume_court": "résumé en 2-3 phrases des garanties principales"
 }
+
+ATTENTION pour les formules :
+- Les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
+- Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
+  Tiers Essentiel, Tiers Confort, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
+- Cherche dans TOUT le texte, y compris les titres de colonnes, en-têtes de tableaux et sections.
+- Ne confonds PAS les noms de garanties (lignes) avec les noms de formules (colonnes).
 
 Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 

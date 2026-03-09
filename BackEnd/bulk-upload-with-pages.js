@@ -197,28 +197,70 @@ async function extractAllPagesByGemini(pdfBuffer, pageCount) {
 }
 
 /**
- * Détecte si une page contient un tableau de garanties
+ * Détecte si une page contient un tableau de garanties.
+ * Logique alignée sur detectTable() de pageVectorizationService.ts
+ * pour une détection robuste identique entre bulk-upload et Admin.
  */
 function detectTableInPage(pageText) {
-  const tableKeywords = [
-    'garanties',
-    'formule',
-    'option',
-    'couverture',
-    'inclus',
-    'exclu',
-    'franchise',
-    'plafond',
-    'tiers',
-    'tous risques',
-    'intermédiaire'
-  ];
-  
-  const lowerText = pageText.toLowerCase();
-  const keywordCount = tableKeywords.filter(keyword => lowerText.includes(keyword)).length;
-  
-  // Si au moins 3 mots-clés sont présents, on considère qu'il y a probablement un tableau
-  return keywordCount >= 3;
+  const text = pageText;
+  const t = text.toLowerCase();
+
+  // ── Colonnes de formules (noms de formules / niveaux / options) ──
+  const hasFormulas =
+    // Auto : tiers, tous risques, confort, etc.
+    /tiers[\s-]*(eco|essentiel|\+)?|tous[\s-]*risques|leasing|confort|int[eé]gral|pl[eé]nitude/i.test(text)
+    // Habitation : formule 1/2/3, essentiel, premium, intégral
+    || /formule\s*\d|formule\s+[a-z]/i.test(text)
+    || /niveau\s*\d|option\s*\d|pack\s/i.test(text)
+    || /\bessentiel\b|\bconfort\b|\bpremium\b|\boptimum\b|\bzenith\b|\bs[eé]r[eé]nit[eé]\b/i.test(text)
+    // Bancaire / protection
+    || /bourso\s*protect|visa\s|mastercard|formule\s*(plus|\+)/i.test(text)
+    // Santé, prévoyance
+    || /\bbase\b.*\brenforcé|\brenforcé\b.*\bbase\b|\bsurcompl[eé]mentaire\b/i.test(text)
+    // Générique : bronze/silver/gold, économique/standard/premium, protectrice, élargie
+    || /bronze|silver|gold|platinum|standard|[eé]conomique|[eé]largie|protectrice/i.test(text)
+    // Au moins 2 colonnes nommées
+    || (text.match(/formule/gi) || []).length >= 2;
+
+  // ── Lignes de garanties ──
+  const hasGuarantees =
+    /responsabilit[eé]|bris[\s-]*de[\s-]*glac|vitrage|pare[\s-]*brise/i.test(text)
+    || /\bvol\b|incendie|dommages|assistance|conducteur/i.test(text)
+    || /d[eé]g[aâ]ts?\s*des\s*eaux|catastrophe|tempête|grêle|neige|foudre/i.test(text)
+    || /serrurerie|plomberie|[eé]lectricit[eé]|chauffage/i.test(text)
+    || /d[eé]pannage|relogement|gardiennage|objets\s*de\s*valeur/i.test(text)
+    || /protection.*paiement|moyens?\s*de\s*paiement|vol\s*d.esp[eè]ces/i.test(text)
+    || /cl[eé]s|papiers|maroquinerie|spectacle|voyage/i.test(text)
+    || /hospitalisation|optique|dentaire|consultation|m[eé]decine/i.test(text)
+    || /garantie|couverture|franchise|plafond|sinistre/i.test(text);
+
+  // ── Symboles visuels OR mots-clés de statut ──
+  const hasSymbols =
+    /[\u2713\u2714\u25cb\u25cf\u2022\u2717\u2718\u00d7\u25a0\u25a1\u25aa\u25ab\u25c6\u25c7\u25b3]/g.test(text)
+    || /\b(inclus|option|exclu|oui|non|garanti|non garanti)\b/i.test(text);
+
+  // ── Structure tabulaire ──
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  const hasMultipleLines = lines.length > 5;
+  const hasTableStructure = lines.filter(l => l.trim().length < 80).length > 8;
+
+  // Détection principale : formules + garanties + (symboles OU structure)
+  if (hasFormulas && hasGuarantees && (hasSymbols || hasMultipleLines)) return true;
+  // Détection secondaire : beaucoup de garanties + structure tabulaire
+  if (hasGuarantees && hasTableStructure && hasSymbols) return true;
+  // Détection tertiaire : légende explicite
+  if (/l[eé]gende|symbole.*:|correspond/i.test(text) && hasGuarantees) return true;
+
+  return false;
+}
+
+/**
+ * Détection secondaire : pages avec mots-clés de garantie → tenter Vision
+ * même si pas sûr (identique à maybeTable dans pageVectorizationService.ts)
+ */
+function detectMaybeTable(pageText) {
+  return /garantie|formule|couverture|franchise|plafond/i.test(pageText)
+    && pageText.split('\n').filter(l => l.trim().length > 0).length > 8;
 }
 
 /**
@@ -675,15 +717,19 @@ async function extractEnrichedMetadataBulk(text, insurerCode, insuranceTypeCode)
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
 
 Extrais du texte :
-1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+1. Les formules commerciales mentionnées.
+   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
+   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
+   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, etc.
+   Cherche dans TOUT le texte, y compris les titres de colonnes et en-têtes de sections.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
 Réponds UNIQUEMENT en JSON strict, sans texte ni markdown supplémentaire :
 {"indexedFormulas":["Formule 1","Formule 2"],"indexedOptions":["Option 1"],"semanticSummary":"Résumé..."}
 
-Texte (tronqué à 12 000 chars) :
-${text.slice(0, 12000)}`;
+Texte (tronqué à 25 000 chars) :
+${text.slice(0, 25000)}`;
 
     const result = await model.generateContent([{ text: prompt }]);
     recordTokens('metadataExtraction', result?.response?.usageMetadata);
@@ -1121,23 +1167,26 @@ async function processDocument(row, index, total) {
           }
         } catch (embErr) { log(`      ⚠️  Embedding p.${pageNum}: ${embErr.message}`); }
         
-        // Détection tableau
+        // Détection tableau (logique alignée sur pageVectorizationService.ts)
         const hasTable = detectTableInPage(contentText);
+        const maybeTable = !hasTable && detectMaybeTable(contentText);
         let tableJson = null, confidence = 0.0, tableIsVision = false;
         
-        if (hasTable) {
+        if (hasTable || maybeTable) {
           if (imageBase64) {
             // Vision extraction — identique Admin (plus précise)
-            log(`      📊 Tableau détecté, extraction Vision (image)...`);
+            log(`      📊 ${hasTable ? 'Tableau détecté' : 'Possible tableau'}, extraction Vision (image)...`);
             tableJson = await extractTableFromPageVision(imageBase64, row.Insurer, row.Insurance_type);
             if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
               confidence = tableJson.confidence || 0;
               tablesFound++;
               tableIsVision = true;
               log(`      ✅ Vision: ${tableJson.rows.length} garanties`);
+            } else if (maybeTable) {
+              log(`      ℹ️ Pas de tableau trouvé par Vision (faux positif maybe-table)`);
             }
           }
-          if (!tableJson) {
+          if (!tableJson && hasTable) {
             // Fallback texte si image indisponible ou Vision insuffisante
             log(`      🔍 Fallback extraction texte...`);
             tableJson = await extractTableFromPageText(contentText, row.Insurer, row.Insurance_type);
@@ -1177,6 +1226,15 @@ async function processDocument(row, index, total) {
               if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
             });
           }
+          // Capturer aussi depuis les clés de formulas dans les rows (Vision)
+          if (tableJson._isVision || tableIsVision) {
+            (tableJson.rows || []).forEach(r => {
+              if (r && r.formulas && typeof r.formulas === 'object') {
+                // Les clés sont normalisées, utiliser plutôt les en-têtes originaux
+                // Mais si headers ne contient pas assez d'info, extraire depuis formulas
+              }
+            });
+          }
           const facts = tableIsVision
             ? tableToFactsVision(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type)
             : tableToFacts(tableJson, cgId, pageId, pageNum, row.Insurer, row.Insurance_type);
@@ -1198,15 +1256,33 @@ async function processDocument(row, index, total) {
     log(`     - ${tablesFound} tableaux extraits`);
     log(`     - ${factsCreated} faits de couverture créés`);
 
-    // Mettre à jour indexedFormulas si des formules ont été détectées dans les tableaux
-    // (enrichedMeta ne lit que les 12 000 premiers chars ; les formules peuvent être à la page 10-20)
-    if (discoveredFormulaLabels.size > 0) {
-      const allFormulas = [...new Set([
-        ...enrichedMeta.indexedFormulas,
-        ...discoveredFormulaLabels
-      ])];
-      if (allFormulas.length > enrichedMeta.indexedFormulas.length) {
-        log(`  🔄 Mise à jour indexedFormulas: ${allFormulas.length} formules (${enrichedMeta.indexedFormulas.length} Gemini + ${discoveredFormulaLabels.size} tableaux)`);
+    // Mettre à jour indexedFormulas : les formules Vision (en-têtes de tableaux) sont
+    // la source la plus fiable — elles ont priorité sur l'extraction Gemini par texte seul
+    // qui peut rater des formules quand le texte pdfjs est incomplet (accents, styling…)
+    {
+      const geminiFormulas = enrichedMeta.indexedFormulas || [];
+      const visionFormulas = [...discoveredFormulaLabels];
+
+      // Filtrer les en-têtes génériques non-formule ("Garanties", "Garantie", "Prestations"…)
+      const nonFormulaHeaders = /^(garantie|garanties|prestations?|coverage|guarantee|nature|objet)$/i;
+      const cleanVisionFormulas = visionFormulas.filter(f => !nonFormulaHeaders.test(f.trim()));
+
+      // Fusionner : Vision prioritaire, Gemini en complément (dédoublonnage insensible casse)
+      const seen = new Set();
+      const allFormulas = [];
+      for (const f of [...cleanVisionFormulas, ...geminiFormulas]) {
+        const key = f.trim().toLowerCase();
+        if (key.length > 1 && !seen.has(key)) {
+          seen.add(key);
+          allFormulas.push(f.trim());
+        }
+      }
+
+      if (allFormulas.length > 0) {
+        log(`  🔄 Mise à jour indexedFormulas: ${allFormulas.length} formules (${cleanVisionFormulas.length} Vision + ${geminiFormulas.length} Gemini, dédoublonné)`);
+        log(`     Vision: [${cleanVisionFormulas.join(', ')}]`);
+        log(`     Gemini: [${geminiFormulas.join(', ')}]`);
+        log(`     Final:  [${allFormulas.join(', ')}]`);
         try {
           await pool.query(
             `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
@@ -1214,6 +1290,10 @@ async function processDocument(row, index, total) {
           );
           log(`  ✅ indexedFormulas mis à jour: ${allFormulas.join(', ')}`);
         } catch (fErr) { log(`  ⚠️  Mise à jour indexedFormulas (non bloquant): ${fErr.message}`); }
+      } else if (geminiFormulas.length > 0) {
+        log(`  ℹ️  indexedFormulas from Gemini only: [${geminiFormulas.join(', ')}]`);
+      } else {
+        log(`  ⚠️  Aucune formule détectée (ni Vision, ni Gemini)`);
       }
     }
 

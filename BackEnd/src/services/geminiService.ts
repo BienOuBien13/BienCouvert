@@ -2022,7 +2022,11 @@ export const indexCgDocument = async (provider: string, type: string, pdfUrl: st
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
 
 Extrais du texte :
-1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+1. Les formules commerciales mentionnées.
+   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
+   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
+   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
+   Cherche dans TOUT le texte, y compris les titres de colonnes et en-têtes de sections.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
@@ -2035,8 +2039,8 @@ Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentai
   "semanticSummary": "Résumé des garanties principales..."
 }
 
-Texte du document (tronqué à 12 000 caractères) :
-${contentText.slice(0, 12000)}`;
+Texte du document (tronqué à 25 000 caractères) :
+${contentText.slice(0, 25000)}`;
 
       const model = ai.getGenerativeModel({
         model: 'gemini-2.5-flash',
@@ -2092,7 +2096,11 @@ ${contentText.slice(0, 12000)}`;
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu réel du document PDF fourni. N'invente AUCUNE information.
 
 Extrais du document : 
-1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+1. Les formules commerciales mentionnées.
+   ATTENTION : les noms de formules apparaissent souvent comme EN-TÊTES DE COLONNES dans les tableaux de garanties.
+   Exemples : Économique, Élargie, Protectrice, Confort, Tiers, Tous Risques, Initiale, Essentiel, Premium,
+   Tiers Essentiel, Tiers Confort, Tous Risques, Formule 1, Formule 2, Bronze, Silver, Gold, etc.
+   Cherche dans TOUT le document, y compris les titres de colonnes et en-têtes de tableaux.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 

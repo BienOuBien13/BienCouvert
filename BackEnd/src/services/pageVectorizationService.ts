@@ -311,6 +311,7 @@ export async function vectorizeCgByPages(
     let pagesProcessed = 0;
     let tablesExtracted = 0;
     let factsCreated = 0;
+    const discoveredFormulaLabels = new Set<string>(); // Formules découvertes dans les en-têtes de tableaux Vision
 
     // Nettoyer un éventuel flag stop résiduel
     clearStopVectorization(centralCgId);
@@ -384,6 +385,13 @@ export async function vectorizeCgByPages(
           tableJson = table;
           extractionConfidence = table.confidence;
           tablesExtracted++;
+
+          // Capturer les labels de formules depuis les en-têtes du tableau Vision
+          if (table.headers && table.headers.length > 1) {
+            table.headers.slice(1).forEach((h: string) => {
+              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+            });
+          }
           
           console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties × ${table.headers.length - 1} formules`);
         } else if (maybeTable) {
@@ -465,6 +473,46 @@ export async function vectorizeCgByPages(
       
       pagesProcessed++;
       console.log(`   ✅ Page ${pageNum} sauvegardée (${classification.chunkType})`);
+    }
+
+    // ── Mettre à jour indexedFormulas avec les formules découvertes dans les tableaux Vision ──
+    // Les en-têtes de tableaux Vision sont la source la plus fiable pour les noms de formules
+    // (pdfjs peut rater les accents/styling, et l'extraction texte Gemini tronque à 12–25k chars)
+    if (discoveredFormulaLabels.size > 0) {
+      try {
+        // Récupérer les formules existantes en metadata
+        const metaResult = await pool.query(
+          'SELECT metadata FROM central_cg WHERE id = $1',
+          [centralCgId]
+        );
+        const currentMeta = metaResult.rows[0]?.metadata || {};
+        const existingFormulas: string[] = currentMeta.indexedFormulas || currentMeta.formules || [];
+
+        // Filtrer les en-têtes génériques non-formule
+        const nonFormulaHeaders = /^(garanties?|prestations?|coverage|guarantee|nature|objet)$/i;
+        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !nonFormulaHeaders.test(f.trim()));
+
+        // Fusionner : Vision prioritaire, existant en complément (dédoublonnage insensible casse)
+        const seen = new Set<string>();
+        const allFormulas: string[] = [];
+        for (const f of [...cleanVisionFormulas, ...existingFormulas]) {
+          const key = f.trim().toLowerCase();
+          if (key.length > 1 && !seen.has(key)) {
+            seen.add(key);
+            allFormulas.push(f.trim());
+          }
+        }
+
+        if (allFormulas.length > 0) {
+          await pool.query(
+            `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ indexedFormulas: allFormulas }), centralCgId]
+          );
+          console.log(`   🔄 indexedFormulas mis à jour: [${allFormulas.join(', ')}] (${cleanVisionFormulas.length} Vision + ${existingFormulas.length} existant)`);
+        }
+      } catch (formulaErr) {
+        console.warn(`   ⚠️ Mise à jour indexedFormulas (non bloquant):`, formulaErr);
+      }
     }
     
     // Marquer la vectorisation comme terminée
@@ -617,6 +665,7 @@ export async function vectorizeUserCgByPages(
     let pagesProcessed = 0;
     let tablesExtracted = 0;
     let factsCreated = 0;
+    const discoveredFormulaLabels = new Set<string>(); // Formules découvertes dans les en-têtes de tableaux Vision
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       console.log(`\n📄 [user_cg ${userCgId}] Page ${pageNum}/${numPages}...`);
@@ -634,13 +683,16 @@ export async function vectorizeUserCgByPages(
       const embeddingValues = await generateEmbedding(pageData.contentText);
 
       const hasTable = detectTable(pageData.contentText);
+      // Détection secondaire : pages avec mots-clés de garantie → tenter Vision
+      const maybeTable = !hasTable && /garantie|formule|couverture|franchise|plafond/i.test(pageData.contentText)
+        && pageData.contentText.split('\n').filter((l: string) => l.trim().length > 0).length > 8;
       const classification = classifyPage(pageData.contentText, hasTable);
 
       let tableJson = null;
       let extractionConfidence = null;
 
-      if (hasTable) {
-        console.log(`   📊 Tableau détecté, extraction Vision...`);
+      if (hasTable || maybeTable) {
+        console.log(`   📊 ${hasTable ? 'Tableau détecté' : 'Possible tableau'}, extraction Vision...`);
         const table = await extractTableFromPageImage(
           pageData.imageBase64,
           cg.insurer_code,
@@ -651,7 +703,17 @@ export async function vectorizeUserCgByPages(
           tableJson = table;
           extractionConfidence = table.confidence;
           tablesExtracted++;
+
+          // Capturer les labels de formules depuis les en-têtes du tableau Vision
+          if (table.headers && table.headers.length > 1) {
+            table.headers.slice(1).forEach((h: string) => {
+              if (h && h.trim().length > 1) discoveredFormulaLabels.add(h.trim());
+            });
+          }
+
           console.log(`   ✅ Tableau extrait: ${table.rows.length} garanties × ${table.headers.length - 1} formules`);
+        } else if (maybeTable) {
+          console.log(`   ℹ️ Pas de tableau trouvé par Vision (faux positif maybe-table)`);
         }
       }
 
@@ -729,6 +791,43 @@ export async function vectorizeUserCgByPages(
 
       pagesProcessed++;
       console.log(`   ✅ Page ${pageNum} sauvegardée (user_cg, ${classification.chunkType})`);
+    }
+
+    // ── Mettre à jour les formules découvertes dans les tableaux Vision ──
+    if (discoveredFormulaLabels.size > 0) {
+      try {
+        const metaResult = await pool.query(
+          'SELECT metadata FROM user_cg WHERE id = $1',
+          [userCgId]
+        );
+        const currentMeta = metaResult.rows[0]?.metadata || {};
+        const existingFormulas: string[] = currentMeta.formules || currentMeta.indexedFormulas || [];
+
+        // Filtrer les en-têtes génériques non-formule
+        const nonFormulaHeaders = /^(garanties?|prestations?|coverage|guarantee|nature|objet)$/i;
+        const cleanVisionFormulas = [...discoveredFormulaLabels].filter(f => !nonFormulaHeaders.test(f.trim()));
+
+        // Fusionner : Vision prioritaire, existant en complément
+        const seen = new Set<string>();
+        const allFormulas: string[] = [];
+        for (const f of [...cleanVisionFormulas, ...existingFormulas]) {
+          const key = f.trim().toLowerCase();
+          if (key.length > 1 && !seen.has(key)) {
+            seen.add(key);
+            allFormulas.push(f.trim());
+          }
+        }
+
+        if (allFormulas.length > 0) {
+          await pool.query(
+            `UPDATE user_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ formules: allFormulas, indexedFormulas: allFormulas }), userCgId]
+          );
+          console.log(`   🔄 user_cg formules mis à jour: [${allFormulas.join(', ')}]`);
+        }
+      } catch (formulaErr) {
+        console.warn(`   ⚠️ Mise à jour formules user_cg (non bloquant):`, formulaErr);
+      }
     }
 
     // Marquer la vectorisation comme terminée
