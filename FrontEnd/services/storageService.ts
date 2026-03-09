@@ -154,6 +154,19 @@ export const storageService = {
   },
 
   /**
+   * Met à jour les formules / options / description d'une entrée CG sans re-vectoriser
+   */
+  updateCgMetadata: async (
+    id: string,
+    data: { indexedFormulas?: string[]; indexedOptions?: Record<string, string[]>; description?: string }
+  ): Promise<void> => {
+    await apiFetch(`/cg/central/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
    * Retourne le statut de vectorisation d'une CG
    */
   getVectorizationStatus: async (id: number | string): Promise<{

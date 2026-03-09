@@ -354,6 +354,51 @@ router.get('/central/documents', async (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
+// PATCH /api/cg/central/:id
+// Met à jour les formules et options indexées d'un document CG (sans re-vectoriser)
+// Body: { indexedFormulas?: string[], indexedOptions?: Record<string, string[]>, description?: string }
+// -----------------------------------------------------------------------------
+router.patch('/central/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { indexedFormulas, indexedOptions, description } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: 'ID requis' });
+    }
+
+    // Récupère le document existant pour merger le metadata
+    const existing = await query('SELECT metadata FROM central_cg WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Document CG introuvable' });
+    }
+
+    const currentMeta = existing.rows[0].metadata || {};
+
+    // Merge partiel : on ne remplace que les champs fournis
+    const newMeta: Record<string, any> = { ...currentMeta };
+    if (Array.isArray(indexedFormulas)) newMeta.indexedFormulas = indexedFormulas;
+    if (indexedOptions !== undefined) newMeta.indexedOptions = indexedOptions;
+    if (description !== undefined) newMeta.description = description;
+    if (description !== undefined) newMeta.resume_court = description;
+
+    await query(
+      'UPDATE central_cg SET metadata = $1::jsonb WHERE id = $2',
+      [JSON.stringify(newMeta), id]
+    );
+
+    console.log(`[CG/PATCH] Metadata updated for id=${id}`, {
+      formulas: (newMeta.indexedFormulas || []).length,
+    });
+
+    res.json({ success: true, id, metadata: newMeta });
+  } catch (error: any) {
+    console.error('[CG/PATCH] ERROR:', error.message);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // POST /api/cg/user/upload
 // Upload d'une CG personnalisée — réponse immédiate, traitement asynchrone
 // -----------------------------------------------------------------------------

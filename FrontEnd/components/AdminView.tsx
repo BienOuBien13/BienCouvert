@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag
 } from 'lucide-react';
 import { CentralCgEntry, PolicyType } from '../types';
 import { storageService } from '../services/storageService';
@@ -54,6 +54,13 @@ export const AdminView: React.FC = () => {
   } | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
+
+  // --- État du modal d'édition des formules/options ---
+  const [editingEntry, setEditingEntry] = useState<CentralCgEntry | null>(null);
+  const [editFormulas, setEditFormulas] = useState<string[]>([]);
+  const [editOptions, setEditOptions] = useState<Record<string, string[]>>({});
+  const [newFormulaInput, setNewFormulaInput] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Charger les types de document au montage
   useEffect(() => {
@@ -223,6 +230,33 @@ export const AdminView: React.FC = () => {
     } catch (error: any) {
       console.error('Failed to delete CG entry:', error);
       alert(`Erreur lors de la suppression: ${error.message || 'Erreur inconnue'}`);
+    }
+  };
+
+  const handleOpenEdit = (entry: CentralCgEntry) => {
+    const meta = (entry as any).metadata || {};
+    setEditingEntry(entry);
+    setEditFormulas(Array.isArray(meta.indexedFormulas) ? [...meta.indexedFormulas] : []);
+    setEditOptions(meta.indexedOptions || {});
+    setNewFormulaInput('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingEntry) return;
+    setIsSavingEdit(true);
+    try {
+      await storageService.updateCgMetadata(editingEntry.id, {
+        indexedFormulas: editFormulas,
+        indexedOptions: editOptions,
+      });
+      // Recharger le repo pour refléter les changements
+      const data = await storageService.getCentralCgRepo();
+      setRepo(data || []);
+      setEditingEntry(null);
+    } catch (error: any) {
+      alert(`Erreur lors de la sauvegarde: ${error.message || 'Erreur inconnue'}`);
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -505,9 +539,10 @@ export const AdminView: React.FC = () => {
                 <th className="px-6 py-4">Assureur</th>
                 <th className="px-6 py-4">Type d'assurance</th>
                 <th className="px-6 py-4">Sous-type</th>
+                <th className="px-6 py-4">Formules</th>
                 <th className="px-6 py-4">URL</th>
                 <th className="px-6 py-4">Statut</th>
-                <th className="px-6 py-4 text-center">Suppression</th>
+                <th className="px-6 py-4 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -535,6 +570,24 @@ export const AdminView: React.FC = () => {
                     ) : (
                       <span className="text-slate-300 text-xs">—</span>
                     )}
+                  </td>
+                  {/* Formules indexées */}
+                  <td className="px-6 py-4 max-w-[200px]">
+                    {(() => {
+                      const formulas: string[] = (entry as any).metadata?.indexedFormulas || [];
+                      return formulas.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {formulas.slice(0, 3).map(f => (
+                            <span key={f} className="px-2 py-0.5 bg-primary-50 text-primary-700 border border-primary-100 rounded-lg text-[9px] font-bold whitespace-nowrap">{f}</span>
+                          ))}
+                          {formulas.length > 3 && (
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-lg text-[9px] font-bold">+{formulas.length - 3}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-300 text-[9px]">—</span>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4">
                     {entry.documentUrl ? (
@@ -572,13 +625,22 @@ export const AdminView: React.FC = () => {
                     )}
                   </td>
                   <td className="px-6 py-4 text-center">
-                    <button
-                      onClick={() => handleDelete(entry.id)}
-                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => handleOpenEdit(entry)}
+                        className="p-2 text-slate-300 hover:text-primary-600 transition-colors"
+                        title="Éditer les formules / options"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(entry.id)}
+                        className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                        title="Supprimer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -586,6 +648,148 @@ export const AdminView: React.FC = () => {
           </table>
         </div>
       </div>
+    </div>
+
+      {/* =====================================================================
+          MODAL : Édition des formules / options d'un document CG
+      ===================================================================== */}
+      {editingEntry && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-8"
+          onClick={() => setEditingEntry(null)}
+        >
+          <div
+            className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* En-tête */}
+            <div className="flex items-center justify-between px-8 pt-8 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <Tag className="w-6 h-6 text-primary-600" />
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                    {(editingEntry as any).insurer || editingEntry.insurerCode}
+                  </h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {(editingEntry as any).insuranceTypeLabel || editingEntry.insuranceTypeCode}
+                    {((editingEntry as any).productName) ? ` · ${(editingEntry as any).productName}` : ''}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setEditingEntry(null)} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Corps scrollable */}
+            <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
+
+              {/* --- Formules --- */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                  <Tag className="w-3 h-3" /> Formules indexées
+                </p>
+                <div className="flex flex-wrap gap-2 min-h-[2rem]">
+                  {editFormulas.map((f, i) => (
+                    <span
+                      key={i}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-50 text-primary-700 border border-primary-200 rounded-xl text-xs font-bold group"
+                    >
+                      {f}
+                      <button
+                        onClick={() => setEditFormulas(prev => prev.filter((_, idx) => idx !== i))}
+                        className="text-primary-400 hover:text-red-500 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {editFormulas.length === 0 && (
+                    <span className="text-slate-300 text-xs italic">Aucune formule — ajoutez-en ci-dessous</span>
+                  )}
+                </div>
+
+                {/* Ajouter une formule */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Nouvelle formule (ex : Confort, Tiers+…)"
+                    className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 font-medium"
+                    value={newFormulaInput}
+                    onChange={e => setNewFormulaInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newFormulaInput.trim()) {
+                        const v = newFormulaInput.trim();
+                        if (!editFormulas.includes(v)) setEditFormulas(prev => [...prev, v]);
+                        setNewFormulaInput('');
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      const v = newFormulaInput.trim();
+                      if (v && !editFormulas.includes(v)) setEditFormulas(prev => [...prev, v]);
+                      setNewFormulaInput('');
+                    }}
+                    className="px-4 py-2.5 bg-primary-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary-700 transition-colors"
+                  >
+                    Ajouter
+                  </button>
+                </div>
+              </div>
+
+              {/* --- Options (lecture seule ou édition par catégorie) --- */}
+              {Object.keys(editOptions).length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Options indexées</p>
+                  {Object.entries(editOptions).map(([category, opts]) => (
+                    <div key={category} className="space-y-1.5">
+                      <p className="text-[9px] font-black uppercase text-slate-400 ml-1">{category}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(opts as string[]).map((opt, oi) => (
+                          <span
+                            key={oi}
+                            className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-[10px] font-bold"
+                          >
+                            {opt}
+                            <button
+                              onClick={() => {
+                                const updated = (opts as string[]).filter((_, idx) => idx !== oi);
+                                setEditOptions(prev => ({ ...prev, [category]: updated }));
+                              }}
+                              className="text-slate-300 hover:text-red-500 transition-colors"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pied de modal */}
+            <div className="flex gap-3 px-8 py-6 border-t border-slate-100">
+              <button
+                onClick={() => setEditingEntry(null)}
+                className="flex-1 py-3 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="flex-1 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 shadow-lg shadow-primary-900/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+              >
+                {isSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                {isSavingEdit ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
