@@ -347,7 +347,8 @@ export function tableToFacts(
         }
       }
 
-      const coverageStatus = parseStatus(symbol, table.legend);
+      const parsed = parseStatus(symbol, table.legend);
+      const coverageStatus = parsed.status;
 
       // Log détaillé pour diagnostiquer le mapping symbole → statut
       if (coverageStatus === 'excluded') {
@@ -360,7 +361,8 @@ export function tableToFacts(
         guarantee_label: truncate(guaranteeLabel, 500),
         formula_key:     truncate(formulaKey,     200),
         formula_label:   truncate(formulaLabel,   500),
-        coverage_status: coverageStatus
+        coverage_status: coverageStatus,
+        coverage_amount: parsed.amount ?? undefined,
       });
     });
   });
@@ -391,22 +393,22 @@ export async function saveCoverageFacts(
           insurer_code, insurance_type_code, central_cg_id,
           guarantee_key, guarantee_label,
           formula_key, formula_label,
-          coverage_status,
+          coverage_status, coverage_amount,
           source_page_id, source_page_number,
           extraction_confidence
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (insurer_code, insurance_type_code, central_cg_id, guarantee_key, formula_key)
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
-          -- Stratégie : la dernière extraction valide l'emporte.
-          -- Exception : not_applicable ne peut pas écraser un statut réel (inclus/optionnel/exclu).
           coverage_status = CASE
             WHEN EXCLUDED.coverage_status = 'not_applicable'
               AND coverage_facts.coverage_status != 'not_applicable'
               THEN coverage_facts.coverage_status
             ELSE EXCLUDED.coverage_status
           END,
+          -- Conserver le montant existant si le nouveau est NULL
+          coverage_amount = COALESCE(EXCLUDED.coverage_amount, coverage_facts.coverage_amount),
           source_page_id = EXCLUDED.source_page_id,
           source_page_number = EXCLUDED.source_page_number,
           extraction_confidence = EXCLUDED.extraction_confidence,
@@ -420,9 +422,10 @@ export async function saveCoverageFacts(
           fact.formula_key,
           fact.formula_label,
           fact.coverage_status,
+          fact.coverage_amount ?? null,
           sourcePageId,
           sourcePageNumber,
-          0.85 // Confiance par défaut
+          0.85
         ]
       );
     }
@@ -463,22 +466,22 @@ export async function saveUserCoverageFacts(
           insurer_code, insurance_type_code,
           guarantee_key, guarantee_label,
           formula_key, formula_label,
-          coverage_status,
+          coverage_status, coverage_amount,
           source_page_id, source_page_number,
           extraction_confidence
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (user_cg_id, guarantee_key, formula_key)
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
           formula_label = EXCLUDED.formula_label,
-          -- Stratégie : la dernière extraction valide l'emporte.
-          -- Exception : not_applicable ne peut pas écraser un statut réel.
           coverage_status = CASE
             WHEN EXCLUDED.coverage_status = 'not_applicable'
               AND user_coverage_facts.coverage_status != 'not_applicable'
               THEN user_coverage_facts.coverage_status
             ELSE EXCLUDED.coverage_status
           END,
+          -- Conserver le montant existant si le nouveau est NULL
+          coverage_amount = COALESCE(EXCLUDED.coverage_amount, user_coverage_facts.coverage_amount),
           source_page_id = EXCLUDED.source_page_id,
           source_page_number = EXCLUDED.source_page_number,
           extraction_confidence = EXCLUDED.extraction_confidence,
@@ -493,6 +496,7 @@ export async function saveUserCoverageFacts(
           fact.formula_key,
           fact.formula_label,
           fact.coverage_status,
+          fact.coverage_amount ?? null,
           sourcePageId,
           sourcePageNumber,
           0.85

@@ -355,7 +355,7 @@ router.get('/:id/available-options', async (req: any, res) => {
            ucf.formula_label,
            ucf.formula_key,
            ucf.source_page_number,
-           NULL::text AS coverage_amount,
+           ucf.coverage_amount,
            NULL::text AS coverage_notes
          FROM user_coverage_facts ucf
          WHERE ucf.user_cg_id = $1

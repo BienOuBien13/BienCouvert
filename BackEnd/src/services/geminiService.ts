@@ -833,7 +833,7 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
         }))] as string[];
 
         const userFactsBase = `SELECT ucf.guarantee_label, ucf.guarantee_key, ucf.formula_label, ucf.formula_key,
-                  ucf.coverage_status, NULL::text as coverage_amount, NULL::text as franchise, NULL::text as coverage_notes,
+                  ucf.coverage_status, ucf.coverage_amount, NULL::text as franchise, NULL::text as coverage_notes,
                   ucf.source_page_number, uc.target_filename as pdf_url, NULL::text as insurer_label
            FROM user_coverage_facts ucf
            JOIN user_cg uc ON ucf.user_cg_id = uc.id`;
@@ -1264,7 +1264,7 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
             : '— N/A';
 
           const details = [
-            f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+            f.coverage_amount ? `détail: ${f.coverage_amount}` : '',
             f.franchise       ? `franchise: ${f.franchise}`      : '',
             f.coverage_notes  ? f.coverage_notes.substring(0, 100) : ''
           ].filter(Boolean).join(', ');
@@ -1756,7 +1756,7 @@ export const sendMessageToAssistantStream = async (
             : f.coverage_status === 'excluded'  ? '✗ EXCLUE'
             : '— N/A';
           const details = [
-            f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+            f.coverage_amount ? `détail: ${f.coverage_amount}` : '',
             f.franchise       ? `franchise: ${f.franchise}`      : '',
             f.coverage_notes  ? f.coverage_notes.substring(0, 100) : ''
           ].filter(Boolean).join(', ');
