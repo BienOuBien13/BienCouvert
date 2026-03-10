@@ -359,11 +359,12 @@ export function tableToFacts(
       }
 
       facts.push({
-        // Clés normalisées : tronquées à 200 car. pour les contraintes UNIQUE
-        guarantee_key:   truncate(guaranteeKey,   200),
-        guarantee_label: truncate(guaranteeLabel, 500),
-        formula_key:     truncate(formulaKey,     200),
-        formula_label:   truncate(formulaLabel,   500),
+        // Clés tronquées à 90 car. : safe pour VARCHAR(100) avant migration 019
+        // (après migration les colonnes sont TEXT, la troncature devient un garde-fou)
+        guarantee_key:   truncate(guaranteeKey,   90),
+        guarantee_label: truncate(guaranteeLabel, 90),
+        formula_key:     truncate(formulaKey,     90),
+        formula_label:   truncate(formulaLabel,   90),
         coverage_status: coverageStatus,
         coverage_amount: parsed.amount ?? undefined,
       });
