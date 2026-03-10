@@ -860,4 +860,100 @@ router.delete('/coverage-fact/:id', async (req: Request, res: Response) => {
   }
 });
 
+// =============================================================================
+// ADMIN : User CG management
+// =============================================================================
+
+// GET /api/cg/admin/user-cgs
+// Liste tous les CG utilisateurs avec infos user, assureur, type, compteurs
+router.get('/admin/user-cgs', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT uc.id,
+              uc.user_id,
+              u.email        AS user_email,
+              u.first_name,
+              u.last_name,
+              uc.insurer_code,
+              COALESCE(i.label, uc.insurer_code)       AS insurer_label,
+              uc.insurance_type_code,
+              COALESCE(it.label_fr, uc.insurance_type_code) AS insurance_type_label,
+              uc.target_filename,
+              uc.url,
+              uc.created_at,
+              uc.vectorized_at,
+              COUNT(DISTINCT ucp.id)::int  AS pages_count,
+              COUNT(DISTINCT ucf.id)::int  AS facts_count
+       FROM user_cg uc
+       LEFT JOIN users             u   ON u.id   = uc.user_id
+       LEFT JOIN insurers          i   ON i.code  = uc.insurer_code
+       LEFT JOIN insurance_types   it  ON it.code = uc.insurance_type_code
+       LEFT JOIN user_cg_pages     ucp ON ucp.user_cg_id = uc.id
+       LEFT JOIN user_coverage_facts ucf ON ucf.user_cg_id = uc.id
+       GROUP BY uc.id, u.email, u.first_name, u.last_name, i.label, it.label_fr
+       ORDER BY uc.created_at DESC`,
+      []
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[CG/admin/user-cgs GET]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// DELETE /api/cg/admin/user-cg/:id
+// Supprime un CG utilisateur (FK cascade sur pages et faits)
+router.delete('/admin/user-cg/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await query('DELETE FROM user_cg WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[CG/admin/user-cg DELETE]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// GET /api/cg/user-coverage-facts/:userCgId
+// Retourne les faits de couverture d'un CG utilisateur
+router.get('/user-coverage-facts/:userCgId', async (req: Request, res: Response) => {
+  try {
+    const { userCgId } = req.params;
+    const result = await query(
+      `SELECT id, guarantee_key, guarantee_label, formula_key, formula_label,
+              coverage_status, coverage_amount, coverage_notes, franchise,
+              source_page_number, extraction_confidence
+       FROM user_coverage_facts
+       WHERE user_cg_id = $1
+       ORDER BY guarantee_label, formula_key`,
+      [userCgId]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[CG/user-coverage-facts GET]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// PATCH /api/cg/user-coverage-fact/:id
+// Met à jour le statut d'un fait de couverture utilisateur
+router.patch('/user-coverage-fact/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { coverage_status } = req.body;
+    const VALID = ['included', 'optional', 'excluded', 'not_applicable'];
+    if (!VALID.includes(coverage_status)) {
+      return res.status(400).json({ error: `coverage_status doit être l'un de : ${VALID.join(', ')}` });
+    }
+    await query(
+      `UPDATE user_coverage_facts SET coverage_status = $1 WHERE id = $2`,
+      [coverage_status, id]
+    );
+    res.json({ success: true, id, coverage_status });
+  } catch (err: any) {
+    console.error('[CG/user-coverage-fact PATCH]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 export default router;

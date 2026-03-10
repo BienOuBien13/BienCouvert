@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,27 @@ interface CoverageFact {
   source_page_number?: number;
   extraction_confidence?: number;
 }
+// ---------------------------------------------------------------------------
+// Type pour la liste admin des CG utilisateurs
+// ---------------------------------------------------------------------------
+interface UserCgEntry {
+  id: number;
+  user_id: number;
+  user_email: string;
+  first_name: string | null;
+  last_name: string | null;
+  insurer_code: string;
+  insurer_label: string;
+  insurance_type_code: string;
+  insurance_type_label: string;
+  target_filename: string;
+  url: string | null;
+  created_at: string;
+  vectorized_at: string | null;
+  pages_count: number;
+  facts_count: number;
+}
+
 import { CentralCgEntry, PolicyType } from '../types';
 import { storageService } from '../services/storageService';
 import { indexCgDocument } from '../services/geminiService';
@@ -85,9 +106,18 @@ export const AdminView: React.FC = () => {
   const [facts, setFacts] = useState<CoverageFact[]>([]);
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsPatchLoading, setFactsPatchLoading] = useState<Record<number, boolean>>({});
+  // Flag: true → on affiche des faits user_coverage_facts (vs coverage_facts central)
+  const [factsIsUser, setFactsIsUser] = useState(false);
 
-  // Fête les faits de couverture d'un document
+  // --- État de l'onglet User CG ---
+  const [activeTab, setActiveTab] = useState<'central' | 'userCg'>('central');
+  const [userCgList, setUserCgList] = useState<UserCgEntry[]>([]);
+  const [userCgLoading, setUserCgLoading] = useState(false);
+  const [userCgSearchTerm, setUserCgSearchTerm] = useState('');
+
+  // Charge les faits de couverture d'un document CG central
   const loadCoverageFacts = async (centralCgId: number, label: string) => {
+    setFactsIsUser(false);
     setFactsDocId(centralCgId);
     setFactsDocLabel(label);
     setFacts([]);
@@ -107,13 +137,36 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  // Met à jour le statut d'un fait
+  // Charge les faits de couverture d'un CG utilisateur (user_coverage_facts)
+  const loadUserCoverageFacts = async (userCgId: number, label: string) => {
+    setFactsIsUser(true);
+    setFactsDocId(userCgId);
+    setFactsDocLabel(label);
+    setFacts([]);
+    setFactsLoading(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/user-coverage-facts/${userCgId}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }
+      );
+      const data = await res.json();
+      setFacts(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('[user-coverage-facts]', e);
+      setFacts([]);
+    } finally {
+      setFactsLoading(false);
+    }
+  };
+
+  // Met à jour le statut d'un fait (central ou utilisateur)
   const handlePatchFact = async (factId: number, newStatus: CoverageFact['coverage_status']) => {
     setFactsPatchLoading(prev => ({ ...prev, [factId]: true }));
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || ''}/api/cg/coverage-fact/${factId}`,
-        {
+      const endpoint = factsIsUser
+        ? `${import.meta.env.VITE_API_URL || ''}/api/cg/user-coverage-fact/${factId}`
+        : `${import.meta.env.VITE_API_URL || ''}/api/cg/coverage-fact/${factId}`;
+      const res = await fetch(endpoint, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -338,12 +391,56 @@ export const AdminView: React.FC = () => {
     }
   };
 
+  // Charge la liste de tous les CG utilisateurs (vue admin)
+  const loadUserCgs = async () => {
+    setUserCgLoading(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/admin/user-cgs`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }
+      );
+      const data = await res.json();
+      setUserCgList(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('[admin/user-cgs]', e);
+      setUserCgList([]);
+    } finally {
+      setUserCgLoading(false);
+    }
+  };
+
+  // Supprime un CG utilisateur
+  const handleDeleteUserCg = async (id: number, filename: string) => {
+    if (!confirm(`Supprimer le CG "${filename}" ? Cette action est irréversible.`)) return;
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/admin/user-cg/${id}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
+        }
+      );
+      if (!res.ok) throw new Error((await res.json()).error || 'Erreur');
+      setUserCgList(prev => prev.filter(u => u.id !== id));
+    } catch (e: any) {
+      alert(`Erreur lors de la suppression : ${e.message}`);
+    }
+  };
+
   const filteredRepo = (repo || []).filter(e => {
     if (!e) return false;
     const provider = e.insurer?.toLowerCase() || '';
     const productName = e.productName?.toLowerCase() || '';
     const search = searchTerm.toLowerCase();
     return provider.includes(search) || productName.includes(search);
+  });
+
+  const filteredUserCgList = (userCgList || []).filter(e => {
+    if (!e) return false;
+    const u = `${e.first_name || ''} ${e.last_name || ''} ${e.user_email || ''}`.toLowerCase();
+    const ins = `${e.insurer_label || ''} ${e.insurance_type_label || ''}`.toLowerCase();
+    const s = userCgSearchTerm.toLowerCase();
+    return u.includes(s) || ins.includes(s);
   });
 
   return (
@@ -358,14 +455,41 @@ export const AdminView: React.FC = () => {
           <p className="text-slate-500 font-medium mt-1">Base vectorisée pour l'IA de BienCouvert</p>
         </div>
         
-        <button 
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-900/10 transition-all"
+        {activeTab === 'central' && (
+          <button 
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-900/10 transition-all"
+          >
+            {showAddForm ? 'Annuler' : <><Plus className="w-4 h-4" /> Indexer un nouveau document</>}
+          </button>
+        )}
+      </div>
+
+      {/* Onglets */}
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-2xl w-fit">
+        <button
+          onClick={() => setActiveTab('central')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            activeTab === 'central'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
         >
-          {showAddForm ? 'Annuler' : <><Plus className="w-4 h-4" /> Indexer un nouveau document</>}
+          <Database className="w-3.5 h-3.5" /> Contrats généraux
+        </button>
+        <button
+          onClick={() => { setActiveTab('userCg'); loadUserCgs(); }}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            activeTab === 'userCg'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" /> CG Utilisateurs
         </button>
       </div>
 
+      {activeTab === 'central' && (<>
       {/* Bandeau de progression vectorisation */}
       {vectorizationStatus && (
         <div className={`p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${
@@ -738,6 +862,153 @@ export const AdminView: React.FC = () => {
           </table>
         </div>
       </div>
+      </>)}
+
+      {/* ===================================================================
+          ONGLET : CG Utilisateurs
+      =================================================================== */}
+      {activeTab === 'userCg' && (
+        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
+            <div className="relative flex-grow max-w-md">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Rechercher par utilisateur, assureur, type..."
+                className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all"
+                value={userCgSearchTerm}
+                onChange={e => setUserCgSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                {filteredUserCgList.length} CG utilisateur(s)
+              </div>
+              <button
+                onClick={loadUserCgs}
+                disabled={userCgLoading}
+                className="p-2 text-slate-400 hover:text-primary-600 transition-colors disabled:opacity-50"
+                title="Actualiser"
+              >
+                <RefreshCw className={`w-4 h-4 ${userCgLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {userCgLoading ? (
+            <div className="flex items-center justify-center h-40 gap-3">
+              <Loader2 className="w-8 h-8 text-slate-300 animate-spin" />
+              <span className="text-sm text-slate-400 font-medium">Chargement…</span>
+            </div>
+          ) : filteredUserCgList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 gap-3">
+              <Users className="w-8 h-8 text-slate-200" />
+              <p className="text-sm text-slate-400 font-medium">Aucun CG utilisateur trouvé.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left" style={{ minWidth: '900px' }}>
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100">
+                    <th className="px-5 py-4">Utilisateur</th>
+                    <th className="px-5 py-4">Assureur / Type</th>
+                    <th className="px-5 py-4">Fichier</th>
+                    <th className="px-5 py-4">Date upload</th>
+                    <th className="px-5 py-4">Statut</th>
+                    <th className="px-5 py-4 text-center">Pages / Faits</th>
+                    <th className="px-5 py-4 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredUserCgList.map(entry => {
+                    const initials = `${entry.first_name?.[0] || ''}${entry.last_name?.[0] || ''}`.toUpperCase() || entry.user_email[0].toUpperCase();
+                    const fullName = [entry.first_name, entry.last_name].filter(Boolean).join(' ') || '—';
+                    return (
+                      <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-black shrink-0">
+                              {initials}
+                            </div>
+                            <div>
+                              <div className="font-black text-slate-900 text-sm">{fullName}</div>
+                              <div className="text-[10px] text-slate-400">{entry.user_email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-1">
+                            <span className="font-bold text-slate-800 text-xs block">{entry.insurer_label}</span>
+                            <span className="text-[10px] font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-lg uppercase inline-block">
+                              {entry.insurance_type_label}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 max-w-[200px]">
+                          <span className="text-xs text-slate-700 font-medium truncate block" title={entry.target_filename}>
+                            {entry.target_filename}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className="text-xs text-slate-600">
+                            {new Date(entry.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          {entry.vectorized_at ? (
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                <span className="text-[10px] font-bold text-emerald-700">Vectorisé</span>
+                              </div>
+                              <span className="text-[9px] text-slate-400">
+                                {new Date(entry.vectorized_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 rounded-full bg-slate-300" />
+                              <span className="text-[9px] text-slate-400">Non vectorisé</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="text-xs font-bold text-slate-500">{entry.pages_count}p</span>
+                            <span className="text-slate-300 text-xs">·</span>
+                            <span className="text-xs font-bold text-emerald-600">{entry.facts_count}f</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => loadUserCoverageFacts(
+                                entry.id,
+                                `${entry.insurer_label} · ${entry.insurance_type_label} (${fullName})`
+                              )}
+                              className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
+                              title="Voir les faits de couverture"
+                            >
+                              <BarChart2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUserCg(entry.id, entry.target_filename)}
+                              className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                              title="Supprimer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
 
       {/* =====================================================================
