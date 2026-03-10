@@ -36,9 +36,10 @@ router.get('/sessions/:userId', async (req: Request, res: Response) => {
     const { userId } = req.params;
     const result = await query(
       `SELECT cs.*, p.metadata->>'name' AS policy_name,
-              p.insurer, p.type AS policy_type
+              i.label AS insurer, p.type AS policy_type
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
+       LEFT JOIN insurers i ON i.code = p.insurer_code
        WHERE cs.user_id = $1
        ORDER BY cs.updated_at DESC`,
       [userId]
@@ -56,9 +57,11 @@ router.get('/sessions/:userId', async (req: Request, res: Response) => {
 router.get('/session/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT cs.*, p.metadata->>'name' AS policy_name, p.insurer, p.type AS policy_type
+      `SELECT cs.*, p.metadata->>'name' AS policy_name,
+              i.label AS insurer, p.type AS policy_type
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
+       LEFT JOIN insurers i ON i.code = p.insurer_code
        WHERE cs.id = $1`,
       [req.params.id]
     );
@@ -82,11 +85,13 @@ router.post('/session/:id/chat', async (req: Request, res: Response) => {
 
     // Charger la session
     const sessionResult = await query(
-      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type,
+      `SELECT cs.*, p.metadata AS policy_metadata,
+              i.label AS insurer, p.type AS policy_type,
               cg.insurer_code, cg.insurance_type_code
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
        LEFT JOIN central_cg cg ON cg.id = p.central_cg_id
+       LEFT JOIN insurers i ON i.code = p.insurer_code
        WHERE cs.id = $1`,
       [id]
     );
@@ -207,11 +212,13 @@ router.post('/session/:id/analyze', async (req: Request, res: Response) => {
 
     // Charger la session
     const sessionResult = await query(
-      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type,
+      `SELECT cs.*, p.metadata AS policy_metadata,
+              i.label AS insurer, p.type AS policy_type,
               cg.insurer_code, cg.insurance_type_code
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
        LEFT JOIN central_cg cg ON cg.id = p.central_cg_id
+       LEFT JOIN insurers i ON i.code = p.insurer_code
        WHERE cs.id = $1`,
       [id]
     );
@@ -285,9 +292,11 @@ router.post('/session/:id/letter', async (req: Request, res: Response) => {
 
     // Charger session + utilisateur
     const sessionResult = await query(
-      `SELECT cs.*, p.metadata AS policy_metadata, p.insurer, p.type AS policy_type
+      `SELECT cs.*, p.metadata AS policy_metadata,
+              i.label AS insurer, p.type AS policy_type
        FROM claim_sessions cs
        LEFT JOIN policies p ON p.id = cs.policy_id
+       LEFT JOIN insurers i ON i.code = p.insurer_code
        WHERE cs.id = $1`,
       [id]
     );

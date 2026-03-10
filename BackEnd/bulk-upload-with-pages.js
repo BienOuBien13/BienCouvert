@@ -331,10 +331,10 @@ function tableToFacts(tableData, centralCgId, pageId, pageNumber, insurerCode, i
         insurer_code: insurerCode,
         insurance_type_code: insuranceTypeCode,
         central_cg_id: centralCgId,
-        guarantee_key: guaranteeKey,
-        guarantee_label: guaranteeLabel,
-        formula_key: formulaKey,
-        formula_label: formulaLabel,
+        guarantee_key:   truncate(guaranteeKey,   200),
+        guarantee_label: truncate(guaranteeLabel, 500),
+        formula_key:     truncate(formulaKey,     200),
+        formula_label:   truncate(formulaLabel,   500),
         coverage_status: coverageInfo.status,
         coverage_amount: coverageInfo.amount,
         coverage_notes: null,
@@ -359,6 +359,16 @@ function normalizeKey(label) {
     .replace(/[\u0300-\u036f]/g, '') // Enlever les accents
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Tronque une chaîne à max caractères (sécurité DB).
+ * Migration 019 a élargi les colonnes en TEXT, mais on garde
+ * des clés courtes pour la contrainte UNIQUE et la lisibilité.
+ */
+function truncate(s, max) {
+  if (!s) return s;
+  return s.length <= max ? s : s.slice(0, max - 1) + '\u2026';
 }
 
 /**
@@ -705,10 +715,10 @@ function tableToFactsVision(tableData, centralCgId, pageId, pageNumber, insurerC
         insurer_code:        insurerCode,
         insurance_type_code: insuranceTypeCode,
         central_cg_id:       centralCgId,
-        guarantee_key:       guaranteeKey,
-        guarantee_label:     guaranteeLabel,
-        formula_key:         formulaKey,
-        formula_label:       formulaLabel,
+        guarantee_key:       truncate(guaranteeKey,   200),
+        guarantee_label:     truncate(guaranteeLabel, 500),
+        formula_key:         truncate(formulaKey,     200),
+        formula_label:       truncate(formulaLabel,   500),
         coverage_status:     coverageInfo.status,
         coverage_amount:     coverageInfo.amount,
         coverage_notes:      null,

@@ -139,49 +139,70 @@ router.post('/', upload.single('file'), async (req: any, res) => {
  */
 router.put('/:id', upload.single('file'), async (req: any, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const policies = await storage.readPolicies();
-    
-    // Recherche de la police à modifier
-    const existing = policies.find((p: any) => p.id === id);
-    if (!existing) return res.status(404).json({ message: 'Not found' });
-    
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: 'Invalid policy id' });
+
+    // Vérifier que la police existe et appartient à l'utilisateur
+    const existing = await query(
+      `SELECT p.*, i.label AS insurer_label
+       FROM policies p
+       LEFT JOIN insurers i ON i.code = p.insurer_code
+       WHERE p.id = $1`,
+      [id]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ message: 'Not found' });
+    const current = existing.rows[0];
+    const currentMeta = current.metadata || {};
+
     const body = req.body;
 
-    // Mise à jour des propriétés de base
-    if (body.name) existing.metadata.name = body.name;
-    if (body.insurer) existing.insurer = body.insurer;
-    if (body.type) existing.type = body.type;
-    if (body.coverageDetail) existing.metadata.coverageDetail = body.coverageDetail;
-    if (body.options) existing.metadata.options = body.options;
-    if (body.sourceUrl) existing.documentUrl = body.sourceUrl;
-    if (body.summary) existing.metadata.summary = body.summary;
-    if (body.annualPremium !== undefined) existing.premium = body.annualPremium;
-    if (body.isInternalSource !== undefined) existing.metadata.isInternalSource = body.isInternalSource;
+    // Construire l'objet de mise à jour en fusionnant l'existant avec les nouvelles valeurs
+    const updatedPolicy: any = {
+      id,
+      userId: current.user_id,
+      insurerCode:          body.insurerCode          ?? current.insurer_code,
+      insuranceTypeCode:    body.insurance_type_code   ?? body.typeCode ?? current.insurance_type_code,
+      insuranceSubTypeCode: body.insurance_sub_type_code ?? body.subTypeCode ?? current.insurance_sub_type_code,
+      centralCgId:          body.centralCgId !== undefined ? (body.centralCgId || null) : current.central_cg_id,
+      userCgId:             body.userCgId    !== undefined ? (body.userCgId    || null) : current.user_cg_id,
+      startDate:            body.startDate   ?? current.start_date,
+      endDate:              body.endDate     !== undefined ? (body.endDate || null) : current.end_date,
+      status:               body.status      ?? current.status,
+      documentUrl:          body.sourceUrl   ?? current.document_url,
+      metadata: {
+        ...currentMeta,
+        name:    body.name    ?? currentMeta.name,
+        formula: body.formula !== undefined ? body.formula : currentMeta.formula,
+        options: body.options !== undefined ? body.options : (currentMeta.options || []),
+        premium: body.premium !== undefined ? body.premium : currentMeta.premium,
+        coverage: body.coverage !== undefined ? body.coverage : currentMeta.coverage,
+        summary: body.summary ?? currentMeta.summary,
+      }
+    };
 
     // Si un nouveau fichier est uploadé via multipart
     if (req.file) {
-      existing.documentData = req.file.buffer.toString('base64');
-      existing.metadata.fileName = req.file.originalname;
-      existing.metadata.mimeType = req.file.mimetype;
-      try { existing.metadata.summary = await summarizePolicy(existing.documentData, existing.metadata.mimeType); } catch (e) {}
-    } 
-    // Si un nouveau fichier est fourni en base64
-    else if (body.fileData && body.fileName) {
-      existing.documentData = body.fileData;
-      existing.metadata.fileName = body.fileName;
-      existing.metadata.mimeType = body.mimeType || existing.metadata.mimeType;
-      if (!existing.metadata.summary) {
-        try { existing.metadata.summary = await summarizePolicy(existing.documentData, existing.metadata.mimeType); } catch (e) {}
+      const fileData = req.file.buffer.toString('base64');
+      updatedPolicy.metadata.fileName = req.file.originalname;
+      updatedPolicy.metadata.mimeType = req.file.mimetype;
+      try { updatedPolicy.metadata.summary = await summarizePolicy(fileData, req.file.mimetype); } catch (e) {}
+    } else if (body.fileData && body.fileName) {
+      updatedPolicy.metadata.fileName = body.fileName;
+      updatedPolicy.metadata.mimeType = body.mimeType || currentMeta.mimeType;
+      if (!updatedPolicy.metadata.summary) {
+        try { updatedPolicy.metadata.summary = await summarizePolicy(body.fileData, updatedPolicy.metadata.mimeType); } catch (e) {}
       }
     }
 
-    // Sauvegarde des modifications
-    await storage.writePolicy(existing);
-    res.json(existing);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    await storage.writePolicy(updatedPolicy);
+
+    // Retourner la policy complète avec les JOINs
+    const updatedPolicies = await storage.readPolicies(current.user_id);
+    const updated = updatedPolicies.find((p: any) => p.id === id.toString());
+    res.json(updated ?? { message: 'Updated' });
+  } catch (err: any) {
+    console.error('❌ Erreur PUT policy:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 

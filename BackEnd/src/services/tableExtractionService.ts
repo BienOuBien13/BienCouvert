@@ -34,6 +34,15 @@ interface CoverageFact {
 }
 
 /**
+ * Tronque un libellé à une longueur maximale raisonnable.
+ * Évite les erreurs VARCHAR côté DB et garde les clés UNIQUE raisonnables.
+ */
+function truncate(s: string, max: number): string {
+  if (!s) return s;
+  return s.length <= max ? s : s.slice(0, max - 1) + '\u2026'; // … = ellipsis
+}
+
+/**
  * Normalise un nom de garantie en clé snake_case
  */
 function normalizeGuaranteeKey(label: string): string {
@@ -346,10 +355,11 @@ export function tableToFacts(
       }
 
       facts.push({
-        guarantee_key: guaranteeKey,
-        guarantee_label: guaranteeLabel,
-        formula_key: formulaKey,
-        formula_label: formulaLabel,
+        // Clés normalisées : tronquées à 200 car. pour les contraintes UNIQUE
+        guarantee_key:   truncate(guaranteeKey,   200),
+        guarantee_label: truncate(guaranteeLabel, 500),
+        formula_key:     truncate(formulaKey,     200),
+        formula_label:   truncate(formulaLabel,   500),
         coverage_status: coverageStatus
       });
     });
