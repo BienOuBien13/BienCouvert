@@ -77,62 +77,65 @@ function normalizeFormulaKey(label: string): string {
 }
 
 /**
- * Détermine le statut de couverture à partir d'un symbole ou texte de cellule
+ * Détermine le statut de couverture à partir d'un symbole ou texte de cellule.
+ * Retourne { status, amount } où `amount` est le texte brut de la cellule quand il
+ * contient une information de plafond/montant (sinon null).
  */
+type ParsedStatus = {
+  status: 'included' | 'optional' | 'excluded' | 'not_applicable';
+  amount: string | null;
+};
+
 function parseStatus(
   symbol: string,
   legend?: Record<string, string>
-): 'included' | 'optional' | 'excluded' | 'not_applicable' {
+): ParsedStatus {
   const raw = symbol.trim();
   const s = raw.toLowerCase();
 
   // Vide
-  if (!s) return 'not_applicable';
+  if (!s) return { status: 'not_applicable', amount: null };
 
   // ── Légende prioritaire : si le symbole brut correspond à une clé de la légende ──
   if (legend) {
     const legendVal = legend[raw] || legend[s] || legend[raw.toUpperCase()];
     if (legendVal) {
       const lv = legendVal.toLowerCase();
-      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) return 'included';
-      if (/exclu|non|no|néant|neant|excluded/.test(lv)) return 'excluded';
-      if (/option|en sus|optionnel|optional/.test(lv)) return 'optional';
-      if (/n\/a|sans objet|not.applicable/.test(lv)) return 'not_applicable';
+      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) return { status: 'included', amount: null };
+      if (/exclu|non|no|néant|neant|excluded/.test(lv)) return { status: 'excluded', amount: null };
+      if (/option|en sus|optionnel|optional/.test(lv)) return { status: 'optional', amount: null };
+      if (/n\/a|sans objet|not.applicable/.test(lv)) return { status: 'not_applicable', amount: null };
     }
   }
 
-  // Inclus — symboles positifs
-  if (/^(✓|✔|√|●|•|■|▪|◆)$/.test(raw)) return 'included';
-  if (/^(oui|yes|inclus|included|compris|couvert|garanti)$/i.test(s)) return 'included';
+  // Inclus — symboles positifs (picto seul, sans texte)
+  if (/^(✓|✔|√|●|•|■|▪|◆)$/.test(raw)) return { status: 'included', amount: null };
+  if (/^(oui|yes|inclus|included|compris|couvert|garanti)$/i.test(s)) return { status: 'included', amount: null };
 
   // Exclus — symboles négatifs (AVANT le fallback texte afin d'éviter faux positif)
-  if (/^(✗|✘|×|✕|□|▫)$/.test(raw)) return 'excluded';     // ballot x, carrés vides
-  if (/^(x|×)$/.test(s)) return 'excluded';                   // lettre x seule
-  if (/^(-|−|–|—|\.\.\.|--)$/.test(raw)) return 'excluded'; // tirets
-  if (/^(non|no|exclu|excluded|non compris|néant|neant|nul|nulle)$/i.test(s)) return 'excluded';
-  if (/\bexclu/i.test(s) && !/en option/i.test(s)) return 'excluded';
+  if (/^(✗|✘|×|✕|□|▫)$/.test(raw)) return { status: 'excluded', amount: null };
+  if (/^(x|×)$/.test(s)) return { status: 'excluded', amount: null };
+  if (/^(-|−|–|—|\.\.\.|--)$/.test(raw)) return { status: 'excluded', amount: null };
+  if (/^(non|no|exclu|excluded|non compris|néant|neant|nul|nulle)$/i.test(s)) return { status: 'excluded', amount: null };
+  if (/\bexclu/i.test(s) && !/en option/i.test(s)) return { status: 'excluded', amount: null };
 
   // Optionnel
-  if (/^(○|◯|⊙|opt|△)$/.test(raw)) return 'optional';
-  if (/^(option|opt\.|en option|en sus|sur option|optionnel)$/i.test(s)) return 'optional';
+  if (/^(○|◯|⊙|opt|△)$/.test(raw)) return { status: 'optional', amount: null };
+  if (/^(option|opt\.|en option|en sus|sur option|optionnel)$/i.test(s)) return { status: 'optional', amount: null };
 
   // N/A
-  if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s)) return 'not_applicable';
+  if (/^(n\/a|na|s\.o\.|sans objet|so|n\.a\.)$/i.test(s)) return { status: 'not_applicable', amount: null };
 
   // Exclus — catch-all textuel AVANT le fallback inclusif
-  // Patterns explicites d'exclusion en texte long ("non inclus", "non couvert"…)
-  if (/\b(non\s+inclus|non\s+couvert|non\s+compris|non\s+garanti|non\s+pris\s+en\s+charge|pas\s+inclus|pas\s+couvert|exclue?|exclusion)\b/i.test(s)) return 'excluded';
-  // Cellule contenant uniquement «non» suivi éventuellement d'une ponctuation
-  if (/^non[\s.,;:!]*$/i.test(s)) return 'excluded';
-  // Dash/tiret ou point de suspension seul (cellule vide de sens = non couvert pour cette formule)
-  if (/^[-–—.]{1,5}$/.test(raw)) return 'excluded';
+  if (/\b(non\s+inclus|non\s+couvert|non\s+compris|non\s+garanti|non\s+pris\s+en\s+charge|pas\s+inclus|pas\s+couvert|exclue?|exclusion)\b/i.test(s)) return { status: 'excluded', amount: null };
+  if (/^non[\s.,;:!]*$/i.test(s)) return { status: 'excluded', amount: null };
+  if (/^[-–—.]{1,5}$/.test(raw)) return { status: 'excluded', amount: null };
 
-  // Texte positif : montant, plafond, pourcentage → inclus
-  // On n'utilise PAS s.length > 3 ici pour éviter de classer n'importe quel texte comme inclus
-  if (/\d/.test(s) && !/\b(non|exclu|sans)\b/i.test(s)) return 'included'; // contient un chiffre et pas de mot d'exclusion
-  if (/\b(jusqu'?à|jusqu.a|plafond|forfait|remboursement|capital|rente|indemnit|cotisation|prime|prise\s+en\s+charge)\b/i.test(s)) return 'included';
+  // Texte avec chiffres (plafond, montant, %) → inclus + conserver le texte comme amount
+  if (/\d/.test(s) && !/\b(non|exclu|sans)\b/i.test(s)) return { status: 'included', amount: raw };
+  if (/\b(jusqu'?à|jusqu.a|plafond|forfait|remboursement|capital|rente|indemnit|cotisation|prime|prise\s+en\s+charge)\b/i.test(s)) return { status: 'included', amount: raw };
 
-  return 'not_applicable';
+  return { status: 'not_applicable', amount: null };
 }
 
 /**
