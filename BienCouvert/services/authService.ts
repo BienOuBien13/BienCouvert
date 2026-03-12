@@ -4,8 +4,7 @@
 // Utilise expo-secure-store au lieu de localStorage
 // =============================================================================
 
-import * as SecureStore from 'expo-secure-store';
-import { apiFetch, getToken, setToken, removeToken } from './api';
+import { apiFetch, getToken, setToken, removeToken, storageGet, storageSet, storageRemove } from './api';
 import { User, UserProfileData } from '../types';
 import { TOKEN_KEY, USER_KEY } from '../constants/Config';
 
@@ -19,7 +18,7 @@ export const authService = {
       body: JSON.stringify({ email, password }),
     });
     await setToken(data.token);
-    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(data.user));
+    await storageSet(USER_KEY, JSON.stringify(data.user));
     return data.user;
   },
 
@@ -32,7 +31,7 @@ export const authService = {
       body: JSON.stringify({ email, password }),
     });
     await setToken(data.token);
-    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(data.user));
+    await storageSet(USER_KEY, JSON.stringify(data.user));
     return data.user;
   },
 
@@ -44,15 +43,15 @@ export const authService = {
       await apiFetch('/auth/logout', { method: 'POST' });
     } catch {}
     await removeToken();
-    await SecureStore.deleteItemAsync(USER_KEY);
+    await storageRemove(USER_KEY);
   },
 
   /**
-   * Retourne l'utilisateur actuellement connecté (depuis le cache SecureStore)
+   * Retourne l'utilisateur actuellement connecté (depuis le cache)
    */
   getCurrentUser: async (): Promise<User | null> => {
     try {
-      const raw = await SecureStore.getItemAsync(USER_KEY);
+      const raw = await storageGet(USER_KEY);
       if (!raw) return null;
       return JSON.parse(raw) as User;
     } catch {
@@ -91,7 +90,7 @@ export const authService = {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
-    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(updatedUser));
+    await storageSet(USER_KEY, JSON.stringify(updatedUser));
     return updatedUser;
   },
 
@@ -101,6 +100,6 @@ export const authService = {
   deleteAccount: async (userId: string): Promise<void> => {
     await apiFetch(`/auth/user/${userId}`, { method: 'DELETE' });
     await removeToken();
-    await SecureStore.deleteItemAsync(USER_KEY);
+    await storageRemove(USER_KEY);
   },
 };

@@ -19,6 +19,7 @@ const masterdata_1 = __importDefault(require("./routes/masterdata"));
 const cg_1 = __importDefault(require("./routes/cg"));
 const contact_1 = __importDefault(require("./routes/contact"));
 const partner_1 = __importDefault(require("./routes/partner"));
+const sinistre_1 = __importDefault(require("./routes/sinistre"));
 require("./db"); // Initialisation de la connexion PostgreSQL
 const telemetry_1 = require("./telemetry");
 const geminiMetrics_1 = require("./utils/geminiMetrics");
@@ -33,6 +34,9 @@ const dbInitService_1 = require("./services/dbInitService");
 // -----------------------------------------------------------------------------
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
+// Bypass SSL Zscaler/corporate proxy pour les appels HTTPS sortants (Gemini, etc.)
+// Identique à ce que font les scripts bulk – nécessaire sur les postes avec inspection TLS.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Initialisation de la télémétrie OTel (avant tout appel Gemini)
 (0, telemetry_1.initTelemetry)();
 // -----------------------------------------------------------------------------
@@ -161,6 +165,7 @@ const apiLimiter = (0, express_rate_limit_1.default)({
     skip: (req) => /\/api\/cg\/user\/status\//.test(req.originalUrl) ||
         /\/api\/auth\/me/.test(req.originalUrl) ||
         /\/api\/policies\/central-cg\/[^/]+\/vectorization-status/.test(req.originalUrl) ||
+        /\/api\/policies\/central-cg\/[^/]+\/reprocess/.test(req.originalUrl) ||
         /\/api\/masterdata\//.test(req.originalUrl)
 });
 // Limiter strict pour les routes IA (prévention des coûts API Gemini incontrôlés)
@@ -215,6 +220,7 @@ app.use('/api/masterdata', masterdataLimiter, masterdata_1.default); // 📊 Mas
 app.use('/api/cg', doubleCsrfProtection, cg_1.default); // 📄 Conditions Générales avec CSRF
 app.use('/api/contact', doubleCsrfProtection, contact_1.default); // 📧 Prise de RDV avec CSRF
 app.use('/api/partner', doubleCsrfProtection, partner_1.default); // 🤝 Vue partenaire
+app.use('/api/sinistre', doubleCsrfProtection, sinistre_1.default); // 🛡️ Assistant Sinistre
 // ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
 /**
  * GET /api/admin/token-stats

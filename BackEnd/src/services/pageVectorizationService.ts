@@ -6,7 +6,9 @@
 import { Pool } from 'pg';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
-import { createCanvas } from 'canvas';
+// canvas est un module natif (binaire .node) — import lazy pour éviter le crash au démarrage sur Windows
+let createCanvas: (w: number, h: number) => any;
+try { createCanvas = require('canvas').createCanvas; } catch { /* canvas non disponible, les routes de rendu PDF échoueront gracieusement */ }
 import { generateEmbedding } from './geminiService';
 import { extractTableFromPageImage, tableToFacts, saveCoverageFacts, saveUserCoverageFacts } from './tableExtractionService';
 

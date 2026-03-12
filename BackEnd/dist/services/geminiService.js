@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateShareableReport = exports.indexCgDocument = exports.parsePoliciesFromText = exports.sendMessageToAssistantStream = exports.sendMessageToAssistant = exports.chunkText = exports.generateEmbedding = exports.getCoverageAnalysis = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
+exports.chatClaim = exports.generateClaimLetter = exports.analyzeClaim = exports.generateShareableReport = exports.indexCgDocument = exports.parsePoliciesFromText = exports.sendMessageToAssistantStream = exports.sendMessageToAssistant = exports.chunkText = exports.generateEmbedding = exports.getCoverageAnalysis = exports.detectDuplicates = exports.searchPolicyInfo = exports.summarizePolicy = void 0;
 exports.getAiClient = getAiClient;
 exports.resolveCoverageFacts = resolveCoverageFacts;
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -411,11 +411,19 @@ const EMBEDDING_MODELS = [
     'gemini-embedding-exp-03-07',
 ];
 // Cache du modèle qui fonctionne (évite de re-tester à chaque page)
+// Réinitialisé après 5 min pour éviter que les erreurs transitoires bloquent définitivement.
 let _workingEmbedModel = undefined; // undefined = pas encore testé
+let _workingEmbedModelTs = 0; // timestamp du dernier passage à null
 async function callEmbedApi(modelName, text, retries) {
     // Utilise node-fetch pour compatibilité (évite les quirks du fetch natif Node)
     const nodeFetch = require('node-fetch');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
+    // Agent TLS : désactive la vérification de cert si NODE_TLS_REJECT_UNAUTHORIZED=0
+    // (nécessaire sur les postes avec proxy Zscaler/corporate SSL inspection)
+    const _nodeHttps = require('https');
+    const _tlsAgent = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0'
+        ? new _nodeHttps.Agent({ rejectUnauthorized: false })
+        : undefined;
     let response;
     try {
         response = await nodeFetch(url, {
@@ -423,7 +431,8 @@ async function callEmbedApi(modelName, text, retries) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 content: { parts: [{ text: text.slice(0, 8192) }] }
-            })
+            }),
+            ...(_tlsAgent ? { agent: _tlsAgent } : {})
         });
     }
     catch (err) {
@@ -464,9 +473,12 @@ const generateEmbedding = async (text, retries = 4) => {
         console.warn('No GEMINI_API_KEY - embedding désactivé');
         return null;
     }
-    // Si on sait déjà qu'aucun modèle ne marche pour cette clé
-    if (_workingEmbedModel === null)
-        return null;
+    // Si on sait déjà qu'aucun modèle ne marche — réessayer toutes les 5 min (erreur transiente)
+    if (_workingEmbedModel === null) {
+        if (Date.now() - _workingEmbedModelTs < 5 * 60 * 1000)
+            return null;
+        _workingEmbedModel = undefined; // réinitialiser pour re-tenter
+    }
     // Utiliser directement le modèle connu si déjà trouvé
     const modelsToTry = _workingEmbedModel
         ? [_workingEmbedModel]
@@ -491,7 +503,8 @@ const generateEmbedding = async (text, retries = 4) => {
     }
     if (_workingEmbedModel === undefined) {
         console.error('❌ Aucun modèle embedding disponible pour cette clé API — les pages seront indexées sans vecteur (recherche sémantique désactivée).');
-        _workingEmbedModel = null; // ne plus réessayer
+        _workingEmbedModel = null; // ne plus réessayer (jusqu'au prochain timeout de 5 min)
+        _workingEmbedModelTs = Date.now();
     }
     return null;
 };
@@ -587,6 +600,17 @@ async function resolveCoverageFacts(storage, policies, label = '') {
                 else {
                     console.warn(`${tag}⚠️ Impossible de résoudre CG: insurerCode ou typeCode manquant`);
                 }
+                // Fallback supplémentaire : policies sans typeCode → chercher par insurerCode seul
+                const policiesInsurerOnly = policiesNoCgId.filter((p) => p.insurerCode && !p.typeCode);
+                if (policiesInsurerOnly.length > 0) {
+                    const onlyCodes = [...new Set(policiesInsurerOnly.map((p) => p.insurerCode))];
+                    const cgByInsurer = await (0, db_1.query)(`SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`, [onlyCodes]);
+                    const foundByInsurer = cgByInsurer.rows.map((r) => Number(r.id));
+                    if (foundByInsurer.length > 0) {
+                        console.log(`${tag}✅ CG trouvés par insurerCode seul: [${foundByInsurer.join(', ')}]`);
+                        cgIdsForFacts = [...new Set([...cgIdsForFacts, ...foundByInsurer])];
+                    }
+                }
             }
             catch (e) {
                 console.warn(`${tag}⚠️ Échec lookup CG par insurer+type:`, e);
@@ -650,18 +674,55 @@ async function resolveCoverageFacts(storage, policies, label = '') {
                         const table = typeof row.table_json === 'string' ? JSON.parse(row.table_json) : row.table_json;
                         if (table && Array.isArray(table.rows)) {
                             const headers = Array.isArray(table.headers) ? table.headers : [];
+                            // Récupérer la légende si présente dans le table_json
+                            const legend = (table.legend && typeof table.legend === 'object') ? table.legend : null;
+                            if (legend)
+                                console.log(`${tag}📖 Légende table_json page ${row.page_number}: ${JSON.stringify(legend)}`);
+                            const formulaHeaders = headers.slice(1); // colonnes de formules
                             table.rows.forEach((tableRow) => {
-                                Object.entries(tableRow.formulas || {}).forEach(([geminiKey, sym]) => {
+                                const isArrayRow = Array.isArray(tableRow);
+                                const guaranteeLabel = isArrayRow ? String(tableRow[0] || '') : (tableRow.guarantee || '');
+                                if (!guaranteeLabel.trim())
+                                    return; // ignorer lignes vides / sections
+                                // Itérer sur les formules (par position pour arrays, par clé pour objets)
+                                const entries = isArrayRow
+                                    ? formulaHeaders.map((h, i) => [h, String(tableRow[i + 1] ?? '')])
+                                    : Object.entries(tableRow.formulas || {});
+                                entries.forEach(([geminiKey, sym]) => {
                                     const fKey = normalizeKey(geminiKey);
                                     const fLabel = headers.find((h) => normalizeKey(h) === fKey || normalizeKey(h) === fKey.replace(/_plus$/, '')) || geminiKey;
-                                    const s = String(sym).trim().toLowerCase();
-                                    const status = /✓|✔|●|•|oui|inclus|included/.test(s) ? 'included'
-                                        : /○|option/.test(s) ? 'optional'
-                                            : /-|—|non|exclu|excluded/.test(s) ? 'excluded'
-                                                : s.length > 0 ? 'included' : 'not_applicable';
+                                    const rawSym = String(sym).trim();
+                                    const s = rawSym.toLowerCase();
+                                    // 1. Vérifier la légende en priorité
+                                    let status = '';
+                                    if (legend) {
+                                        const legendVal = legend[rawSym] || legend[s] || legend[rawSym.toUpperCase()];
+                                        if (legendVal) {
+                                            const lv = legendVal.toLowerCase();
+                                            if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv))
+                                                status = 'included';
+                                            else if (/exclu|non|no|néant|neant|excluded/.test(lv))
+                                                status = 'excluded';
+                                            else if (/option|en sus|optionnel|optional/.test(lv))
+                                                status = 'optional';
+                                            else if (/n\/a|sans objet|not.applicable/.test(lv))
+                                                status = 'not_applicable';
+                                        }
+                                    }
+                                    // 2. Si pas résolu par la légende, appliquer les règles standard
+                                    if (!status) {
+                                        status = /✓|✔|●|•|√|■|▪|◆|oui|inclus|included|garanti|compris|couvert/.test(s) ? 'included'
+                                            : /✗|✘|×|✕|□|▫/.test(rawSym) ? 'excluded' // symboles négatifs (test sur RAW, pas lowercase)
+                                                : /^x$/.test(s) ? 'excluded' // lettre x seule
+                                                    : /^(-|−|–|—|\.\.\.|--)$/.test(rawSym) ? 'excluded' // tirets seuls
+                                                        : /\bexclu|\bnon\b|\bnéant\b|\bneant\b|\bnul\b/.test(s) ? 'excluded'
+                                                            : /○|◯|△|option|en sus|optionnel/.test(s) ? 'optional'
+                                                                : /^(n\/a|na|s\.o\.|sans objet)$/i.test(s) ? 'not_applicable'
+                                                                    : s.length > 0 ? 'included' : 'not_applicable';
+                                    }
                                     coverageFacts.push({
-                                        guarantee_label: tableRow.guarantee || '',
-                                        guarantee_key: normalizeKey(tableRow.guarantee || ''),
+                                        guarantee_label: guaranteeLabel,
+                                        guarantee_key: normalizeKey(guaranteeLabel),
                                         formula_label: fLabel,
                                         formula_key: fKey,
                                         coverage_status: status,
@@ -711,7 +772,7 @@ async function resolveCoverageFacts(storage, policies, label = '') {
                         return [withPlus, withoutPlus].filter(k => k.length > 2);
                     }))];
                 const userFactsBase = `SELECT ucf.guarantee_label, ucf.guarantee_key, ucf.formula_label, ucf.formula_key,
-                  ucf.coverage_status, NULL::text as coverage_amount, NULL::text as franchise, NULL::text as coverage_notes,
+                  ucf.coverage_status, ucf.coverage_amount, NULL::text as franchise, NULL::text as coverage_notes,
                   ucf.source_page_number, uc.target_filename as pdf_url, NULL::text as insurer_label
            FROM user_coverage_facts ucf
            JOIN user_cg uc ON ucf.user_cg_id = uc.id`;
@@ -777,8 +838,48 @@ const sendMessageToAssistant = async (message, policies, history) => {
         let cgChunks = [];
         try {
             // Récupérer les IDs des CG liés aux policies
-            const centralCgIds = policies.map(p => p.centralCgId).filter(id => id != null);
+            let centralCgIds = policies.map(p => p.centralCgId).filter(id => id != null).map(Number);
             const userCgIds = policies.map(p => p.userCgId).filter(id => id != null);
+            // Fallback A: policies avec insurerCode + typeCode
+            const policiesWithBoth = policies.filter((p) => !p.centralCgId && p.insurerCode && p.typeCode);
+            if (policiesWithBoth.length > 0) {
+                try {
+                    const params = [];
+                    const conditions = policiesWithBoth.map((p) => {
+                        params.push(p.insurerCode, p.typeCode);
+                        let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
+                        if (p.subTypeCode) {
+                            params.push(p.subTypeCode);
+                            clause += ` AND (cg.insurance_sub_type_code = $${params.length} OR cg.insurance_sub_type_code IS NULL)`;
+                        }
+                        clause += ')';
+                        return clause;
+                    }).join(' OR ');
+                    const cgLookup = await (0, db_1.query)(`SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`, params);
+                    const foundIds = cgLookup.rows.map((r) => Number(r.id));
+                    centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
+                    if (foundIds.length > 0)
+                        console.log(`🔍 Fallback CG résolu par insurer+type: [${foundIds.join(', ')}]`);
+                }
+                catch (lookupErr) {
+                    console.warn('⚠️ Échec fallback CG lookup (insurer+type):', lookupErr);
+                }
+            }
+            // Fallback B: policies sans typeCode → chercher par insurerCode seul
+            const policiesInsurerOnly = policies.filter((p) => !p.centralCgId && p.insurerCode && !p.typeCode);
+            if (policiesInsurerOnly.length > 0) {
+                try {
+                    const insurerCodes = [...new Set(policiesInsurerOnly.map((p) => p.insurerCode))];
+                    const cgByInsurer = await (0, db_1.query)(`SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`, [insurerCodes]);
+                    const foundByInsurer = cgByInsurer.rows.map((r) => Number(r.id));
+                    centralCgIds = [...new Set([...centralCgIds, ...foundByInsurer])];
+                    if (foundByInsurer.length > 0)
+                        console.log(`🔍 Fallback CG résolu par insurerCode seul: [${foundByInsurer.join(', ')}]`);
+                }
+                catch (lookupErr) {
+                    console.warn('⚠️ Échec fallback CG lookup (insurer only):', lookupErr);
+                }
+            }
             console.log(`🔍 Recherche CG liés aux policies: ${centralCgIds.length} central_cg, ${userCgIds.length} user_cg`);
             // Recherche dans central_cg via embeddings
             if (centralCgIds.length > 0 && questionEmbedding) {
@@ -821,6 +922,45 @@ const sendMessageToAssistant = async (message, policies, history) => {
             // Trier par similarité
             cgChunks.sort((a, b) => b.similarity - a.similarity);
             cgChunks = cgChunks.slice(0, 5);
+            // Fallback: si aucun résultat embedding (CG sans vecteur), lire le content_text directement
+            if (cgChunks.length === 0) {
+                if (centralCgIds.length > 0) {
+                    try {
+                        const fallbackCentral = await (0, db_1.query)(`SELECT cg.id, cg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label,
+                      cg.metadata->>'productName' as product_name,
+                      0.5 as similarity
+               FROM central_cg cg
+               LEFT JOIN insurers i ON cg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+               WHERE cg.id = ANY($1) AND cg.content_text IS NOT NULL AND cg.content_text <> ''
+               LIMIT 3`, [centralCgIds]);
+                        cgChunks = cgChunks.concat(fallbackCentral.rows);
+                        console.log(`📋 Fallback central_cg text: ${fallbackCentral.rows.length} docs (sans embedding)`);
+                    }
+                    catch (fbErr) {
+                        console.warn('⚠️ Échec fallback central_cg text:', fbErr);
+                    }
+                }
+                if (userCgIds.length > 0) {
+                    try {
+                        const fallbackUser = await (0, db_1.query)(`SELECT ucg.id, ucg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label,
+                      ucg.metadata->>'productName' as product_name,
+                      0.5 as similarity
+               FROM user_cg ucg
+               LEFT JOIN insurers i ON ucg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+               WHERE ucg.id = ANY($1) AND ucg.content_text IS NOT NULL AND ucg.content_text <> ''
+               LIMIT 3`, [userCgIds]);
+                        cgChunks = cgChunks.concat(fallbackUser.rows);
+                        console.log(`📋 Fallback user_cg text: ${fallbackUser.rows.length} docs (sans embedding)`);
+                    }
+                    catch (fbErr) {
+                        console.warn('⚠️ Échec fallback user_cg text:', fbErr);
+                    }
+                }
+            }
             console.log(`✅ Total CG: ${cgChunks.length} documents pertinents`);
             cgChunks.forEach((cg, idx) => {
                 console.log(`   ${idx + 1}. ${cg.insurer_label} - ${cg.type_label} (similarité: ${cg.similarity.toFixed(3)})`);
@@ -977,7 +1117,9 @@ const sendMessageToAssistant = async (message, policies, history) => {
             });
             const grouped = new Map();
             coverageFacts.forEach((f) => {
-                const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+                const fl = f.formula_label || '';
+                const formulaDisplay = /^formule\s/i.test(fl) ? fl : `Formule ${fl}`;
+                const key = `${f.insurer_label || 'Assureur'} - ${formulaDisplay}`;
                 if (!grouped.has(key))
                     grouped.set(key, []);
                 grouped.get(key).push(f);
@@ -1008,7 +1150,7 @@ const sendMessageToAssistant = async (message, policies, history) => {
                                 : f.coverage_status === 'excluded' ? '✗ EXCLUE'
                                     : '— N/A';
                     const details = [
-                        f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+                        f.coverage_amount ? `détail: ${f.coverage_amount}` : '',
                         f.franchise ? `franchise: ${f.franchise}` : '',
                         f.coverage_notes ? f.coverage_notes.substring(0, 100) : ''
                     ].filter(Boolean).join(', ');
@@ -1086,6 +1228,21 @@ RÈGLES ABSOLUES:
 - N'utilise JAMAIS de texte en gras (pas de ** ou __)
 - Reste concis et direct
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
+
+HIÉRARCHIE DES GARANTIES (CRITIQUE):
+- Une clause d'exclusion GÉNÉRALE d'une section (ex: "dommages résultant d'une perte") ne s'applique JAMAIS à une autre section qui couvre spécifiquement ce cas
+- Les garanties d'ASSISTANCE (serrurerie, plomberie, électricité, chauffage, dépannage) sont des PRESTATIONS DE SERVICE — elles sont distinctes et séparées des garanties couvrant les dommages aux biens
+- Si la section "Assistance" mentionne explicitement "serrurerie", "perte de clés", "dépannage électrique" etc. → c'est INCLUS, même si la section "Protection des biens" exclut les "pertes" en général
+- Principe de spécificité: une garantie SPÉCIFIQUE nommée dans une section l'emporte toujours sur une exclusion générale d'une autre section
+- TOUJOURS lire la section "Assistance" INDÉPENDAMMENT de la section "Dommages aux biens" avant de répondre sur une prestation d'assistance
+- Ne jamais appliquer une exclusion d'une section à une garantie couverte par une section différente du contrat
+
+COHÉRENCE ET FIABILITÉ (CRITIQUE):
+- Tes réponses sont DÉFINITIVES — chaque réponse doit être fiable du premier coup
+- Ne JAMAIS s'excuser d'une réponse précédente, admettre une "imprécision initiale" ou "corriger" une réponse passée
+- Interdiction absolue de phrases comme: "Je m'excuse", "Mon analyse initiale était incorrecte", "J'aurais dû", "je m'engage à être plus rigoureux", "Vous avez eu raison de me reprendre"
+- Si une garantie est mentionnée dans le tableau 📊 comme INCLUSE → réponds INCLUSE, sans vérification contradictoire dans d'autres sections
+- En cas de doute entre deux sections du contrat, applique TOUJOURS la règle de spécificité : la section qui nomme explicitement la garantie l'emporte
 
 RÈGLE OPTIONS SOUSCRITES (CRITIQUE):
 - Dans "📋 VOS CONTRATS", le champ "Options souscrites (INCLUSES dans la couverture): ..." liste les options que l'utilisateur a RÉELLEMENT ACHETÉES
@@ -1177,8 +1334,49 @@ const sendMessageToAssistantStream = async (message, policies, history, onChunk)
             console.warn('⚠️ Échec recherche policy_embeddings:', ragErr);
         }
         try {
-            const centralCgIds = policies.map(p => p.centralCgId).filter(id => id != null);
+            // Résolution des centralCgIds (direct + fallback insurer+type)
+            let centralCgIds = policies.map(p => p.centralCgId).filter(id => id != null).map(Number);
             const userCgIds = policies.map(p => p.userCgId).filter(id => id != null);
+            // Fallback A: policies avec insurerCode + typeCode
+            const policiesWithBothStream = policies.filter((p) => !p.centralCgId && p.insurerCode && p.typeCode);
+            if (policiesWithBothStream.length > 0) {
+                try {
+                    const params = [];
+                    const conditions = policiesWithBothStream.map((p) => {
+                        params.push(p.insurerCode, p.typeCode);
+                        let clause = `(cg.insurer_code = $${params.length - 1} AND cg.insurance_type_code = $${params.length}`;
+                        if (p.subTypeCode) {
+                            params.push(p.subTypeCode);
+                            clause += ` AND (cg.insurance_sub_type_code = $${params.length} OR cg.insurance_sub_type_code IS NULL)`;
+                        }
+                        clause += ')';
+                        return clause;
+                    }).join(' OR ');
+                    const cgLookup = await (0, db_1.query)(`SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`, params);
+                    const foundIds = cgLookup.rows.map((r) => Number(r.id));
+                    centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
+                    if (foundIds.length > 0)
+                        console.log(`🔍 Stream fallback CG (insurer+type): [${foundIds.join(', ')}]`);
+                }
+                catch (lookupErr) {
+                    console.warn('⚠️ Échec fallback CG lookup (stream insurer+type):', lookupErr);
+                }
+            }
+            // Fallback B: policies sans typeCode → insurerCode seul
+            const policiesInsurerOnlyStream = policies.filter((p) => !p.centralCgId && p.insurerCode && !p.typeCode);
+            if (policiesInsurerOnlyStream.length > 0) {
+                try {
+                    const insurerCodes = [...new Set(policiesInsurerOnlyStream.map((p) => p.insurerCode))];
+                    const cgByInsurer = await (0, db_1.query)(`SELECT DISTINCT id FROM central_cg WHERE insurer_code = ANY($1) AND status = 'active' LIMIT 10`, [insurerCodes]);
+                    const foundByInsurer = cgByInsurer.rows.map((r) => Number(r.id));
+                    centralCgIds = [...new Set([...centralCgIds, ...foundByInsurer])];
+                    if (foundByInsurer.length > 0)
+                        console.log(`🔍 Stream fallback CG (insurer only): [${foundByInsurer.join(', ')}]`);
+                }
+                catch (lookupErr) {
+                    console.warn('⚠️ Échec fallback CG lookup (stream insurer only):', lookupErr);
+                }
+            }
             if (centralCgIds.length > 0 && questionEmbedding) {
                 const centralResults = await (0, db_1.query)(`SELECT 
             cg.id,
@@ -1210,6 +1408,39 @@ const sendMessageToAssistantStream = async (message, policies, history, onChunk)
           ORDER BY similarity DESC
           LIMIT 3`, [JSON.stringify(questionEmbedding), userCgIds]);
                 cgChunks = cgChunks.concat(userResults.rows.filter((cg) => !isNaN(cg.similarity)));
+            }
+            // Sort + dedup
+            cgChunks.sort((a, b) => b.similarity - a.similarity);
+            cgChunks = cgChunks.slice(0, 5);
+            // Fallback texte si aucun embedding disponible
+            if (cgChunks.length === 0) {
+                if (centralCgIds.length > 0) {
+                    try {
+                        const fbCentral = await (0, db_1.query)(`SELECT cg.id, cg.content_text, i.label as insurer_label,
+                      it.label_fr as type_label, cg.metadata->>'productName' as product_name, 0.5 as similarity
+               FROM central_cg cg
+               LEFT JOIN insurers i ON cg.insurer_code = i.code
+               LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+               WHERE cg.id = ANY($1) AND cg.content_text IS NOT NULL AND cg.content_text <> '' LIMIT 3`, [centralCgIds]);
+                        cgChunks = cgChunks.concat(fbCentral.rows);
+                        if (fbCentral.rows.length > 0)
+                            console.log(`📋 Stream fallback text central: ${fbCentral.rows.length} docs`);
+                    }
+                    catch (_) { }
+                }
+                if (userCgIds.length > 0) {
+                    try {
+                        const fbUser = await (0, db_1.query)(`SELECT ucg.id, ucg.content_text, 'CG Personnalisé' as insurer_label,
+                      it.label_fr as type_label, 0.5 as similarity
+               FROM user_cg ucg
+               LEFT JOIN insurance_types it ON ucg.insurance_type_code = it.code
+               WHERE ucg.id = ANY($1) AND ucg.content_text IS NOT NULL AND ucg.content_text <> '' LIMIT 3`, [userCgIds]);
+                        cgChunks = cgChunks.concat(fbUser.rows);
+                        if (fbUser.rows.length > 0)
+                            console.log(`📋 Stream fallback text user: ${fbUser.rows.length} docs`);
+                    }
+                    catch (_) { }
+                }
             }
         }
         catch (cgErr) {
@@ -1336,7 +1567,9 @@ const sendMessageToAssistantStream = async (message, policies, history, onChunk)
             });
             const grouped = new Map();
             coverageFacts.forEach((f) => {
-                const key = `${f.insurer_label || 'Assureur'} - Formule ${f.formula_label}`;
+                const fl = f.formula_label || '';
+                const formulaDisplay = /^formule\s/i.test(fl) ? fl : `Formule ${fl}`;
+                const key = `${f.insurer_label || 'Assureur'} - ${formulaDisplay}`;
                 if (!grouped.has(key))
                     grouped.set(key, []);
                 grouped.get(key).push(f);
@@ -1364,7 +1597,7 @@ const sendMessageToAssistantStream = async (message, policies, history, onChunk)
                                 : f.coverage_status === 'excluded' ? '✗ EXCLUE'
                                     : '— N/A';
                     const details = [
-                        f.coverage_amount ? `plafond: ${f.coverage_amount}` : '',
+                        f.coverage_amount ? `détail: ${f.coverage_amount}` : '',
                         f.franchise ? `franchise: ${f.franchise}` : '',
                         f.coverage_notes ? f.coverage_notes.substring(0, 100) : ''
                     ].filter(Boolean).join(', ');
@@ -1437,6 +1670,20 @@ RÈGLES ABSOLUES:
 - Reste concis et direct
 - Indiquer clairement si la garantie demandée est INCLUSE / EN OPTION / EXCLUE dans la formule de l'utilisateur
 - Si l'info n'est pas dans le contexte fourni, dis simplement "Cette information n'apparaît pas dans vos conditions générales"
+
+HIÉRARCHIE DES GARANTIES (CRITIQUE):
+- Une clause d'exclusion GÉNÉRALE d'une section (ex: "dommages résultant d'une perte") ne s'applique JAMAIS à une autre section qui couvre spécifiquement ce cas
+- Les garanties d'ASSISTANCE (serrurerie, plomberie, électricité, chauffage, dépannage) sont des PRESTATIONS DE SERVICE — distinctes et séparées des garanties couvrant les dommages aux biens
+- Si la section "Assistance" mentionne explicitement "serrurerie", "perte de clés", "dépannage électrique" etc. → c'est INCLUS, même si la section "Protection des biens" exclut les "pertes" en général
+- Principe de spécificité: la garantie SPÉCIFIQUE nommée dans une section l'emporte toujours sur une exclusion générale d'une autre section
+- Ne jamais appliquer une exclusion d'une section à une garantie couverte par une section différente du contrat
+
+COHÉRENCE ET FIABILITÉ (CRITIQUE):
+- Tes réponses sont DÉFINITIVES — chaque réponse doit être fiable du premier coup
+- Ne JAMAIS s'excuser d'une réponse précédente, admettre une "imprécision initiale" ou "corriger" une réponse passée
+- Interdiction absolue de phrases comme: "Je m'excuse", "Mon analyse initiale était incorrecte", "J'aurais dû", "je m'engage à être plus rigoureux", "Vous avez eu raison de me reprendre"
+- Si une garantie est dans le tableau 📊 comme INCLUSE → réponds INCLUSE, sans contradiction possible via d'autres sections
+- En cas de doute entre deux sections, applique la règle de spécificité : la section qui nomme explicitement la garantie l'emporte
 
 FORMAT DE RÉPONSE OBLIGATOIRE:
 - Une ligne d'introduction courte identifiant la formule
@@ -1600,7 +1847,16 @@ const indexCgDocument = async (provider, type, pdfUrl, contentText) => {
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu fourni. N'invente AUCUNE information.
 
 Extrais du texte :
-1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+1. Les formules commerciales du contrat (les niveaux de couverture vendus par l'assureur).
+   RÈGLES STRICTES — une formule est un EN-TÊTE DE COLONNE dans le tableau principal des garanties :
+   • Exemples valides : Économique, Élargie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver
+   • NOMS COURTS : 1 à 5 mots maximum.
+   • Si la formule s'appelle "Formule Économique", retourne "Économique" (sans le préfixe "Formule").
+   • EXCLURE absolument : zones géographiques (France métropolitaine, Monaco, Corse, DROM, COM…)
+   • EXCLURE : catégories produit ou segments clients (Appareils neufs, reconditionnés, Individu, Famille…)
+   • EXCLURE : noms de garanties = lignes du tableau (Responsabilité Civile, Vol, Incendie, Bris de glace…)
+   • EXCLURE : combinaisons avec "/" (ex : "Éco/Éq/Confort", "Standard / Autres Formules")
+   • MAXIMUM 8 formules. En cas de doute, ne PAS inclure l'élément. Tableau vide [] si aucune formule certaine.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
@@ -1608,13 +1864,13 @@ Si une information n'est pas présente, laisse le tableau vide ou indique "Non s
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
-  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedFormulas": ["Économique", "Confort"],
   "indexedOptions": ["Option 1", "Option 2"],
   "semanticSummary": "Résumé des garanties principales..."
 }
 
-Texte du document (tronqué à 12 000 caractères) :
-${contentText.slice(0, 12000)}`;
+Texte du document (tronqué à 25 000 caractères) :
+${contentText.slice(0, 25000)}`;
             const model = ai.getGenerativeModel({
                 model: 'gemini-2.5-flash',
                 generationConfig: { responseMimeType: 'application/json' }
@@ -1665,8 +1921,17 @@ ${contentText.slice(0, 12000)}`;
 
 IMPORTANT: Base-toi UNIQUEMENT sur le contenu réel du document PDF fourni. N'invente AUCUNE information.
 
-Extrais du document : 
-1. Les formules commerciales mentionnées (ex: Tiers, Tous Risques, Initiale, Confort, Essentiel, Premium).
+Extrais du document :
+1. Les formules commerciales du contrat (les niveaux de couverture vendus par l'assureur).
+   RÈGLES STRICTES — une formule est un EN-TÊTE DE COLONNE dans le tableau principal des garanties :
+   • Exemples valides : Économique, Élargie, Confort, Tiers, Tous Risques, Essentiel, Gold, Premium, Bronze, Silver
+   • NOMS COURTS : 1 à 5 mots maximum.
+   • Si la formule s'appelle "Formule Économique", retourne "Économique" (sans le préfixe "Formule").
+   • EXCLURE absolument : zones géographiques (France métropolitaine, Monaco, Corse, DROM, COM…)
+   • EXCLURE : catégories produit ou segments clients (Appareils neufs, reconditionnés, Individu, Famille…)
+   • EXCLURE : noms de garanties = lignes du tableau (Responsabilité Civile, Vol, Incendie, Bris de glace…)
+   • EXCLURE : combinaisons avec "/" (ex : "Éco/Éq/Confort", "Standard / Autres Formules")
+   • MAXIMUM 8 formules. En cas de doute, ne PAS inclure l'élément. Tableau vide [] si aucune formule certaine.
 2. Les options complémentaires listées (ex: Assistance 0km, Protection du conducteur, Bris de glace).
 3. Un résumé sémantique concis des garanties principales (max 200 mots).
 
@@ -1674,7 +1939,7 @@ Si une information n'est pas présente dans le document, laisse le tableau vide 
 
 Réponds UNIQUEMENT au format JSON suivant, sans texte ni markdown supplémentaire :
 {
-  "indexedFormulas": ["Formule 1", "Formule 2"],
+  "indexedFormulas": ["Économique", "Confort"],
   "indexedOptions": ["Option 1", "Option 2"],
   "semanticSummary": "Résumé des garanties principales..."
 }`;
@@ -1751,3 +2016,265 @@ const generateShareableReport = async (policies, findings) => {
     }
 };
 exports.generateShareableReport = generateShareableReport;
+const CLAIM_RULES = {
+    AUTO: {
+        deadlineDays: 5,
+        volDeadlineDays: 2,
+        docs: ['Constat amiable ou rapport de police', 'Photos des dommages', 'Certificat d\'immatriculation', 'Permis de conduire'],
+    },
+    AUT01: {
+        deadlineDays: 5,
+        volDeadlineDays: 2,
+        docs: ['Constat amiable ou rapport de police', 'Photos des dommages', 'Certificat d\'immatriculation', 'Permis de conduire'],
+    },
+    HAB01: {
+        deadlineDays: 5,
+        volDeadlineDays: 2,
+        docs: ['Photos des dommages', 'Rapport artisan ou plombier', 'Factures de réparation', 'Liste des objets endommagés avec estimations'],
+    },
+    SAN01: {
+        deadlineDays: 365,
+        volDeadlineDays: 365,
+        docs: ['Feuille de soins', 'Ordonnance médicale', 'Factures acquittées'],
+    },
+    VIE01: {
+        deadlineDays: 30,
+        volDeadlineDays: 30,
+        docs: ['Certificat médical', 'Arrêt de travail', 'Justificatifs revenus'],
+    },
+    EMP01: {
+        deadlineDays: 30,
+        volDeadlineDays: 30,
+        docs: ['Certificat médical', 'Arrêt de travail', 'Attestation employeur'],
+    },
+    JUR01: {
+        deadlineDays: 30,
+        volDeadlineDays: 30,
+        docs: ['Description détaillée des faits', 'Documents contractuels litigieux', 'Correspondances'],
+    },
+};
+const getClaimRules = (typeCode) => CLAIM_RULES[typeCode] || CLAIM_RULES[(typeCode || '').replace(/[0-9]/g, '')] || { deadlineDays: 5, volDeadlineDays: 2, docs: [] };
+const analyzeClaim = async (claimCtx, policyContext, // résumé ou texte CG de la police
+policyName, insurerName, typeCode) => {
+    const ai = getAiClient();
+    const rules = getClaimRules(typeCode);
+    const isVol = /vol|theft|stolen/i.test(claimCtx.evenement);
+    const deadlineDays = isVol ? rules.volDeadlineDays : rules.deadlineDays;
+    const fallback = {
+        isCovered: null,
+        confidence: 'low',
+        franchise: undefined,
+        declarationDeadlineDays: deadlineDays,
+        declarationDeadlineDate: '',
+        requiredDocs: [...rules.docs, ...getBasicDocs(claimCtx)],
+        obligations: [
+            'Déclarer le sinistre dans les délais contractuels',
+            'Ne pas aggraver les dommages avant expertise',
+            'Conserver tous les documents et justificatifs',
+        ],
+        actions: buildDefaultActions(claimCtx, deadlineDays, rules.docs),
+        reasoning: 'Analyse IA indisponible — se référer aux conditions générales du contrat.',
+        riskLevel: 'medium',
+        disclaimer: '⚠️ Cet assistant est un outil d\'aide à la préparation. Il ne remplace pas les conseils de votre assureur ou d\'un professionnel.',
+    };
+    if (!ai)
+        return fallback;
+    const prompt = `Tu es un expert en droit des assurances français. Analyse ce sinistre et réponds en JSON strict.
+
+CONTRAT : "${policyName}" chez ${insurerName} (type: ${typeCode})
+INFORMATIONS CONTRAT :
+${policyContext || '(aucune information disponible — base-toi sur les règles générales du marché français)'}
+
+SINISTRE DÉCLARÉ :
+- Événement : ${claimCtx.evenement}
+- Date : ${claimCtx.dateIncident}
+- Lieu : ${claimCtx.lieu || 'non précisé'}
+- Tiers impliqué : ${claimCtx.tiers ? 'Oui' : 'Non'}
+- Dommages : ${claimCtx.dommages.join(', ') || 'non précisés'}
+- Urgence : ${claimCtx.urgence ? 'Oui' : 'Non'}
+- Détails : ${claimCtx.details || 'aucun'}
+
+Réponds UNIQUEMENT en JSON valide, sans markdown ni texte autour :
+{
+  "isCovered": true | false | null,
+  "confidence": "high" | "medium" | "low",
+  "franchise": "montant ou description ou null",
+  "declarationDeadlineDays": ${deadlineDays},
+  "requiredDocs": ["doc1", "doc2", ...],
+  "obligations": ["obligation1", ...],
+  "actions": [
+    {"step": 1, "label": "action claire et concrète", "priority": "urgent" | "important" | "normal", "deadline": "délai optionnel"},
+    ...
+  ],
+  "reasoning": "explication courte et claire pour l'assuré (max 3 phrases)",
+  "riskLevel": "low" | "medium" | "high",
+  "insurerContact": "numéro ou adresse si connu ou null"
+}
+
+Règles :
+- isCovered = null si incertain faute d'information suffisante
+- Limite à 7 actions maximum, ordonnées par priorité
+- reasoning en français, simple, compréhensible par un non-expert
+- Si urgence = true, mettre "Appeler immédiatement le numéro d'urgence de votre assureur" en step 1
+`;
+    try {
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'analyzeClaim');
+        const result = await model.generateContent([prompt]);
+        const text = (await result.response).text().trim();
+        const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+            isCovered: parsed.isCovered ?? null,
+            confidence: parsed.confidence || 'medium',
+            franchise: parsed.franchise || undefined,
+            declarationDeadlineDays: deadlineDays,
+            declarationDeadlineDate: '',
+            requiredDocs: Array.isArray(parsed.requiredDocs) ? parsed.requiredDocs : rules.docs,
+            obligations: Array.isArray(parsed.obligations) ? parsed.obligations : fallback.obligations,
+            actions: Array.isArray(parsed.actions) ? parsed.actions : fallback.actions,
+            reasoning: parsed.reasoning || fallback.reasoning,
+            riskLevel: parsed.riskLevel || 'medium',
+            insurerContact: parsed.insurerContact || undefined,
+            disclaimer: '⚠️ Cet assistant est un outil d\'aide à la préparation. Il ne remplace pas les conseils de votre assureur ou d\'un professionnel.',
+        };
+    }
+    catch (err) {
+        console.error('[analyzeClaim] JSON parse error:', err);
+        return fallback;
+    }
+};
+exports.analyzeClaim = analyzeClaim;
+const generateClaimLetter = async (claimCtx, analysis, policyName, insurerName, userFirstName, userLastName, userEmail) => {
+    const ai = getAiClient();
+    const dateFr = claimCtx.dateIncident
+        ? new Date(claimCtx.dateIncident).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+        : 'date du sinistre';
+    const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const fallbackLetter = `${userFirstName} ${userLastName}
+${userEmail || ''}
+
+[Ville], le ${today}
+
+Objet : Déclaration de sinistre — Contrat "${policyName}"
+
+Madame, Monsieur,
+
+Je soussigné(e) ${userFirstName} ${userLastName}, titulaire du contrat d'assurance "${policyName}" souscrit auprès de ${insurerName}, ai l'honneur de vous informer d'un sinistre survenu le ${dateFr}.
+
+Nature du sinistre : ${claimCtx.evenement}
+Lieu : ${claimCtx.lieu || 'à préciser'}
+${claimCtx.tiers ? `Un tiers est impliqué dans ce sinistre.` : ''}
+Dommages constatés : ${claimCtx.dommages.join(', ') || 'à décrire'}
+
+${claimCtx.details ? `Circonstances détaillées :\n${claimCtx.details}\n` : ''}
+Je vous transmets ci-joint les justificatifs suivants :
+${analysis.requiredDocs.map(d => `- ${d}`).join('\n')}
+
+Je reste à votre disposition pour tout renseignement complémentaire et vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+${userFirstName} ${userLastName}`;
+    if (!ai) {
+        return {
+            letter: fallbackLetter,
+            emailSubject: `Déclaration de sinistre — ${policyName} — ${dateFr}`,
+        };
+    }
+    const prompt = `Rédige une lettre de déclaration de sinistre professionnelle en français pour :
+- Assuré : ${userFirstName} ${userLastName}${userEmail ? ` — ${userEmail}` : ''}
+- Assureur : ${insurerName}
+- Contrat : "${policyName}"
+- Sinistre : ${claimCtx.evenement} survenu le ${dateFr}
+- Lieu : ${claimCtx.lieu || 'non précisé'}
+- Tiers impliqué : ${claimCtx.tiers ? 'Oui' : 'Non'}
+- Dommages : ${claimCtx.dommages.join(', ')}
+- Détails : ${claimCtx.details || 'aucun'}
+- Documents joints à mentionner : ${analysis.requiredDocs.join(', ')}
+- Date de rédaction : ${today}
+
+Rédige une lettre formelle complète (courrier postal), prête à envoyer. Inclus un objet clair.
+Réponds en JSON : {"letter": "...", "emailSubject": "..."} — texte plain (pas de markdown dans la lettre).`;
+    try {
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'generateClaimLetter');
+        const result = await model.generateContent([prompt]);
+        const text = (await result.response).text().trim();
+        const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+            letter: parsed.letter || fallbackLetter,
+            emailSubject: parsed.emailSubject || `Déclaration de sinistre — ${policyName}`,
+        };
+    }
+    catch {
+        return { letter: fallbackLetter, emailSubject: `Déclaration de sinistre — ${policyName} — ${dateFr}` };
+    }
+};
+exports.generateClaimLetter = generateClaimLetter;
+const chatClaim = async (userMessage, history, claimData, analysis, policyName, insurerName, policyContext = '') => {
+    const ai = getAiClient();
+    if (!ai)
+        return 'Service IA non disponible. Vérifiez la configuration GEMINI_API_KEY.';
+    const claimSummary = [
+        `Événement : ${claimData.evenement || '?'}`,
+        `Date : ${claimData.dateIncident || '?'}`,
+        claimData.lieu ? `Lieu : ${claimData.lieu}` : '',
+        (claimData.dommages || []).length ? `Dommages : ${claimData.dommages.join(', ')}` : '',
+        claimData.tiers ? 'Tiers impliqué.' : '',
+    ].filter(Boolean).join(' | ');
+    const analysisSummary = analysis
+        ? `Couverture estimée : ${analysis.isCovered === true ? 'OUI' : analysis.isCovered === false ? 'NON' : 'INCERTAINE'}. Délai déclaration : ${analysis.declarationDeadlineDays}j. Franchise : ${analysis.franchise || 'inconnue'}.`
+        : 'Analyse IA non encore effectuée.';
+    const historyText = history
+        .slice(-8) // Keep last 8 messages for context window
+        .map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.content}`)
+        .join('\n');
+    const systemPrompt = `Tu es un assistant expert en assurance française, spécialisé dans l'accompagnement des assurés lors de sinistres.
+Contrat concerné : ${policyName} (${insurerName}).
+Sinistre déclaré : ${claimSummary}.
+${analysisSummary}
+${policyContext ? `Contexte contrat :\n${policyContext.slice(0, 2000)}` : ''}
+
+Règles :
+- Réponds en français, de façon concise et pédagogique
+- Tu aides à préparer la déclaration, tu n'es pas l'assureur
+- Si tu n'es pas sûr, dis-le clairement
+- En cas d'urgence réelle, conseille d'appeler le 15/17/18 ou l'assureur directement
+- Ne donne pas de conseils juridiques qui nécessiteraient un avocat`;
+    const fullPrompt = `${systemPrompt}\n\nHistorique :\n${historyText}\n\nUtilisateur: ${userMessage}\nAssistant:`;
+    try {
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'chatClaim');
+        const result = await model.generateContent([fullPrompt]);
+        const text = (await result.response).text().trim();
+        return text || 'Désolé, je n\'ai pas pu générer une réponse. Veuillez réessayer.';
+    }
+    catch {
+        return 'Une erreur est survenue. Veuillez réessayer ou contacter directement votre assureur.';
+    }
+};
+exports.chatClaim = chatClaim;
+function getBasicDocs(ctx) {
+    const docs = [];
+    if (ctx.tiers)
+        docs.push('Coordonnées du tiers impliqué');
+    if (/vol|theft/i.test(ctx.evenement))
+        docs.push('Dépôt de plainte (récépissé)');
+    if (ctx.urgence)
+        docs.push('Rapport des secours ou pompiers');
+    return docs;
+}
+function buildDefaultActions(ctx, deadlineDays, docs) {
+    const actions = [];
+    let step = 1;
+    if (ctx.urgence)
+        actions.push({ step: step++, label: 'Appeler le numéro d\'urgence de votre assureur', priority: 'urgent', deadline: 'Immédiatement' });
+    actions.push({ step: step++, label: 'Prendre des photos des dommages', priority: 'urgent', deadline: 'Dès que possible' });
+    if (/dégât des eaux|fuite|inondation/i.test(ctx.evenement))
+        actions.push({ step: step++, label: 'Couper l\'eau et prévenir l\'aggravation', priority: 'urgent', deadline: 'Immédiatement' });
+    if (/vol/i.test(ctx.evenement))
+        actions.push({ step: step++, label: 'Déposer plainte auprès des forces de l\'ordre', priority: 'urgent', deadline: 'Dans les 24h' });
+    if (ctx.tiers)
+        actions.push({ step: step++, label: 'Récupérer les coordonnées du tiers et établir un constat amiable', priority: 'urgent' });
+    actions.push({ step: step++, label: `Déclarer le sinistre à votre assureur (délai légal : ${deadlineDays} jours ouvrés)`, priority: 'important', deadline: `Sous ${deadlineDays} jours` });
+    if (docs.length > 0)
+        actions.push({ step: step++, label: `Rassembler les pièces justificatives : ${docs.slice(0, 2).join(', ')}${docs.length > 2 ? '…' : ''}`, priority: 'important' });
+    return actions;
+}

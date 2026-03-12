@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const geminiService_1 = require("../services/geminiService");
+const tableExtractionService_1 = require("../services/tableExtractionService");
 const storage_1 = require("../storage");
 const db_1 = require("../db");
 const cacheService_1 = require("../services/cacheService");
@@ -253,6 +254,60 @@ router.get('/debug-coverage', async (req, res) => {
     }
     catch (err) {
         console.error('❌ debug-coverage error:', err);
+        res.status(500).json({ error: err?.message || 'Erreur interne' });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// DEBUG: relancer Vision sur une page spécifique et voir le JSON brut
+// GET /api/ai/debug-extract-page?cgId=536&page=5
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/debug-extract-page', async (req, res) => {
+    const cgId = parseInt(req.query.cgId);
+    const pageNo = parseInt(req.query.page);
+    if (isNaN(cgId) || isNaN(pageNo))
+        return res.status(400).json({ error: 'cgId et page (numéros) requis' });
+    try {
+        // 1. Récupérer l'image de la page depuis la DB
+        const pageRow = await (0, db_1.query)(`SELECT page_image_base64, content_text, has_table, table_json
+       FROM central_cg_pages WHERE central_cg_id = $1 AND page_number = $2 LIMIT 1`, [cgId, pageNo]);
+        if (pageRow.rows.length === 0) {
+            return res.status(404).json({ error: `Page ${pageNo} introuvable pour CG ${cgId}. Vectoriser d'abord.` });
+        }
+        const { page_image_base64, content_text, has_table, table_json } = pageRow.rows[0];
+        // 2. Récupérer insurer_code et insurance_type_code
+        const cgRow = await (0, db_1.query)(`SELECT insurer_code, insurance_type_code FROM central_cg WHERE id = $1`, [cgId]);
+        const insurer_code = cgRow.rows[0]?.insurer_code ?? 'unknown';
+        const insurance_type = cgRow.rows[0]?.insurance_type_code ?? 'unknown';
+        // 3. Relancer Vision en direct sur cette page
+        let freshExtraction = null;
+        let extractionError = null;
+        if (page_image_base64) {
+            try {
+                freshExtraction = await (0, tableExtractionService_1.extractTableFromPageImage)(page_image_base64, insurer_code, insurance_type);
+            }
+            catch (e) {
+                extractionError = e?.message || 'Erreur Vision';
+            }
+        }
+        else {
+            extractionError = 'image non disponible en DB (page pas encore vectorisée avec images)';
+        }
+        // 4. Coverage_facts actuellement en DB pour cette page
+        const existingFacts = await (0, db_1.query)(`SELECT guarantee_label, guarantee_key, formula_label, formula_key, coverage_status
+       FROM coverage_facts WHERE central_cg_id = $1 ORDER BY guarantee_key, formula_key`, [cgId]);
+        res.json({
+            cgId, pageNo, insurer_code, insurance_type,
+            textPreview: (content_text || '').substring(0, 500),
+            hasTableInDB: has_table,
+            tableJsonInDB: table_json,
+            freshVisionExtraction: freshExtraction,
+            extractionError,
+            existingFactsCount: existingFacts.rows.length,
+            existingFacts: existingFacts.rows
+        });
+    }
+    catch (err) {
+        console.error('❌ debug-extract-page error:', err);
         res.status(500).json({ error: err?.message || 'Erreur interne' });
     }
 });

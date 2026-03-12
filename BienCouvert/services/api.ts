@@ -1,22 +1,50 @@
 // =============================================================================
 // services/api.ts — Helper de fetch authentifié pour React Native
-// Remplace localStorage par expo-secure-store pour le token JWT
+// Stockage token : expo-secure-store avec fallback AsyncStorage (Expo Go dev)
 // CSRF non requis en mobile (pas de cookies cross-origin)
 // =============================================================================
 
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL, TOKEN_KEY } from '../constants/Config';
 
+// Wrapper sécurisé : utilise SecureStore en production, AsyncStorage en fallback
+export async function storageGet(key: string): Promise<string | null> {
+  try {
+    const SecureStore = require('expo-secure-store');
+    return await SecureStore.getItemAsync(key);
+  } catch {
+    return AsyncStorage.getItem(key);
+  }
+}
+
+export async function storageSet(key: string, value: string): Promise<void> {
+  try {
+    const SecureStore = require('expo-secure-store');
+    await SecureStore.setItemAsync(key, value);
+  } catch {
+    await AsyncStorage.setItem(key, value);
+  }
+}
+
+export async function storageRemove(key: string): Promise<void> {
+  try {
+    const SecureStore = require('expo-secure-store');
+    await SecureStore.deleteItemAsync(key);
+  } catch {
+    await AsyncStorage.removeItem(key);
+  }
+}
+
 export async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(TOKEN_KEY);
+  return storageGet(TOKEN_KEY);
 }
 
 export async function setToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(TOKEN_KEY, token);
+  await storageSet(TOKEN_KEY, token);
 }
 
 export async function removeToken(): Promise<void> {
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  await storageRemove(TOKEN_KEY);
 }
 
 // Callback global déclenchée en cas de session expirée (401 non récupérable)

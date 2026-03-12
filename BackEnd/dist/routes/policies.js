@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -129,61 +162,71 @@ router.post('/', upload.single('file'), async (req, res) => {
  */
 router.put('/:id', upload.single('file'), async (req, res) => {
     try {
-        const id = parseInt(req.params.id);
-        const policies = await storage_1.storage.readPolicies();
-        // Recherche de la police à modifier
-        const existing = policies.find((p) => p.id === id);
-        if (!existing)
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id))
+            return res.status(400).json({ message: 'Invalid policy id' });
+        // Vérifier que la police existe et appartient à l'utilisateur
+        const existing = await (0, db_1.query)(`SELECT p.*, i.label AS insurer_label
+       FROM policies p
+       LEFT JOIN insurers i ON i.code = p.insurer_code
+       WHERE p.id = $1`, [id]);
+        if (existing.rows.length === 0)
             return res.status(404).json({ message: 'Not found' });
+        const current = existing.rows[0];
+        const currentMeta = current.metadata || {};
         const body = req.body;
-        // Mise à jour des propriétés de base
-        if (body.name)
-            existing.metadata.name = body.name;
-        if (body.insurer)
-            existing.insurer = body.insurer;
-        if (body.type)
-            existing.type = body.type;
-        if (body.coverageDetail)
-            existing.metadata.coverageDetail = body.coverageDetail;
-        if (body.options)
-            existing.metadata.options = body.options;
-        if (body.sourceUrl)
-            existing.documentUrl = body.sourceUrl;
-        if (body.summary)
-            existing.metadata.summary = body.summary;
-        if (body.annualPremium !== undefined)
-            existing.premium = body.annualPremium;
-        if (body.isInternalSource !== undefined)
-            existing.metadata.isInternalSource = body.isInternalSource;
+        // Construire l'objet de mise à jour en fusionnant l'existant avec les nouvelles valeurs
+        const updatedPolicy = {
+            id,
+            userId: current.user_id,
+            insurerCode: body.insurerCode ?? current.insurer_code,
+            insuranceTypeCode: body.insurance_type_code ?? body.typeCode ?? current.insurance_type_code,
+            insuranceSubTypeCode: body.insurance_sub_type_code ?? body.subTypeCode ?? current.insurance_sub_type_code,
+            centralCgId: body.centralCgId !== undefined ? (body.centralCgId || null) : current.central_cg_id,
+            userCgId: body.userCgId !== undefined ? (body.userCgId || null) : current.user_cg_id,
+            startDate: body.startDate ?? current.start_date,
+            endDate: body.endDate !== undefined ? (body.endDate || null) : current.end_date,
+            status: body.status ?? current.status,
+            documentUrl: body.sourceUrl ?? current.document_url,
+            metadata: {
+                ...currentMeta,
+                name: body.name ?? currentMeta.name,
+                formula: body.formula !== undefined ? body.formula : currentMeta.formula,
+                options: body.options !== undefined ? body.options : (currentMeta.options || []),
+                premium: body.premium !== undefined ? body.premium : currentMeta.premium,
+                coverage: body.coverage !== undefined ? body.coverage : currentMeta.coverage,
+                summary: body.summary ?? currentMeta.summary,
+            }
+        };
         // Si un nouveau fichier est uploadé via multipart
         if (req.file) {
-            existing.documentData = req.file.buffer.toString('base64');
-            existing.metadata.fileName = req.file.originalname;
-            existing.metadata.mimeType = req.file.mimetype;
+            const fileData = req.file.buffer.toString('base64');
+            updatedPolicy.metadata.fileName = req.file.originalname;
+            updatedPolicy.metadata.mimeType = req.file.mimetype;
             try {
-                existing.metadata.summary = await (0, geminiService_1.summarizePolicy)(existing.documentData, existing.metadata.mimeType);
+                updatedPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(fileData, req.file.mimetype);
             }
             catch (e) { }
         }
-        // Si un nouveau fichier est fourni en base64
         else if (body.fileData && body.fileName) {
-            existing.documentData = body.fileData;
-            existing.metadata.fileName = body.fileName;
-            existing.metadata.mimeType = body.mimeType || existing.metadata.mimeType;
-            if (!existing.metadata.summary) {
+            updatedPolicy.metadata.fileName = body.fileName;
+            updatedPolicy.metadata.mimeType = body.mimeType || currentMeta.mimeType;
+            if (!updatedPolicy.metadata.summary) {
                 try {
-                    existing.metadata.summary = await (0, geminiService_1.summarizePolicy)(existing.documentData, existing.metadata.mimeType);
+                    updatedPolicy.metadata.summary = await (0, geminiService_1.summarizePolicy)(body.fileData, updatedPolicy.metadata.mimeType);
                 }
                 catch (e) { }
             }
         }
-        // Sauvegarde des modifications
-        await storage_1.storage.writePolicy(existing);
-        res.json(existing);
+        await storage_1.storage.writePolicy(updatedPolicy);
+        // Retourner la policy complète avec les JOINs
+        const updatedPolicies = await storage_1.storage.readPolicies(current.user_id);
+        const updated = updatedPolicies.find((p) => p.id === id.toString());
+        res.json(updated ?? { message: 'Updated' });
     }
     catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Server error' });
+        console.error('❌ Erreur PUT policy:', err);
+        res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 /**
@@ -313,7 +356,7 @@ router.get('/:id/available-options', async (req, res) => {
            ucf.formula_label,
            ucf.formula_key,
            ucf.source_page_number,
-           NULL::text AS coverage_amount,
+           ucf.coverage_amount,
            NULL::text AS coverage_notes
          FROM user_coverage_facts ucf
          WHERE ucf.user_cg_id = $1
@@ -446,7 +489,7 @@ router.post('/central-cg', async (req, res) => {
     try {
         console.log('📥 Réception POST /central-cg, body:', JSON.stringify({ ...req.body, pdfData: req.body.pdfData ? '[PDF DATA]' : undefined }, null, 2));
         // Extraction des champs
-        const { insurerCode, productName, insuranceTypeCode, insuranceSubTypeCode, documentTypeCode, version, type, url, targetFilename, pdfData, metadata } = req.body;
+        const { insurerCode, productName, insuranceTypeCode, insuranceSubTypeCode, documentTypeCode, version, type, detail, url, targetFilename, pdfData, metadata } = req.body;
         console.log('📋 Champs extraits:', {
             insurerCode,
             productName,
@@ -482,7 +525,7 @@ router.post('/central-cg', async (req, res) => {
             version: version || null,
             type: documentTypeCode || type || 'CG',
             owner: `user_${userId}`,
-            detail: null,
+            detail: detail || null,
             url: url || null,
             targetFilename: targetFilename || 'document.pdf',
             status: 'active',
@@ -592,6 +635,91 @@ router.get('/central-cg/:id/vectorization-status', async (req, res) => {
     }
     catch (err) {
         console.error('❌ Error in GET /central-cg/:id/vectorization-status:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+/**
+ * Route POST /api/policies/central-cg/:id/reprocess
+ * Relance la vectorisation d'un CG central existant (utile si le PDF était absent lors de la création).
+ * Utilise le pdf_base64 ou pdf_file_path déjà stocké en DB.
+ */
+router.post('/central-cg/:id/reprocess', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id))
+            return res.status(400).json({ message: 'Invalid id' });
+        // Vérifications préliminaires
+        const cgCheck = await (0, db_1.query)(`SELECT id, insurer_code, source_url, pdf_base64, pdf_file_path, vectorization_status
+       FROM central_cg WHERE id = $1`, [id]);
+        if (cgCheck.rows.length === 0) {
+            return res.status(404).json({ message: `CG ${id} introuvable` });
+        }
+        const cg = cgCheck.rows[0];
+        // Si aucun PDF disponible, tenter u téléchargement depuis source_url
+        let pdfBase64 = cg.pdf_base64 || null;
+        if (!pdfBase64 && cg.pdf_file_path) {
+            try {
+                const fullPath = path_1.default.join(PDF_STORAGE_DIR, cg.pdf_file_path);
+                if (fs_1.default.existsSync(fullPath)) {
+                    pdfBase64 = fs_1.default.readFileSync(fullPath).toString('base64');
+                    console.log(`✅ PDF lu depuis disque: ${fullPath}`);
+                }
+            }
+            catch (diskErr) {
+                console.warn(`⚠️ Impossible de lire PDF disque:`, diskErr);
+            }
+        }
+        if (!pdfBase64 && cg.source_url) {
+            try {
+                console.log(`📥 Téléchargement PDF depuis: ${cg.source_url}`);
+                const https = await Promise.resolve().then(() => __importStar(require('https')));
+                const http = await Promise.resolve().then(() => __importStar(require('http')));
+                const fetchModule = cg.source_url.startsWith('https') ? https : http;
+                pdfBase64 = await new Promise((resolve, reject) => {
+                    const chunks = [];
+                    fetchModule.get(cg.source_url, (resp) => {
+                        if (resp.statusCode !== 200)
+                            return reject(new Error(`HTTP ${resp.statusCode}`));
+                        resp.on('data', (chunk) => chunks.push(chunk));
+                        resp.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+                    }).on('error', reject);
+                });
+                await (0, db_1.query)('UPDATE central_cg SET pdf_base64 = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [pdfBase64, id]);
+                console.log(`✅ PDF téléchargé et stocké pour CG ${id}`);
+            }
+            catch (downloadErr) {
+                console.error(`❌ Échec téléchargement PDF pour CG ${id}:`, downloadErr);
+                return res.status(422).json({ message: `Aucun PDF disponible et téléchargement échoué: ${downloadErr.message}` });
+            }
+        }
+        if (!pdfBase64) {
+            return res.status(422).json({ message: `Impossible de retraiter CG ${id}: aucun PDF disponible` });
+        }
+        // Réponse immédiate — traitement en arrière-plan
+        res.json({ message: `Retraitement du CG ${id} lancé en arrière-plan`, status: 'processing' });
+        (async () => {
+            try {
+                const pageResult = await (0, pageVectorizationService_1.vectorizeCgByPages)(db_2.default, id, cg.source_url || '', pdfBase64);
+                console.log(`✅ Retraitement page par page OK pour CG ${id}:`, pageResult);
+                const textResult = await (0, db_1.query)(`SELECT COALESCE(string_agg(content_text, E'\n\n' ORDER BY page_number), '') AS full_text
+           FROM central_cg_pages WHERE central_cg_id = $1`, [id]);
+                const fullText = textResult.rows[0]?.full_text || '';
+                await (0, db_1.query)('UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [fullText, id]);
+                if (fullText.trim().length > 0) {
+                    await storage_1.storage.vectorizeCentralCg(id, fullText);
+                    console.log(`✅ Embedding mis à jour pour CG ${id} après retraitement`);
+                }
+                else {
+                    console.warn(`⚠️ Texte vide après retraitement pour CG ${id}`);
+                }
+            }
+            catch (e) {
+                console.error(`❌ Erreur retraitement CG ${id}:`, e);
+            }
+        })().catch(err => console.error('❌ Erreur async reprocess:', err));
+    }
+    catch (err) {
+        console.error('❌ Erreur POST /central-cg/:id/reprocess:', err);
         res.status(500).json({ message: 'Server error' });
     }
 });

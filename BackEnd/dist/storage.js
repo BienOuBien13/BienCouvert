@@ -320,10 +320,12 @@ exports.storage = {
         cg.*,
         i.label as insurer_label,
         i.logo_url as insurer_logo,
-        it.label_fr as type_label
+        it.label_fr as type_label,
+        ist.label_fr as sub_type_label
       FROM central_cg cg
       LEFT JOIN insurers i ON cg.insurer_code = i.code
       LEFT JOIN insurance_types it ON cg.insurance_type_code = it.code
+      LEFT JOIN insurance_sub_types ist ON cg.insurance_sub_type_code = ist.code
       ORDER BY cg.id
     `);
         return result.rows.map(row => ({
@@ -331,6 +333,8 @@ exports.storage = {
             // Nouveaux champs
             insurerCode: row.insurer_code,
             insuranceTypeCode: row.insurance_type_code,
+            insuranceSubTypeCode: row.insurance_sub_type_code || null,
+            insuranceSubTypeLabel: row.sub_type_label || row.insurance_sub_type_code || null,
             version: row.version,
             type: row.type,
             owner: row.owner,
