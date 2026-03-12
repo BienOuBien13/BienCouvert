@@ -47,8 +47,10 @@
     "extra": {
       "apiUrl": "https://api.assurclair.fr",
       "eas": {
-        "projectId": "BIENCOUVERT"
-      }
-    }
+        "projectId": "b384319c-0296-4837-b700-22be9d599b1d"
+      },
+      "router": {}
+    },
+    "owner": "remi.jolivalt"
   }
 }
