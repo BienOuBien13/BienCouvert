@@ -236,7 +236,12 @@ app.get('/api/csrf-token', (req, res) => {
 
 // Montage des routes principales de l'API
 // 🔒 authLimiter est appliqué directement sur les routes /login et /register (dans auth.ts)
-app.use('/api/auth', doubleCsrfProtection, authRoutes);                     // 🔒 Auth avec CSRF
+// login et register sont exclus du CSRF : déjà protégés par rate limiting + bcrypt + JWT
+// Les autres routes auth (logout, reset-password, etc.) gardent la protection CSRF
+app.use('/api/auth/login', authRoutes);                                     // 🔓 Login sans CSRF (mobile-friendly)
+app.use('/api/auth/register', authRoutes);                                  // 🔓 Register sans CSRF (mobile-friendly)
+app.use('/api/auth/forgot-password', authRoutes);                           // 🔓 Forgot password sans CSRF
+app.use('/api/auth', doubleCsrfProtection, authRoutes);                     // 🔒 Autres routes auth avec CSRF
 app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // 🔒 Policies avec CSRF
 app.use('/api/ai', aiLimiter, doubleCsrfProtection, aiRoutes);              // 🔒 AI avec CSRF + rate limit strict
 app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                // 📊 Master Data (lecture seule, pas de CSRF)
