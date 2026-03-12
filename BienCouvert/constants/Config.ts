@@ -8,6 +8,8 @@
 export const API_URL: string =
   (process.env.EXPO_PUBLIC_API_URL as string) || 'https://api.assurclair.fr';
 
+console.log('[Config] API_URL =', API_URL);
+
 export const APP_VERSION = '1.0.0';
 
 export const TOKEN_KEY = 'assurclair_token';
