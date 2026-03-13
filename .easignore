@@ -1,0 +1,21 @@
+# Exclure tout sauf BienCouvert/ du tarball EAS Build
+# EAS archive depuis la racine git — on exclut les dossiers non-mobile
+
+BackEnd/
+FrontEnd/
+docs/
+scripts/
+.github/
+*.sh
+*.ps1
+*.sql
+*.yml
+docker-compose.yml
+nginx*.conf
+otel-collector-config.yaml
+README.md
+deploy*.ps1
+rebuild*.ps1
+fix-*.ps1
+run-*.ps1
+view-*.ps1
