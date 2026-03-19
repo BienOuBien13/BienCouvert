@@ -5,8 +5,7 @@
 // =============================================================================
 
 import { User, UserProfileData } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { API_URL } from './apiUrl';
 const TOKEN_KEY = 'assurclair_token';
 const USER_KEY = 'assurclair_current_user';
 
@@ -281,7 +280,6 @@ export const authService = {
    * Vérifie l'adresse email via token envoyé à l'inscription
    */
   verifyEmail: async (token: string): Promise<{ ok: boolean; email: string }> => {
-    const API_URL = (import.meta as any).env?.VITE_API_URL || '';
     const res = await fetch(`${API_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { credentials: 'include' });
     if (!res.ok) throw new Error('Lien de vérification invalide ou expiré');
     return res.json();

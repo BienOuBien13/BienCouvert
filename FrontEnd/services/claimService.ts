@@ -4,8 +4,7 @@
 // ============================================================================
 
 import { fetchCsrfToken } from './authService';
-
-const API_URL = import.meta.env.VITE_API_URL ?? '';
+import { API_URL } from './apiUrl';
 const TOKEN_KEY = 'assurclair_token';
 
 export interface ClaimContext {

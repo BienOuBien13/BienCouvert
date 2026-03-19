@@ -6,8 +6,7 @@
 import { Policy, OptimizationFinding, Message, WebSearchResult, UserProfileData, PolicyType, CentralCgEntry } from "../types";
 import { fetchCsrfToken } from './authService';
 import type { CoverageData } from '../components/CoverageDetailPage';
-
-const API_URL = import.meta.env.VITE_API_URL ?? '';
+import { API_URL } from './apiUrl';
 
 /**
  * Effectue une requête vers le backend
