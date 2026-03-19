@@ -440,15 +440,15 @@ function App() {
         </div>
       )}
 
-      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 h-16 px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100">
+      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 h-12 md:h-16 px-3 md:px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100">
         <div className="flex items-center cursor-pointer group" onClick={() => setActiveView('home')}>
-          <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-9 w-auto object-contain group-hover:scale-105 transition-transform duration-200" />
+          <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-7 md:h-9 w-auto object-contain group-hover:scale-105 transition-transform duration-200" />
         </div>
         <div className="flex items-center gap-2">
            {user?.isAdmin && (
            <button 
              onClick={() => setActiveView('admin')} 
-             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'admin' ? 'bg-primary-600 text-white border-primary-600 shadow-primary-200' : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300 hover:text-primary-600'}`}
+             className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'admin' ? 'bg-primary-600 text-white border-primary-600 shadow-primary-200' : 'bg-white text-slate-600 border-slate-200 hover:border-primary-300 hover:text-primary-600'}`}
              title="Administration - Base de Connaissances"
            >
              <Database className="w-4 h-4" />
@@ -458,7 +458,7 @@ function App() {
            {user?.isPartner && (
            <button
              onClick={() => setActiveView('partner')}
-             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'partner' ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
+             className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'partner' ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
              title="Espace Partenaire"
            >
              <Briefcase className="w-4 h-4" />
@@ -467,22 +467,22 @@ function App() {
            )}
            <button
              onClick={() => setActiveView('sinistre')}
-             className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'sinistre' ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'}`}
+             className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'sinistre' ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'}`}
              title="Assistant Sinistre"
            >
              <ShieldAlert className="w-4 h-4" />
              <span className="text-sm font-bold hidden sm:inline">Sinistre</span>
            </button>
-           <button onClick={() => setActiveView('profile')} className={`p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
+           <button onClick={() => setActiveView('profile')} className={`p-1.5 md:p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
              <Settings className="w-5 h-5" />
            </button>
-           <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors bg-white p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95" title="Déconnexion">
+           <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors bg-white p-1.5 md:p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95" title="Déconnexion">
              <LogOut className="w-5 h-5" />
            </button>
         </div>
       </header>
 
-      <main className="p-4 md:p-8 flex-1">
+      <main className="p-3 md:p-8 flex-1">
         <div className={`${activeView === 'admin' || activeView === 'partner' || activeView === 'sinistre' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
       </main>
 
@@ -494,10 +494,12 @@ function App() {
         />
       )}
 
-      <Footer 
-        onNavigateToTerms={() => setShowTerms(true)}
-        onNavigateToPrivacy={() => setShowPrivacy(true)}
-      />
+      <div className="hidden md:block">
+        <Footer 
+          onNavigateToTerms={() => setShowTerms(true)}
+          onNavigateToPrivacy={() => setShowPrivacy(true)}
+        />
+      </div>
 
       <BottomNav activeView={activeView} setActiveView={setActiveView} />
 
