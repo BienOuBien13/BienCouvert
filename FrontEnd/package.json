@@ -8,9 +8,22 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "echo 'No unit tests yet — typecheck acts as smoke test' && npm run typecheck"
+    "test": "echo 'No unit tests yet — typecheck acts as smoke test' && npm run typecheck",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:android": "npm run build && npx cap sync android && npx cap open android",
+    "cap:ios": "npm run build && npx cap sync ios && npx cap open ios",
+    "cap:run:android": "npm run build && npx cap sync android && npx cap run android",
+    "cap:run:ios": "npm run build && npx cap sync ios && npx cap run ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/haptics": "^8.0.1",
+    "@capacitor/ios": "^8.2.0",
+    "@capacitor/keyboard": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.1",
     "@google/genai": "^1.30.0",
     "jspdf": "^2.5.1",
     "lucide-react": "^0.554.0",
