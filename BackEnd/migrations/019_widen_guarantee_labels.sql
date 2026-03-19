@@ -19,6 +19,14 @@ ALTER TABLE user_coverage_facts
   ALTER COLUMN formula_key     TYPE TEXT,
   ALTER COLUMN formula_label   TYPE TEXT;
 
--- Ajout de coverage_amount si absent (peut déjà exister sur certaines instances) -----
+-- Ajout de coverage_amount si absent et élargissement si déjà présent en VARCHAR -----
 ALTER TABLE user_coverage_facts
   ADD COLUMN IF NOT EXISTS coverage_amount TEXT;
+-- Si coverage_amount existait déjà en VARCHAR(100), ADD COLUMN IF NOT EXISTS ne change pas
+-- le type. On force TEXT explicitement (no-op si déjà TEXT).
+ALTER TABLE user_coverage_facts
+  ALTER COLUMN coverage_amount TYPE TEXT;
+
+-- Même chose pour coverage_facts (table centrale)
+ALTER TABLE coverage_facts
+  ALTER COLUMN coverage_amount TYPE TEXT;

@@ -45,7 +45,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://biencouvert.fr/api",
+      "apiUrl": "https://biencouvert.fr",
       "eas": {
         "projectId": "b384319c-0296-4837-b700-22be9d599b1d"
       },

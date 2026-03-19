@@ -99,6 +99,31 @@ export function AuthScreen({ onLogin }: Props) {
           </View>
         ) : (
           <View style={styles.form}>
+            {/* Onglets Connexion / Inscription (comme le web) */}
+            {(mode === 'login' || mode === 'register') && (
+              <View style={styles.tabs}>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'login' && styles.tabActive]}
+                  onPress={() => { setMode('login'); setError(''); }}
+                >
+                  <Text style={[styles.tabText, mode === 'login' && styles.tabTextActive]}>Connexion</Text>
+                  {mode === 'login' && <View style={styles.tabUnderline} />}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'register' && styles.tabActive]}
+                  onPress={() => { setMode('register'); setError(''); }}
+                >
+                  <Text style={[styles.tabText, mode === 'register' && styles.tabTextActive]}>Inscription</Text>
+                  {mode === 'register' && <View style={styles.tabUnderline} />}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Titre pour les modes forgot */}
+            {mode === 'forgot' && (
+              <Text style={styles.forgotTitle}>Réinitialisation du mot de passe</Text>
+            )}
+
             {error ? (
               <View style={styles.errorBox}>
                 <Ionicons name="alert-circle-outline" size={16} color="#b91c1c" />
@@ -179,16 +204,11 @@ export function AuthScreen({ onLogin }: Props) {
             {/* Liens de navigation entre modes */}
             <View style={styles.links}>
               {mode === 'login' && (
-                <>
-                  <TouchableOpacity onPress={() => { setError(''); setMode('forgot'); }}>
-                    <Text style={styles.link}>Mot de passe oublié ?</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => { setError(''); setMode('register'); }}>
-                    <Text style={styles.link}>Créer un compte</Text>
-                  </TouchableOpacity>
-                </>
+                <TouchableOpacity onPress={() => { setError(''); setMode('forgot'); }}>
+                  <Text style={styles.link}>Mot de passe oublié ?</Text>
+                </TouchableOpacity>
               )}
-              {(mode === 'register' || mode === 'forgot') && (
+              {mode === 'forgot' && (
                 <TouchableOpacity onPress={() => { setError(''); setMode('login'); }}>
                   <Text style={styles.link}>← Retour à la connexion</Text>
                 </TouchableOpacity>
@@ -222,6 +242,31 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '800', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
   form: { gap: 16 },
+  tabs: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    marginBottom: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingBottom: 14,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  tabActive: {},
+  tabText: { fontSize: 14, fontWeight: '500', color: '#64748b' },
+  tabTextActive: { color: '#0ea5e9', fontWeight: '700' },
+  tabUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: '#0ea5e9',
+    borderRadius: 2,
+  },
+  forgotTitle: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',

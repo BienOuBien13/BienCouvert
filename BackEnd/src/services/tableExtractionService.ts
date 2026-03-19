@@ -366,7 +366,9 @@ export function tableToFacts(
         formula_key:     truncate(formulaKey,     90),
         formula_label:   truncate(formulaLabel,   90),
         coverage_status: coverageStatus,
-        coverage_amount: parsed.amount ?? undefined,
+        // Tronqué à 200 : protection contre les cellules très longues (ex: descriptions CPAM)
+        // avant migration 019 qui widend la colonne en TEXT
+        coverage_amount: parsed.amount ? truncate(parsed.amount, 200) : undefined,
       });
     });
   });

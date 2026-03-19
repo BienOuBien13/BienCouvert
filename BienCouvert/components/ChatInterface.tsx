@@ -13,11 +13,88 @@ import {
   Platform,
   ActivityIndicator,
   SafeAreaView,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Message, Policy } from '../types';
 import { sendMessageToAssistantStream } from '../services/geminiService';
 import { uuid } from '../utils/uuid';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rendu Markdown pour React Native
+// Gère : **gras**, *italique*, `code`, [lien](url), - listes, ## titres
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Segment = { type: 'text' | 'bold' | 'italic' | 'code' | 'link'; text: string; url?: string };
+
+function tokenizeLine(raw: string): Segment[] {
+  const out: Segment[] = [];
+  let rest = raw;
+  while (rest.length > 0) {
+    const linkM = rest.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)/);
+    if (linkM) { out.push({ type: 'link', text: linkM[1], url: linkM[2] }); rest = rest.slice(linkM[0].length); continue; }
+    const boldM = rest.match(/^\*\*([^*]+)\*\*/);
+    if (boldM) { out.push({ type: 'bold', text: boldM[1] }); rest = rest.slice(boldM[0].length); continue; }
+    const italM = rest.match(/^\*([^*]+)\*/);
+    if (italM) { out.push({ type: 'italic', text: italM[1] }); rest = rest.slice(italM[0].length); continue; }
+    const codeM = rest.match(/^`([^`]+)`/);
+    if (codeM) { out.push({ type: 'code', text: codeM[1] }); rest = rest.slice(codeM[0].length); continue; }
+    const nextIdx = rest.search(/[\[*`]/);
+    if (nextIdx === 0) { out.push({ type: 'text', text: rest[0] }); rest = rest.slice(1); }
+    else if (nextIdx > 0) { out.push({ type: 'text', text: rest.slice(0, nextIdx) }); rest = rest.slice(nextIdx); }
+    else { out.push({ type: 'text', text: rest }); rest = ''; }
+  }
+  return out;
+}
+
+function InlineText({ segments, isUser }: { segments: Segment[]; isUser: boolean }) {
+  return (
+    <Text>
+      {segments.map((seg, i) => {
+        switch (seg.type) {
+          case 'bold': return <Text key={i} style={isUser ? styles.mdUserBold : styles.mdBold}>{seg.text}</Text>;
+          case 'italic': return <Text key={i} style={isUser ? styles.mdUserItalic : styles.mdItalic}>{seg.text}</Text>;
+          case 'code': return <Text key={i} style={isUser ? styles.mdUserCode : styles.mdCode}>{seg.text}</Text>;
+          case 'link': return (
+            <Text key={i} style={styles.mdLink} onPress={() => seg.url && Linking.openURL(seg.url)}>
+              {seg.text} ↗
+            </Text>
+          );
+          default: return <Text key={i} style={isUser ? styles.userText : styles.botText}>{seg.text}</Text>;
+        }
+      })}
+    </Text>
+  );
+}
+
+function MarkdownText({ text, isUser }: { text: string; isUser: boolean }) {
+  const lines = text.split('\n');
+  return (
+    <View style={{ gap: 2 }}>
+      {lines.map((line, i) => {
+        if (line.trim() === '') return <View key={i} style={{ height: 4 }} />;
+        if (/^#{1,3}\s/.test(line)) {
+          const level = (line.match(/^(#{1,3})\s/) || ['', ''])[1].length;
+          const content = line.replace(/^#{1,3}\s/, '');
+          return (
+            <Text key={i} style={isUser ? styles.userText : (level === 1 ? styles.mdH1 : styles.mdH2)}>
+              {content}
+            </Text>
+          );
+        }
+        if (/^[-•]\s/.test(line)) {
+          return (
+            <View key={i} style={styles.mdListItem}>
+              <Text style={isUser ? styles.userText : styles.mdBullet}>{'  •  '}</Text>
+              <InlineText segments={tokenizeLine(line.replace(/^[-•]\s/, ''))} isUser={isUser} />
+            </View>
+          );
+        }
+        return <InlineText key={i} segments={tokenizeLine(line)} isUser={isUser} />;
+      })}
+    </View>
+  );
+}
 
 interface Props {
   policies: Policy[];
@@ -105,9 +182,7 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
           {item.isTyping && item.text === '' ? (
             <ActivityIndicator size="small" color="#0ea5e9" />
           ) : (
-            <Text style={[styles.messageText, isUser ? styles.userText : styles.botText]}>
-              {item.text}
-            </Text>
+            <MarkdownText text={item.text} isUser={isUser} />
           )}
         </View>
       </View>
@@ -213,8 +288,21 @@ const styles = StyleSheet.create({
     borderColor: '#f1f5f9',
   },
   messageText: { fontSize: 14, lineHeight: 20 },
-  userText: { color: '#fff' },
-  botText: { color: '#0f172a' },
+  userText: { color: '#fff', fontSize: 14, lineHeight: 20 },
+  botText: { color: '#0f172a', fontSize: 14, lineHeight: 20 },
+  // Markdown bot styles
+  mdH1: { fontSize: 15, fontWeight: '800', color: '#0f172a', marginTop: 6, marginBottom: 2 },
+  mdH2: { fontSize: 14, fontWeight: '700', color: '#1e293b', marginTop: 4, marginBottom: 1 },
+  mdBold: { fontWeight: '700', color: '#0f172a' },
+  mdItalic: { fontStyle: 'italic', color: '#334155' },
+  mdCode: { fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', backgroundColor: '#e2e8f0', color: '#0f172a', borderRadius: 3, fontSize: 12 },
+  mdLink: { color: '#0ea5e9', textDecorationLine: 'underline' },
+  mdListItem: { flexDirection: 'row', alignItems: 'flex-start' },
+  mdBullet: { color: '#64748b', fontSize: 14 },
+  // Markdown user styles (white for readability on blue bg)
+  mdUserBold: { fontWeight: '700', color: '#fff' },
+  mdUserItalic: { fontStyle: 'italic', color: '#e0f2fe' },
+  mdUserCode: { fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: '#fff', fontSize: 12 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   emptyIcon: {
     width: 72,

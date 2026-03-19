@@ -1,6 +1,3 @@
-// components/UserProfile.tsx — Profil utilisateur adapté RN
-// Adapté depuis FrontEnd/components/UserProfile.tsx
-
 import React, { useState } from 'react';
 import {
   View,
@@ -8,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -32,6 +28,8 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [showDeleteZone, setShowDeleteZone] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const handleSave = async () => {
     setStatus('saving');
@@ -52,26 +50,15 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Supprimer le compte ?',
-      'Cette action est irréversible. Toutes vos données seront supprimées définitivement.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer mon compte',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await authService.deleteAccount(user.id);
-              onLogout();
-            } catch (e: any) {
-              Alert.alert('Erreur', e.message);
-            }
-          },
-        },
-      ],
-    );
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'SUPPRIMER') return;
+    try {
+      await authService.deleteAccount(user.id);
+      onLogout();
+    } catch (e: any) {
+      setErrorMsg(e.message);
+      setStatus('error');
+    }
   };
 
   return (
@@ -80,7 +67,7 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView style={styles.flex} contentContainerStyle={styles.container}>
-        {/* Header */}
+        {/* Header — identique au web (fond sombre, initiales) */}
         <View style={styles.headerCard}>
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarText}>{initials(user.firstName, user.lastName)}</Text>
@@ -117,6 +104,15 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
           <View style={styles.form}>
             <Input label="Prénom" value={firstName} onChangeText={setFirstName} />
             <Input label="Nom" value={lastName} onChangeText={setLastName} />
+            <View>
+              <Input
+                label="Adresse Email"
+                value={user.email}
+                editable={false}
+                style={styles.emailDisabled}
+              />
+              <Text style={styles.emailNote}>L'email est votre identifiant unique et ne peut pas être changé.</Text>
+            </View>
             <Input
               label="Nouveau mot de passe (optionnel)"
               value={password}
@@ -127,7 +123,7 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
           </View>
 
           <Button
-            label="Enregistrer les modifications"
+            label={status === 'saving' ? 'Enregistrement…' : status === 'success' ? 'Profil sauvegardé ✓' : 'Enregistrer les modifications'}
             onPress={handleSave}
             loading={status === 'saving'}
             style={styles.saveBtn}
@@ -140,11 +136,40 @@ export function UserProfile({ user, onUpdateUser, onLogout }: Props) {
             <Ionicons name="log-out-outline" size={20} color="#f59e0b" />
             <Text style={styles.actionLogout}>Se déconnecter</Text>
           </TouchableOpacity>
-          <View style={styles.divider} />
-          <TouchableOpacity style={styles.actionRow} onPress={handleDeleteAccount}>
-            <Ionicons name="trash-outline" size={20} color="#ef4444" />
-            <Text style={styles.actionDelete}>Supprimer mon compte</Text>
-          </TouchableOpacity>
+        </Card>
+
+        {/* Zone de danger — aligne avec le web (confirmation textuelle) */}
+        <Card style={styles.dangerCard}>
+          <Text style={styles.dangerTitle}>🗑️ Zone de danger</Text>
+          <Text style={styles.dangerSubtext}>
+            La suppression de votre compte est <Text style={styles.dangerBold}>définitive et irréversible</Text>.
+            Toutes vos données seront supprimées.
+          </Text>
+          {!showDeleteZone ? (
+            <TouchableOpacity style={styles.dangerBtn} onPress={() => setShowDeleteZone(true)}>
+              <Text style={styles.dangerBtnText}>Supprimer mon compte</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.deleteConfirm}>
+              <Text style={styles.deleteConfirmLabel}>Tapez <Text style={styles.deleteConfirmCode}>SUPPRIMER</Text> pour confirmer :</Text>
+              <Input
+                value={deleteConfirmText}
+                onChangeText={setDeleteConfirmText}
+                placeholder="SUPPRIMER"
+                autoCapitalize="characters"
+              />
+              <View style={styles.deleteActions}>
+                <Button label="Annuler" variant="ghost" onPress={() => { setShowDeleteZone(false); setDeleteConfirmText(''); }} style={styles.flex} />
+                <TouchableOpacity
+                  style={[styles.confirmDeleteBtn, deleteConfirmText !== 'SUPPRIMER' && styles.confirmDeleteBtnDisabled]}
+                  onPress={handleDeleteAccount}
+                  disabled={deleteConfirmText !== 'SUPPRIMER'}
+                >
+                  <Text style={styles.confirmDeleteText}>Confirmer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </Card>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -202,11 +227,38 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   successText: { color: '#15803d', fontSize: 13, flex: 1 },
+  emailDisabled: { backgroundColor: '#f1f5f9', color: '#64748b' },
+  emailNote: { fontSize: 11, color: '#94a3b8', marginTop: 4 },
   form: { gap: 12 },
   saveBtn: { marginTop: 4 },
   actionCard: { gap: 4 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   actionLogout: { fontSize: 15, fontWeight: '600', color: '#f59e0b' },
-  actionDelete: { fontSize: 15, fontWeight: '600', color: '#ef4444' },
-  divider: { height: 1, backgroundColor: '#f1f5f9' },
+  // Danger zone
+  dangerCard: { borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fff5f5', gap: 12 },
+  dangerTitle: { fontSize: 15, fontWeight: '800', color: '#b91c1c' },
+  dangerSubtext: { fontSize: 13, color: '#374151', lineHeight: 20 },
+  dangerBold: { fontWeight: '700', color: '#b91c1c' },
+  dangerBtn: {
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  dangerBtnText: { color: '#b91c1c', fontWeight: '700', fontSize: 14 },
+  deleteConfirm: { gap: 10 },
+  deleteConfirmLabel: { fontSize: 13, color: '#374151' },
+  deleteConfirmCode: { fontWeight: '700', fontFamily: 'monospace', color: '#b91c1c' },
+  deleteActions: { flexDirection: 'row', gap: 10 },
+  confirmDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#b91c1c',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  confirmDeleteBtnDisabled: { backgroundColor: '#fca5a5' },
+  confirmDeleteText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

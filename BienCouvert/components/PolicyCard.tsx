@@ -11,8 +11,7 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Policy } from '../types';
-import { Badge } from './ui/Badge';
+import { Policy, PolicyType } from '../types';
 import { Card } from './ui/Card';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
@@ -22,8 +21,23 @@ interface Props {
   onDelete: (id: string) => void;
 }
 
+type IconConfig = { name: keyof typeof Ionicons.glyphMap; color: string; bg: string };
+
+const TYPE_ICONS: Record<string, IconConfig> = {
+  [PolicyType.AUTO]:      { name: 'car',               color: '#2563eb', bg: '#eff6ff' },
+  [PolicyType.HOME]:      { name: 'home',              color: '#ea580c', bg: '#fff7ed' },
+  [PolicyType.HEALTH]:    { name: 'heart',             color: '#16a34a', bg: '#f0fdf4' },
+  [PolicyType.BANK_CARD]: { name: 'card',              color: '#4f46e5', bg: '#eef2ff' },
+  [PolicyType.LOAN]:      { name: 'cash',              color: '#d97706', bg: '#fffbeb' },
+  [PolicyType.MOBILE]:    { name: 'phone-portrait',    color: '#475569', bg: '#f8fafc' },
+  [PolicyType.LEGAL]:     { name: 'scale',             color: '#7c3aed', bg: '#f5f3ff' },
+  [PolicyType.LIFE]:      { name: 'briefcase',         color: '#e11d48', bg: '#fff1f2' },
+};
+const DEFAULT_ICON: IconConfig = { name: 'shield-checkmark', color: '#64748b', bg: '#f8fafc' };
+
 export function PolicyCard({ policy, onEdit, onDelete }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const iconCfg = TYPE_ICONS[policy.type] ?? DEFAULT_ICON;
 
   const handleDelete = () => {
     Alert.alert(
@@ -43,11 +57,20 @@ export function PolicyCard({ policy, onEdit, onDelete }: Props) {
         activeOpacity={0.8}
         style={styles.header}
       >
-        <View style={styles.headerLeft}>
-          <Badge type={policy.type} size="sm" />
-          <Text style={styles.name} numberOfLines={2}>{policy.name}</Text>
+        {/* Icône colorée par type — identique au web */}
+        <View style={[styles.typeIcon, { backgroundColor: expanded ? '#0ea5e9' : iconCfg.bg }]}>
+          <Ionicons
+            name={iconCfg.name}
+            size={24}
+            color={expanded ? '#fff' : iconCfg.color}
+          />
+        </View>
+
+        <View style={styles.headerMid}>
+          <Text style={styles.name} numberOfLines={1}>{policy.name}</Text>
           <Text style={styles.insurer}>{policy.insurer}</Text>
         </View>
+
         <View style={styles.headerRight}>
           {policy.annualPremium != null && (
             <Text style={styles.premium}>{formatCurrency(policy.annualPremium)}/an</Text>
@@ -121,13 +144,20 @@ const styles = StyleSheet.create({
   card: { marginHorizontal: 16, marginVertical: 6 },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 12,
   },
-  headerLeft: { flex: 1, gap: 4 },
+  typeIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  headerMid: { flex: 1, gap: 2 },
   headerRight: { alignItems: 'flex-end', gap: 4 },
-  name: { fontSize: 15, fontWeight: '700', color: '#0f172a', marginTop: 4 },
+  name: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   insurer: { fontSize: 12, color: '#64748b' },
   premium: { fontSize: 14, fontWeight: '800', color: '#0ea5e9' },
   details: { marginTop: 12, gap: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 12 },

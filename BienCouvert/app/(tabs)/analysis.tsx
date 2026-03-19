@@ -7,7 +7,7 @@ import { usePolicies } from '@/hooks/usePolicies';
 import { AnalysisView } from '@/components/AnalysisView';
 
 export default function AnalysisScreen() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { policies, load } = usePolicies(user?.id);
 
   useEffect(() => { load(); }, [load]);

@@ -102,4 +102,26 @@ export const authService = {
     await removeToken();
     await storageRemove(USER_KEY);
   },
+
+  /**
+   * Récupère le profil d'analyse sauvegardé côté backend
+   */
+  getAnalysisProfile: async (): Promise<UserProfileData | null> => {
+    try {
+      const data = await apiFetch<{ profile: UserProfileData }>('/auth/me/analysis-profile');
+      return data?.profile || null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Sauvegarde le profil d'analyse côté backend
+   */
+  updateAnalysisProfile: async (profile: UserProfileData): Promise<void> => {
+    await apiFetch('/auth/me/analysis-profile', {
+      method: 'PUT',
+      body: JSON.stringify({ profile }),
+    });
+  },
 };

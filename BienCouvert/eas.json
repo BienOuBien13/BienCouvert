@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://52.143.159.51:4000"
+        "EXPO_PUBLIC_API_URL": "https://biencouvert.fr"
       }
     },
     "production": {
@@ -28,7 +28,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://52.143.159.51:4000"
+        "EXPO_PUBLIC_API_URL": "https://biencouvert.fr"
       }
     }
   },
