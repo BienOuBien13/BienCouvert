@@ -6,7 +6,7 @@
  * En production : récupéré depuis EXPO_PUBLIC_API_URL
  */
 export const API_URL: string =
-  (process.env.EXPO_PUBLIC_API_URL as string) || 'https://api.assurclair.fr';
+  (process.env.EXPO_PUBLIC_API_URL as string) || 'https://biencouvert.fr/api';
 
 console.log('[Config] API_URL =', API_URL);
 
