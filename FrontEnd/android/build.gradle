@@ -22,6 +22,8 @@ allprojects {
         google()
         mavenCentral()
     }
+    // Redirect build directories outside of OneDrive to avoid file-locking issues
+    buildDir = "C:/BuildCache/AssurClair/${rootProject.name}/${project.name}/build"
 }
 
 task clean(type: Delete) {
