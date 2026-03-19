@@ -160,8 +160,24 @@ const {
   }
 });
 
+// Origines des apps natives Capacitor (non vulnérables au CSRF)
+const NATIVE_APP_ORIGINS = ['capacitor://localhost', 'https://localhost'];
+
+/**
+ * Middleware CSRF qui bypass la protection pour les apps natives Capacitor.
+ * Les apps mobiles natives ne sont pas vulnérables au CSRF :
+ * - Elles ne s'exécutent pas dans un contexte de navigation web
+ * - L'origine capacitor://localhost / https://localhost ne peut pas être usurpée
+ * - L'authentification JWT Bearer assure déjà la sécurité des requêtes
+ */
+const csrfMiddleware = (req: any, res: any, next: any) => {
+  const origin = req.headers.origin || '';
+  if (NATIVE_APP_ORIGINS.includes(origin)) return next();
+  return doubleCsrfProtection(req, res, next);
+};
+
 // Exporter pour utilisation dans les routes
-export { doubleCsrfProtection as csrfProtection };
+export { csrfMiddleware as csrfProtection };
 
 // -----------------------------------------------------------------------------
 // Rate Limiting (Protection contre les attaques par force brute)
@@ -241,15 +257,15 @@ app.get('/api/csrf-token', (req, res) => {
 const NO_CSRF_AUTH_PATHS = ['/login', '/register', '/forgot-password'];
 app.use('/api/auth', (req: any, res: any, next: any) => {
   if (NO_CSRF_AUTH_PATHS.includes(req.path)) return next();  // 🔓 Mobile-friendly : bypass CSRF
-  doubleCsrfProtection(req, res, next);                      // 🔒 CSRF pour les autres routes auth
+  csrfMiddleware(req, res, next);                            // 🔒 CSRF pour les autres routes auth
 }, authRoutes);
-app.use('/api/policies', doubleCsrfProtection, policyRoutes);               // 🔒 Policies avec CSRF
-app.use('/api/ai', aiLimiter, doubleCsrfProtection, aiRoutes);              // 🔒 AI avec CSRF + rate limit strict
+app.use('/api/policies', csrfMiddleware, policyRoutes);                      // 🔒 Policies avec CSRF
+app.use('/api/ai', aiLimiter, csrfMiddleware, aiRoutes);                     // 🔒 AI avec CSRF + rate limit strict
 app.use('/api/masterdata', masterdataLimiter, masterDataRoutes);                // 📊 Master Data (lecture seule, pas de CSRF)
-app.use('/api/cg', doubleCsrfProtection, cgRoutes);                         // 📄 Conditions Générales avec CSRF
-app.use('/api/contact', doubleCsrfProtection, contactRoutes);               // 📧 Prise de RDV avec CSRF
-app.use('/api/partner', doubleCsrfProtection, partnerRoutes);               // 🤝 Vue partenaire
-app.use('/api/sinistre', doubleCsrfProtection, sinistreRoutes);             // 🛡️ Assistant Sinistre
+app.use('/api/cg', csrfMiddleware, cgRoutes);                                // 📄 Conditions Générales avec CSRF
+app.use('/api/contact', csrfMiddleware, contactRoutes);                      // 📧 Prise de RDV avec CSRF
+app.use('/api/partner', csrfMiddleware, partnerRoutes);                      // 🤝 Vue partenaire
+app.use('/api/sinistre', csrfMiddleware, sinistreRoutes);                    // 🛡️ Assistant Sinistre
 
 // ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
 /**
