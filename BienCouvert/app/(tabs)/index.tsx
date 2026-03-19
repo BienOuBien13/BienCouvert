@@ -11,7 +11,7 @@ import { Policy } from '@/types';
 
 export default function PoliciesScreen() {
   const { user } = useAuth();
-  const { policies, isLoading, load, remove } = usePolicies(user?.id);
+  const { policies, isLoading, load, remove, update } = usePolicies(user?.id);
 
   useEffect(() => {
     load();
@@ -52,6 +52,7 @@ export default function PoliciesScreen() {
         isLoading={isLoading}
         onEdit={handleEdit}
         onDelete={remove}
+        onUpdatePolicy={update}
       />
     </View>
   );

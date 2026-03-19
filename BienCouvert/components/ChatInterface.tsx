@@ -1,5 +1,5 @@
 // components/ChatInterface.tsx — Chat IA adapté pour React Native
-// Adapté depuis FrontEnd/components/ChatInterface.tsx
+// Aligné sur FrontEnd/components/ChatInterface.tsx
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
@@ -11,7 +11,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
+  Animated,
   SafeAreaView,
   Linking,
 } from 'react-native';
@@ -96,6 +96,37 @@ function MarkdownText({ text, isUser }: { text: string; isUser: boolean }) {
   );
 }
 
+/* Bouncing dots loader matching web's 3-dot animation */
+function BouncingDots() {
+  const anim1 = useRef(new Animated.Value(0)).current;
+  const anim2 = useRef(new Animated.Value(0)).current;
+  const anim3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const bounce = (anim: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, { toValue: -6, duration: 300, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        ]),
+      );
+    const a = bounce(anim1, 0);
+    const b = bounce(anim2, 200);
+    const c = bounce(anim3, 400);
+    a.start(); b.start(); c.start();
+    return () => { a.stop(); b.stop(); c.stop(); };
+  }, []);
+
+  return (
+    <View style={styles.dotsRow}>
+      {[anim1, anim2, anim3].map((a, i) => (
+        <Animated.View key={i} style={[styles.dot, { transform: [{ translateY: a }] }]} />
+      ))}
+    </View>
+  );
+}
+
 interface Props {
   policies: Policy[];
   messages: Message[];
@@ -124,12 +155,12 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
       timestamp: Date.now(),
     };
 
+    const botMsgId = uuid();
     const botMsg: Message = {
-      id: uuid(),
+      id: botMsgId,
       role: 'model',
       text: '',
       timestamp: Date.now(),
-      isTyping: true,
     };
 
     setMessages(prev => [...prev, userMsg, botMsg]);
@@ -137,31 +168,29 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
     setIsLoading(true);
 
     try {
+      let accumulatedText = '';
+
       await sendMessageToAssistantStream(
         text,
         policies,
         [...messages, userMsg],
-        chunk => {
+        (chunk: string) => {
+          accumulatedText += chunk;
           setMessages(prev =>
             prev.map(m =>
-              m.id === botMsg.id
-                ? { ...m, text: m.text + chunk, isTyping: true }
-                : m,
+              m.id === botMsgId ? { ...m, text: accumulatedText } : m,
             ),
           );
         },
         () => {
-          setMessages(prev =>
-            prev.map(m => (m.id === botMsg.id ? { ...m, isTyping: false } : m)),
-          );
           setIsLoading(false);
         },
       );
-    } catch (e: any) {
+    } catch {
       setMessages(prev =>
         prev.map(m =>
-          m.id === botMsg.id
-            ? { ...m, text: "Désolé, une erreur est survenue.", isTyping: false }
+          m.id === botMsgId
+            ? { ...m, text: "Désolé, j'ai rencontré une erreur. Veuillez réessayer." }
             : m,
         ),
       );
@@ -172,15 +201,10 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
     return (
-      <View style={[styles.bubble, isUser ? styles.userBubble : styles.botBubble]}>
-        {!isUser && (
-          <View style={styles.avatar}>
-            <Ionicons name="sparkles" size={14} color="#0ea5e9" />
-          </View>
-        )}
+      <View style={[styles.row, isUser ? styles.rowUser : styles.rowBot]}>
         <View style={[styles.bubbleContent, isUser ? styles.userContent : styles.botContent]}>
-          {item.isTyping && item.text === '' ? (
-            <ActivityIndicator size="small" color="#0ea5e9" />
+          {item.text === '' && isLoading ? (
+            <BouncingDots />
           ) : (
             <MarkdownText text={item.text} isUser={isUser} />
           )}
@@ -190,7 +214,20 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.flex}>
+    <SafeAreaView style={styles.container}>
+      {/* Header — matches web's "Assistant Expert" bar */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIcon}>
+            <Ionicons name="chatbubble-ellipses" size={18} color="#0ea5e9" />
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>Assistant Expert</Text>
+            <Text style={styles.headerSubtitle}>Posez vos questions sur vos contrats</Text>
+          </View>
+        </View>
+      </View>
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -199,23 +236,23 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
         {messages.length === 0 ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="chatbubbles-outline" size={40} color="#0ea5e9" />
+              <Ionicons name="sparkles" size={32} color="#7dd3fc" />
             </View>
-            <Text style={styles.emptyTitle}>Votre assistant assurance</Text>
-            <Text style={styles.emptySubtitle}>
-              Posez vos questions sur vos contrats, la couverture, ou les sinistres.
+            <Text style={styles.emptyHint}>
+              {"\"Est-ce que je suis couvert pour le bris de glace ?\"\n\"Quel est le montant de ma franchise ?\""}
             </Text>
-            {/* Suggestions rapides */}
+            {/* Suggestion chips for mobile touch UX */}
             <View style={styles.suggestions}>
               {[
-                "Ai-je besoin d'une mutuelle complémentaire ?",
-                "Quels sont mes doublons d'assurance ?",
-                "Comment déclarer un sinistre ?",
+                "Comment optimiser mes assurances ?",
+                "Ai‑je des trous de couverture ?",
+                "Quelles options puis-je supprimer ?",
               ].map((q, i) => (
                 <TouchableOpacity
                   key={i}
                   style={styles.suggestion}
-                  onPress={() => { setInput(q); }}
+                  onPress={() => setInput(q)}
+                  activeOpacity={0.7}
                 >
                   <Text style={styles.suggestionText}>{q}</Text>
                 </TouchableOpacity>
@@ -233,28 +270,26 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
           />
         )}
 
-        {/* Barre d'envoi */}
+        {/* Input bar */}
         <View style={styles.inputBar}>
           <TextInput
             style={styles.textInput}
             value={input}
             onChangeText={setInput}
-            placeholder="Écrivez votre message…"
+            placeholder="Posez votre question..."
             placeholderTextColor="#94a3b8"
             multiline
             maxLength={2000}
+            editable={!isLoading}
             onSubmitEditing={sendMessage}
           />
           <TouchableOpacity
             style={[styles.sendBtn, (!input.trim() || isLoading) && styles.sendBtnDisabled]}
             onPress={sendMessage}
             disabled={!input.trim() || isLoading}
+            activeOpacity={0.8}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="send" size={18} color="#fff" />
-            )}
+            <Ionicons name="send" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -263,66 +298,98 @@ export function ChatInterface({ policies, messages, setMessages }: Props) {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#f8fafc' },
-  messageList: { padding: 16, paddingBottom: 8 },
-  bubble: { flexDirection: 'row', marginVertical: 4, alignItems: 'flex-end', gap: 8 },
-  userBubble: { justifyContent: 'flex-end' },
-  botBubble: { justifyContent: 'flex-start' },
-  avatar: {
-    width: 28,
-    height: 28,
+  container: { flex: 1, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  flex: { flex: 1 },
+
+  /* Header */
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerIcon: {
+    width: 36,
+    height: 36,
     borderRadius: 8,
-    backgroundColor: '#e0f2fe',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bubbleContent: { maxWidth: '80%', borderRadius: 16, padding: 12 },
+  headerTitle: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
+  headerSubtitle: { fontSize: 11, color: '#64748b', marginTop: 1 },
+
+  /* Messages */
+  messageList: { padding: 16, paddingBottom: 8, gap: 16 },
+  row: { flexDirection: 'row', marginVertical: 2 },
+  rowUser: { justifyContent: 'flex-end' },
+  rowBot: { justifyContent: 'flex-start' },
+  bubbleContent: { maxWidth: '85%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   userContent: {
     backgroundColor: '#0ea5e9',
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: 0,
   },
   botContent: {
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
+    backgroundColor: '#f1f5f9',
+    borderBottomLeftRadius: 0,
     borderWidth: 1,
-    borderColor: '#f1f5f9',
+    borderColor: '#e2e8f0',
   },
-  messageText: { fontSize: 14, lineHeight: 20 },
+
+  /* Text */
   userText: { color: '#fff', fontSize: 14, lineHeight: 20 },
-  botText: { color: '#0f172a', fontSize: 14, lineHeight: 20 },
-  // Markdown bot styles
-  mdH1: { fontSize: 15, fontWeight: '800', color: '#0f172a', marginTop: 6, marginBottom: 2 },
-  mdH2: { fontSize: 14, fontWeight: '700', color: '#1e293b', marginTop: 4, marginBottom: 1 },
+  botText: { color: '#1e293b', fontSize: 14, lineHeight: 20 },
+
+  /* Markdown bot */
+  mdH1: { fontSize: 15, fontWeight: '700', color: '#0f172a', marginTop: 6, marginBottom: 2 },
+  mdH2: { fontSize: 14, fontWeight: '600', color: '#1e293b', marginTop: 4, marginBottom: 1 },
   mdBold: { fontWeight: '700', color: '#0f172a' },
   mdItalic: { fontStyle: 'italic', color: '#334155' },
   mdCode: { fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', backgroundColor: '#e2e8f0', color: '#0f172a', borderRadius: 3, fontSize: 12 },
   mdLink: { color: '#0ea5e9', textDecorationLine: 'underline' },
   mdListItem: { flexDirection: 'row', alignItems: 'flex-start' },
   mdBullet: { color: '#64748b', fontSize: 14 },
-  // Markdown user styles (white for readability on blue bg)
+
+  /* Markdown user (white on blue) */
   mdUserBold: { fontWeight: '700', color: '#fff' },
   mdUserItalic: { fontStyle: 'italic', color: '#e0f2fe' },
   mdUserCode: { fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: '#fff', fontSize: 12 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+
+  /* Bouncing dots */
+  dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#94a3b8' },
+
+  /* Empty state */
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, opacity: 0.7 },
   emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: '#e0f2fe',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#f0f9ff',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 16,
   },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a', textAlign: 'center' },
-  emptySubtitle: { fontSize: 14, color: '#64748b', textAlign: 'center', lineHeight: 20 },
-  suggestions: { gap: 8, width: '100%', marginTop: 8 },
+  emptyHint: { fontSize: 14, color: '#64748b', textAlign: 'center', lineHeight: 22 },
+  suggestions: { gap: 8, width: '100%', marginTop: 16 },
   suggestion: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
   suggestionText: { fontSize: 13, color: '#0ea5e9', fontWeight: '500' },
+
+  /* Input bar */
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -340,7 +407,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 14,
     color: '#0f172a',
     maxHeight: 120,
     backgroundColor: '#f8fafc',
@@ -353,5 +420,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendBtnDisabled: { backgroundColor: '#cbd5e1' },
+  sendBtnDisabled: { opacity: 0.5 },
 });

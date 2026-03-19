@@ -61,6 +61,19 @@ export const storageService = {
   },
 
   /**
+   * Met à jour formule, options et sous-type d'une police (PATCH)
+   */
+  updatePolicyOptions: async (
+    policyId: string,
+    data: { formula?: string; options?: string[]; subTypeCode?: string },
+  ): Promise<void> => {
+    await apiFetch(`/policies/${policyId}/options`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
    * Récupère les Conditions Générales centralisées
    */
   getCentralCg: async (params: {

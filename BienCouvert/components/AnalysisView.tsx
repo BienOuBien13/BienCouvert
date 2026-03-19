@@ -22,7 +22,9 @@ import { formatCurrency } from '../utils/formatters';
 interface Props {
   policies: Policy[];
   profile: UserProfileData;
+  onUpdateProfile?: (profile: UserProfileData) => void;
   user: User;
+  onFinishSimulation?: () => void;
 }
 
 type StepId = 'personal' | 'housing' | 'lifestyle' | 'finance' | 'health' | 'history';
@@ -48,7 +50,7 @@ const TYPE_CONFIG = {
   saving:    { bg: '#f0fdf4', text: '#16a34a', icon: 'trending-down-outline' as const },
 };
 
-export function AnalysisView({ policies, profile: initialProfile, user }: Props) {
+export function AnalysisView({ policies, profile: initialProfile, user, onUpdateProfile, onFinishSimulation }: Props) {
   const [profile, setProfile] = useState<UserProfileData>(initialProfile);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [findings, setFindings] = useState<OptimizationFinding[]>([]);
@@ -57,11 +59,20 @@ export function AnalysisView({ policies, profile: initialProfile, user }: Props)
 
   useEffect(() => {
     authService.getAnalysisProfile()
-      .then(saved => { if (saved && Object.keys(saved).length > 0) setProfile(saved); })
+      .then(saved => {
+        if (saved && Object.keys(saved).length > 0) {
+          setProfile(saved);
+          onUpdateProfile?.(saved);
+        }
+      })
       .catch(() => {});
   }, []);
 
-  const up = (patch: Partial<UserProfileData>) => setProfile(prev => ({ ...prev, ...patch }));
+  const up = (patch: Partial<UserProfileData>) => {
+    const next = { ...profile, ...patch };
+    setProfile(next);
+    onUpdateProfile?.(next);
+  };
   const upNum = (field: keyof UserProfileData, delta: number) => {
     const v = Math.max(0, ((profile[field] as number) || 0) + delta);
     setProfile(prev => ({ ...prev, [field]: v }));

@@ -1,5 +1,5 @@
 // components/PolicyList.tsx — Liste des polices
-// Adapté depuis FrontEnd/components/PolicyList.tsx
+// Exact rebuild from FrontEnd/components/PolicyList.tsx
 
 import React from 'react';
 import {
@@ -18,9 +18,18 @@ interface Props {
   isLoading: boolean;
   onEdit: (policy: Policy) => void;
   onDelete: (id: string) => void;
+  onUpdatePolicy?: (policy: Policy) => void;
+  onViewCoverage?: (policy: Policy) => void;
 }
 
-export function PolicyList({ policies, isLoading, onEdit, onDelete }: Props) {
+export function PolicyList({
+  policies,
+  isLoading,
+  onEdit,
+  onDelete,
+  onUpdatePolicy,
+  onViewCoverage,
+}: Props) {
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -36,7 +45,7 @@ export function PolicyList({ policies, isLoading, onEdit, onDelete }: Props) {
         <View style={styles.emptyIcon}>
           <Ionicons name="shield-outline" size={48} color="#cbd5e1" />
         </View>
-        <Text style={styles.emptyTitle}>Aucun contrat</Text>
+        <Text style={styles.emptyTitle}>Votre portefeuille est vide</Text>
         <Text style={styles.emptySubtitle}>
           Ajoutez votre premier contrat d'assurance pour commencer.
         </Text>
@@ -45,31 +54,74 @@ export function PolicyList({ policies, isLoading, onEdit, onDelete }: Props) {
   }
 
   return (
-    <FlatList
-      data={policies}
-      keyExtractor={p => p.id}
-      renderItem={({ item }) => (
-        <PolicyCard policy={item} onEdit={onEdit} onDelete={onDelete} />
-      )}
-      contentContainerStyle={styles.list}
-      showsVerticalScrollIndicator={false}
-    />
+    <View style={styles.container}>
+      {/* Header — matching web: Mon Portefeuille (count) */}
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>
+          Mon Portefeuille ({policies.length})
+        </Text>
+      </View>
+
+      <FlatList
+        data={policies}
+        keyExtractor={(p) => p.id}
+        renderItem={({ item }) => (
+          <PolicyCard
+            policy={item}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onUpdatePolicy={onUpdatePolicy}
+            onViewCoverage={onViewCoverage}
+          />
+        )}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { paddingVertical: 8, paddingBottom: 100 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  container: { flex: 1 },
+  headerRow: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  headerTitle: {
+    fontWeight: '900',
+    color: '#0f172a',
+    textTransform: 'uppercase',
+    letterSpacing: -0.5,
+    fontSize: 16,
+  },
+  list: { paddingVertical: 4, paddingBottom: 100 },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    gap: 12,
+  },
   loadingText: { color: '#64748b', fontSize: 14 },
   emptyIcon: {
     width: 80,
     height: 80,
-    borderRadius: 20,
-    backgroundColor: '#f8fafc',
+    borderRadius: 40,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a' },
-  emptySubtitle: { fontSize: 14, color: '#64748b', textAlign: 'center' },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
 });
