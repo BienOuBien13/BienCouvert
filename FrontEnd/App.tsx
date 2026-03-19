@@ -424,7 +424,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white via-slate-50 to-slate-100/60 pb-32 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-white via-slate-50 to-slate-100/60 flex flex-col" style={{paddingBottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))"}}>
       {/* Modal d'édition (mode classique) */}
       {editingPolicy && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -440,7 +440,7 @@ function App() {
         </div>
       )}
 
-      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 px-3 md:px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100" style={{paddingTop: "env(safe-area-inset-top, 0px)", minHeight: "3rem"}}>
+      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 px-3 md:px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100" style={{paddingTop: "env(safe-area-inset-top, 20px)", minHeight: "calc(3.5rem + env(safe-area-inset-top, 20px))"}}>
         <div className="flex items-center cursor-pointer group" onClick={() => setActiveView('home')}>
           <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-7 md:h-9 w-auto object-contain group-hover:scale-105 transition-transform duration-200" />
         </div>

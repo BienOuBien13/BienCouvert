@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
-import { getInsuranceSubTypes, type InsuranceSubType } from '../services/masterDataService';
+import { getInsuranceSubTypes, getInsuranceTypes as fetchInsuranceTypes, type InsuranceSubType } from '../services/masterDataService';
 import { API_URL } from '../services/apiUrl';
 
 interface InsuranceType {
@@ -108,9 +108,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
   const loadInsuranceTypes = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/masterdata/insurance-types`);
-      const data = await response.json();
-      setInsuranceTypes(data);
+      // Use the centralised service (includes credentials + fallback on error)
+      const data = await fetchInsuranceTypes();
+      setInsuranceTypes(data as any[]);
     } catch (err) {
       console.error('Erreur chargement types:', err);
       setError('Impossible de charger les types d\'assurance');
@@ -119,9 +119,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
   const loadInsurersByType = async (typeCode: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/masterdata/insurers-by-type/${typeCode}`);
+      const response = await fetch(`${API_URL}/api/masterdata/insurers-by-type/${typeCode}`, { credentials: 'include' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      setAvailableInsurers(data);
+      setAvailableInsurers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Erreur chargement assureurs:', err);
       setError('Impossible de charger les assureurs');
