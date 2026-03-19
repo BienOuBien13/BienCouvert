@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
-
-const API_URL = (import.meta as any).env?.VITE_API_URL || '';
+import { API_URL } from '../services/apiUrl';
 import { 
   Trash2, Pencil, Shield, ChevronDown, Car, Home, Heart, Scale, 
   Briefcase, CreditCard, Banknote, Smartphone, Share2, 

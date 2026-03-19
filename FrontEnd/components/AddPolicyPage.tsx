@@ -6,8 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
 import { getInsuranceSubTypes, type InsuranceSubType } from '../services/masterDataService';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { API_URL } from '../services/apiUrl';
 
 interface InsuranceType {
   code: string;

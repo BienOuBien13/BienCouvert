@@ -440,7 +440,7 @@ function App() {
         </div>
       )}
 
-      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 h-12 md:h-16 px-3 md:px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100">
+      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-100 px-3 md:px-6 flex items-center justify-between sticky top-0 z-[60] shadow-sm shadow-slate-100" style={{paddingTop: "env(safe-area-inset-top, 0px)", minHeight: "3rem"}}>
         <div className="flex items-center cursor-pointer group" onClick={() => setActiveView('home')}>
           <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-7 md:h-9 w-auto object-contain group-hover:scale-105 transition-transform duration-200" />
         </div>

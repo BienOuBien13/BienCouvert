@@ -17,7 +17,7 @@ import {
 import { authService } from '../services/authService';
 import { PolicyType } from '../types';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || '';
+import { API_URL } from '../services/apiUrl';
 
 // ─── Types locaux ─────────────────────────────────────────────────────────────
 
