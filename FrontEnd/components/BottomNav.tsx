@@ -19,7 +19,7 @@ export const BottomNav: React.FC<Props> = ({ activeView, setActiveView }) => {
 
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-2xl border-t border-slate-100/80 px-1 z-[100] shadow-[0_-1px_0_0_rgba(0,0,0,0.04),0_-8px_30px_rgba(0,0,0,0.06)]" style={{paddingBottom: 'env(safe-area-inset-bottom, 12px)'}}>
+    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-2xl border-t border-slate-100/80 px-1 z-[100] shadow-[0_-1px_0_0_rgba(0,0,0,0.04),0_-8px_30px_rgba(0,0,0,0.06)]">
       <div className="max-w-md mx-auto flex items-center justify-between h-[5rem]">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -58,6 +58,8 @@ export const BottomNav: React.FC<Props> = ({ activeView, setActiveView }) => {
           );
         })}
       </div>
+      {/* Spacer pour la barre de navigation Android */}
+      <div style={{height: 'env(safe-area-inset-bottom, 12px)'}} />
     </nav>
   );
 };

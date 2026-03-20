@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon } from 'lucide-react';
+import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon, Package, Scale, Smartphone, Shield, CreditCard } from 'lucide-react';
 import { getInsuranceSubTypes, getInsuranceTypes as fetchInsuranceTypes, type InsuranceSubType } from '../services/masterDataService';
 import { API_URL } from '../services/apiUrl';
 
@@ -43,6 +43,12 @@ const insuranceIconsFallback: Record<string, React.FC<any>> = {
   PRE: Heart, PRE01: Heart,
   PRO: Briefcase,
   DEFAULT: ShieldPlus
+};
+
+// Mapping nom icône API → composant Lucide
+const LUCIDE_ICON_MAP: Record<string, React.FC<any>> = {
+  Car, Home, Heart, Shield, Briefcase, CreditCard, Smartphone, Scale, Package,
+  ShieldPlus, Sport: ShieldPlus,
 };
 
 interface AddPolicyPageProps {
@@ -499,10 +505,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       {step === 'selectType' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {insuranceTypes.map(type => {
-            const FallbackIcon = getFallbackIcon(type.code);
-            const imgUrl = getTypeImageUrl(type);
+            const iconName = (type as any).icon || '';
+            const IconComponent = LUCIDE_ICON_MAP[iconName] || insuranceIconsFallback[type.code] || ShieldPlus;
+            const gradientClass = (type as any).color?.includes('from-') ? (type as any).color : 'from-primary-500 to-primary-600';
             const isSelected = selectedType?.code === type.code;
-            const bgColor = (type as any).color || '#4F46E5';
             return (
               <button
                 key={type.code}
@@ -513,28 +519,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                     : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm hover:bg-gray-50'
                 }`}
               >
-                <div
-                  className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden"
-                  style={{ backgroundColor: bgColor }}
-                >
-                  <img
-                    src={imgUrl}
-                    alt={type.labelFr}
-                    className="w-14 h-14 object-contain"
-                    onError={(e) => {
-                      // Fallback : masquer l'img et afficher l'icône Lucide
-                      const target = e.currentTarget;
-                      target.style.display = 'none';
-                      const parent = target.parentElement;
-                      if (parent && !parent.querySelector('[data-fallback]')) {
-                        const span = document.createElement('span');
-                        span.dataset.fallback = '1';
-                        span.className = 'text-white text-xl font-bold';
-                        span.textContent = type.labelFr.substring(0, 2);
-                        parent.appendChild(span);
-                      }
-                    }}
-                  />
+                <div className={`w-16 h-16 rounded-xl flex items-center justify-center bg-gradient-to-br ${gradientClass}`}>
+                  <IconComponent className="w-9 h-9 text-white" />
                 </div>
                 <span className={`text-xs font-medium text-center leading-tight ${
                   isSelected ? 'text-blue-700' : 'text-gray-700'
