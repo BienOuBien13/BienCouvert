@@ -12,7 +12,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from '../db';
 import pool from '../db';
 import { generateEmbedding as generateEmbeddingCentral } from '../services/geminiService';
-import { vectorizeUserCgByPages } from '../services/pageVectorizationService';
+import { vectorizeUserCgByPages, vectorizeCgByPages } from '../services/pageVectorizationService';
 // pdf-parse : extraction texte locale (0 token Gemini output)
 const pdfParse = require('pdf-parse');
 
@@ -953,6 +953,184 @@ router.patch('/user-coverage-fact/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CG/user-coverage-fact PATCH]', err.message);
     res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/cg/user/promote-to-central/:userCgId
+// Partage (avec consentement) un CG utilisateur comme CG de référence centrale.
+// Conditions :
+//   - document_type_code doit être 'CG' (seuls les contrats généraux sont partagés)
+//   - Le PDF est re-vectorisé via vectorizeCgByPages (même pipeline que Admin)
+//   - La propriété remain préservée via owner = 'shared_by_<email>'
+//   - Réponse immédiate (202) — vectorisation en arrière-plan
+// -----------------------------------------------------------------------------
+router.post('/user/promote-to-central/:userCgId', async (req: Request, res: Response) => {
+  try {
+    const userCgId = parseInt(req.params.userCgId);
+    if (isNaN(userCgId)) {
+      return res.status(400).json({ error: 'ID invalide' });
+    }
+
+    // Récupérer le CG utilisateur
+    const cgResult = await query(
+      `SELECT id, insurer_code, insurance_type_code, insurance_sub_type_code,
+              document_type_code, version, detail, url, target_filename,
+              owner, pdf_base64, pdf_file_path, metadata, vectorization_status
+       FROM user_cg WHERE id = $1`,
+      [userCgId]
+    );
+
+    if (cgResult.rows.length === 0) {
+      return res.status(404).json({ error: `CG utilisateur ${userCgId} introuvable` });
+    }
+
+    const userCg = cgResult.rows[0];
+
+    // Seuls les documents type 'CG' peuvent être partagés
+    const resolvedDocType: string = userCg.document_type_code || 'CG';
+    if (resolvedDocType !== 'CG') {
+      return res.status(400).json({
+        error: `Seuls les documents de type CG peuvent être partagés (ce document est de type "${resolvedDocType}")`
+      });
+    }
+
+    // Récupérer le PDF (base64 ou disque)
+    let pdfBase64: string | null = userCg.pdf_base64 || null;
+    if (!pdfBase64 && userCg.pdf_file_path) {
+      try {
+        const fullPath = path.join(PDF_STORAGE_DIR, userCg.pdf_file_path);
+        if (fs.existsSync(fullPath)) {
+          pdfBase64 = fs.readFileSync(fullPath).toString('base64');
+        }
+      } catch (diskErr: any) {
+        console.warn(`⚠️ Lecture PDF disque user_cg ${userCgId}:`, diskErr?.message);
+      }
+    }
+
+    if (!pdfBase64) {
+      return res.status(422).json({
+        error: 'PDF non disponible pour ce CG — impossible de partager sans le document source'
+      });
+    }
+
+    const meta = typeof userCg.metadata === 'string'
+      ? JSON.parse(userCg.metadata)
+      : (userCg.metadata || {});
+
+    // Vérifier qu'un CG central identique n'existe pas déjà (même insurer + type + version)
+    const existingCheck = await query(
+      `SELECT id FROM central_cg
+       WHERE insurer_code = $1 AND insurance_type_code = $2
+         AND LOWER(COALESCE(version,'')) = LOWER(COALESCE($3,''))
+         AND status = 'active'
+       LIMIT 1`,
+      [userCg.insurer_code, userCg.insurance_type_code, userCg.version]
+    );
+    if (existingCheck.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Un CG central avec le même assureur, type et version existe déjà',
+        existing_central_cg_id: existingCheck.rows[0].id
+      });
+    }
+
+    // Insérer dans central_cg (sans le PDF pour réponse rapide)
+    const insertResult = await query(
+      `INSERT INTO central_cg (
+         insurer_code, insurance_type_code, insurance_sub_type_code,
+         document_type_code, version, type, owner,
+         detail, url, target_filename, status,
+         metadata, vectorization_status,
+         created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', NOW(), NOW())
+       RETURNING id`,
+      [
+        userCg.insurer_code,
+        userCg.insurance_type_code,
+        userCg.insurance_sub_type_code || null,
+        'CG',
+        userCg.version || '001',
+        'CG',
+        `shared_by_${userCg.owner || 'user'}`,
+        userCg.detail || meta?.description || null,
+        userCg.url || null,
+        userCg.target_filename || 'partagé.pdf',
+        'active',
+        JSON.stringify({
+          ...meta,
+          source: 'user_shared',
+          shared_from_user_cg_id: userCgId,
+          shared_at: new Date().toISOString()
+        })
+      ]
+    );
+
+    const centralCgId: number = insertResult.rows[0].id;
+
+    // Réponse immédiate
+    res.status(202).json({
+      success: true,
+      central_cg_id: centralCgId,
+      status: 'processing',
+      message: 'CG partagé avec succès — vectorisation en cours en arrière-plan'
+    });
+
+    // Pipeline asynchrone : stocker PDF + vectoriser
+    (async () => {
+      try {
+        // Stocker le PDF en base
+        await query(
+          'UPDATE central_cg SET pdf_base64 = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [pdfBase64, centralCgId]
+        );
+
+        // Sauvegarder sur disque
+        try {
+          const pdfBuffer = Buffer.from(pdfBase64!, 'base64');
+          const relPath = await savePdfToDisk(
+            pdfBuffer,
+            `central/${userCg.insurer_code}`,
+            userCg.target_filename || `shared-${userCgId}.pdf`
+          );
+          await query(
+            'UPDATE central_cg SET pdf_file_path = $1 WHERE id = $2',
+            [relPath, centralCgId]
+          );
+        } catch (diskErr: any) {
+          console.warn(`⚠️ Sauvegarde PDF disque central_cg ${centralCgId}:`, diskErr?.message);
+        }
+
+        // Vectorisation page par page (même pipeline Admin)
+        const pageResult = await vectorizeCgByPages(pool, centralCgId, userCg.url || '', pdfBase64!);
+        console.log(`✅ [promote] Vectorisation CG ${centralCgId} terminée:`, pageResult);
+
+        // Agréger le texte et mettre à jour l'embedding
+        const textResult = await query(
+          `SELECT COALESCE(string_agg(content_text, E'\n\n' ORDER BY page_number), '') AS full_text
+           FROM central_cg_pages WHERE central_cg_id = $1`,
+          [centralCgId]
+        );
+        const fullText = textResult.rows[0]?.full_text || '';
+        if (fullText.trim().length > 0) {
+          await query(
+            'UPDATE central_cg SET content_text = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [fullText, centralCgId]
+          );
+        }
+      } catch (e: any) {
+        console.error(`❌ [promote] Pipeline CG ${centralCgId} échoué:`, e);
+        try {
+          await query(
+            `UPDATE central_cg SET vectorization_status = 'failed', vectorization_error = $1 WHERE id = $2`,
+            [e?.message || 'Erreur inconnue', centralCgId]
+          );
+        } catch (_) {}
+      }
+    })().catch(err => console.error('❌ [promote] Async error:', err));
+
+  } catch (error: any) {
+    console.error('[CG/promote-to-central] ERROR:', error.message);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });
 

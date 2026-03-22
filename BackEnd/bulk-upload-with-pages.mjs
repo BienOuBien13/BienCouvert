@@ -571,14 +571,25 @@ async function extractPageWithCanvas(pdfDoc, pageNum) {
 /**
  * Extraction tableau via Vision Gemini — identique à extractTableFromPageImage()
  * dans tableExtractionService.ts.
- * Retourne au format Vision : { headers, rows: [{guarantee, formulas{}}], confidence, legend, _isVision:true }
+ * Retourne au format Vision : { headers, rows: [{guarantee, formulas{}, is_section?}], confidence, legend, _isVision:true }
+ *
+ * @param imageBase64         Image PNG base64 de la page
+ * @param insurerCode         Code assureur
+ * @param insuranceTypeCode   Code type assurance
+ * @param knownFormulaHeaders En-têtes de formules des pages précédentes (pour pages de continuation)
  */
-async function extractTableFromPageVision(imageBase64, insurerCode, insuranceTypeCode) {
+async function extractTableFromPageVision(imageBase64, insurerCode, insuranceTypeCode, knownFormulaHeaders = []) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    // Bloc de contexte pour les pages de continuation
+    const continuationContext = knownFormulaHeaders.length > 0
+      ? `\n═══ CONTEXTE — PAGE DE CONTINUATION ═══\nCette page fait probablement partie d'un tableau commencé sur les pages précédentes.\nLes colonnes de formules identifiées sur les pages précédentes sont (dans l'ordre) :\n${knownFormulaHeaders.map((h, i) => `  ${i + 1}. "${h}"`).join('\n')}\n\n⚠️ RÈGLE STRICTE :\n- Si les en-têtes de colonnes NE SONT PAS visibles sur cette page, utilise EXACTEMENT ces noms (même orthographe, même ordre).\n- Ne les invente PAS et ne les renomme PAS.\n═══════════════════════════════════════\n`
+      : '';
+
     const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français.
 Analyse cette image de page PDF et extrait la matrice complète garanties × formules.
-
+${continuationContext}
 ═══ ÉTAPE 1 — LÉGENDE (CRITIQUE — faire AVANT toute extraction) ═══
 Cherche PARTOUT sur la page une légende, un encadré "Légende", "Symboles", une note de bas de page ou un texte explicatif des symboles.
 Exemples fréquents :
@@ -589,13 +600,18 @@ Exemples fréquents :
 Reporte la légende dans le champ "legend" : { "symbole_brut": "included|excluded|optional" }
 Si aucune légende trouvée : "legend": null
 
-═══ ÉTAPE 2 — EXTRACTION DU TABLEAU ═══
-Pour chaque cellule, APPLIQUE la légende pour déterminer le statut et normalise la valeur :
-- Inclus (légende = "garanti"/"inclus"/"oui") → mettre "✓"
-- Exclu (légende = "non garanti"/"exclu"/"non") → mettre "✗"
-- Option (légende = "en option"/"sur option"/"optionnel") → mettre "○"
-- Cellule VIDE (vraiment vide) → mettre ""
-- Montant ou texte descriptif → mettre le texte exact ("1 500 €", "Jusqu'à 3000 €")
+═══ ÉTAPE 2 — DÉTECTION DES EN-TÊTES ═══
+Identifie la ligne d'en-têtes du tableau (noms des formules/produits).
+- Si les en-têtes couvrent plusieurs lignes, concatène : "Zone Europe — FORMULE 1"
+- Si cette page est une suite et que les en-têtes ne sont pas visibles, utilise les noms du contexte ci-dessus.
+
+═══ ÉTAPE 3 — EXTRACTION DES LIGNES ═══
+Pour chaque cellule, APPLIQUE la légende pour normaliser :
+- Inclus (légende = "garanti"/"inclus"/"oui") → "✓"
+- Exclu (légende = "non garanti"/"exclu"/"non") → "✗"
+- Option (légende = "en option"/"sur option"/"optionnel") → "○"
+- Cellule VIDE (vraiment vide) → ""
+- Montant ou texte descriptif → texte exact ("1 500 €", "Jusqu'à 3000 €")
 
 Si PAS de légende :
 - ✓ ✔ ● • √ ■ ▪ ◆ "Oui" "Inclus" "Garanti" → "✓"
@@ -604,11 +620,12 @@ Si PAS de légende :
 - – — - (tiret seul) → "✗"
 - ○ ◯ "Option" "En option" "En sus" △ → "○"
 
-⚠️ RÈGLES :
+⚠️ RÈGLES ABSOLUES :
 1. LÉGENDE = PRIORITÉ ABSOLUE.
-2. Cellule VIDE (pas de symbole) ≠ exclu : mets "".
-3. Identifie TOUTES les lignes (y compris sous-garanties en retrait).
-4. Identifie TOUTES les colonnes de formules.
+2. Cellule VIDE (pas de symbole, pas de tiret) ≠ exclu : mets "".
+3. TITRES DE SECTION : certaines lignes sont des titres (ex: "GARANTIES OBLIGATOIRES", "DOMMAGES AU VÉHICULE") — souvent en gras, sans symboles. Pour ces lignes, inclure le titre dans "guarantee" ET ajouter "is_section": true. Mettre "" dans toutes les cellules.
+4. Identifie TOUTES les lignes (y compris sous-garanties en retrait).
+5. Identifie TOUTES les colonnes de formules.
 
 FORMAT JSON STRICT (aucun autre texte) :
 {
@@ -616,7 +633,9 @@ FORMAT JSON STRICT (aucun autre texte) :
   "legend": { "●": "included", "○": "optional", "—": "excluded" },
   "headers": ["Garanties", "FORMULE 1", "FORMULE 2", "FORMULE 3"],
   "rows": [
-    { "guarantee": "Responsabilité civile", "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" } }
+    { "guarantee": "GARANTIES OBLIGATOIRES", "is_section": true, "formulas": { "formule_1": "", "formule_2": "", "formule_3": "" } },
+    { "guarantee": "Responsabilité civile", "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" } },
+    { "guarantee": "Franchise : 300 €", "formulas": { "formule_1": "", "formule_2": "300 €", "formule_3": "150 €" } }
   ],
   "confidence": 0.95
 }
@@ -676,8 +695,10 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
 }
 
 /**
- * Convertit un tableau Vision (rows = objets {guarantee, formulas}) en coverage_facts.
- * Miroir de tableToFacts() dans tableExtractionService.ts.
+ * Convertit un tableau Vision (rows = objets {guarantee, is_section?, formulas}) en coverage_facts.
+ * Miroir de tableToFacts() dans tableExtractionService.ts — avec même logique de filtrage :
+ * - Skip des lignes is_section:true (titres de section)
+ * - Skip des lignes où TOUTES les cellules sont vides (titres non marqués)
  */
 function tableToFactsVision(tableData, centralCgId, pageId, pageNumber, insurerCode, insuranceTypeCode) {
   const facts = [];
@@ -689,24 +710,36 @@ function tableToFactsVision(tableData, centralCgId, pageId, pageNumber, insurerC
     const isArrayRow = Array.isArray(row);
     const guaranteeLabel = isArrayRow ? String(row[0] || '') : (row.guarantee || '');
     if (!guaranteeLabel.trim()) return;
+
+    // Skip titres de section explicitement marqués par Gemini
+    if (!isArrayRow && row.is_section === true) {
+      log(`      ℹ️  [tableToFactsVision] Titre de section ignoré : "${guaranteeLabel}"`);
+      return;
+    }
+
     const guaranteeKey = normalizeKey(guaranteeLabel);
+
+    // Collecter d'abord les valeurs pour détecter les lignes entièrement vides
+    const cellValues = formulaHeaders.map((formulaLabel, idx) => {
+      const formulaKey = normalizeKey(formulaLabel.replace(/\+/g, '_plus'));
+      if (isArrayRow) return row[idx + 1] !== undefined ? String(row[idx + 1]) : '';
+      const fmls = row.formulas || {};
+      if (fmls[formulaKey] !== undefined) return String(fmls[formulaKey]);
+      const geminiKeys = Object.keys(fmls);
+      const matchKey = geminiKeys.find(gk => normalizeKey(gk.replace(/\+/g, '_plus')) === formulaKey);
+      if (matchKey !== undefined) return String(fmls[matchKey]);
+      return idx < geminiKeys.length ? String(fmls[geminiKeys[idx]]) : '';
+    });
+
+    // Skip les lignes entièrement vides (titre de section non marqué)
+    if (!cellValues.some(v => v.trim() !== '')) {
+      log(`      ℹ️  [tableToFactsVision] Ligne sans contenu ignorée : "${guaranteeLabel}"`);
+      return;
+    }
+
     formulaHeaders.forEach((formulaLabel, idx) => {
       const formulaKey = normalizeKey(formulaLabel.replace(/\+/g, '_plus'));
-      let symbol = '';
-      if (isArrayRow) {
-        symbol = row[idx + 1] !== undefined ? String(row[idx + 1]) : '';
-      } else {
-        const fmls = row.formulas || {};
-        if (fmls[formulaKey] !== undefined) {
-          symbol = String(fmls[formulaKey]);
-        } else {
-          const geminiKeys = Object.keys(fmls);
-          const matchKey = geminiKeys.find(gk => normalizeKey(gk.replace(/\+/g, '_plus')) === formulaKey);
-          symbol = matchKey !== undefined
-            ? String(fmls[matchKey])
-            : (idx < geminiKeys.length ? String(fmls[geminiKeys[idx]]) : '');
-        }
-      }
+      const symbol = cellValues[idx];
       const coverageInfo = parseStatus(symbol, legend);
       if (coverageInfo.status === 'excluded') {
         log(`      ⚠️  [tableToFactsVision] "${guaranteeLabel}" × "${formulaLabel}" : symbole="${symbol}" → ${coverageInfo.status}`);
@@ -1177,6 +1210,8 @@ async function processDocument(row, index, total) {
     let tablesFound = 0;
     let factsCreated = 0;
     const discoveredFormulaLabels = new Map(); // label → nb de pages où il apparaît comme en-tête tableau
+    // En-têtes de formules de la dernière page avec tableau détecté (carry-forward pour pages de continuation)
+    let lastKnownFormulaHeaders = [];
 
     // Traiter chaque page : texte + canvas image + Vision/texte table + embedding
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
@@ -1205,13 +1240,27 @@ async function processDocument(row, index, total) {
         
         if (hasTable || maybeTable) {
           if (imageBase64) {
-            // Vision extraction — identique Admin (plus précise)
+            // Vision extraction — identique Admin (plus précise), avec contexte de continuation
             log(`      📊 ${hasTable ? 'Tableau détecté' : 'Possible tableau'}, extraction Vision (image)...`);
-            tableJson = await extractTableFromPageVision(imageBase64, row.Insurer, row.Insurance_type);
+            if (lastKnownFormulaHeaders.length > 0) {
+              log(`      📌 Contexte continuation : [${lastKnownFormulaHeaders.join(' | ')}]`);
+            }
+            tableJson = await extractTableFromPageVision(imageBase64, row.Insurer, row.Insurance_type, lastKnownFormulaHeaders);
             if (tableJson && tableJson.rows && tableJson.rows.length > 0) {
               confidence = tableJson.confidence || 0;
               tablesFound++;
               tableIsVision = true;
+              // Mettre à jour les en-têtes connus (carry-forward)
+              if (tableJson.headers && tableJson.headers.length > 1) {
+                const newHeaders = tableJson.headers.slice(1).filter(h => h && h.trim().length > 1);
+                if (newHeaders.length > 0) lastKnownFormulaHeaders = newHeaders;
+                tableJson.headers.slice(1).forEach(h => {
+                  if (h && h.trim().length > 1) {
+                    const label = h.trim();
+                    discoveredFormulaLabels.set(label, (discoveredFormulaLabels.get(label) || 0) + 1);
+                  }
+                });
+              }
               log(`      ✅ Vision: ${tableJson.rows.length} garanties`);
             } else if (maybeTable) {
               log(`      ℹ️ Pas de tableau trouvé par Vision (faux positif maybe-table)`);

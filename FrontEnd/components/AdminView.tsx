@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -114,6 +114,7 @@ export const AdminView: React.FC = () => {
   const [userCgList, setUserCgList] = useState<UserCgEntry[]>([]);
   const [userCgLoading, setUserCgLoading] = useState(false);
   const [userCgSearchTerm, setUserCgSearchTerm] = useState('');
+  const [promotingCgId, setPromotingCgId] = useState<number | null>(null);
 
   // Charge les faits de couverture d'un document CG central
   const loadCoverageFacts = async (centralCgId: number, label: string) => {
@@ -424,6 +425,32 @@ export const AdminView: React.FC = () => {
       setUserCgList(prev => prev.filter(u => u.id !== id));
     } catch (e: any) {
       alert(`Erreur lors de la suppression : ${e.message}`);
+    }
+  };
+
+  // Promeut un CG utilisateur en CG centrale (partagée avec tous)
+  const handlePromoteToCentral = async (entry: UserCgEntry) => {
+    if (!confirm(
+      `Partager "${entry.target_filename}" comme CG de référence centrale ?\n\n` +
+      `Ce document sera vectorisé et rendu visible pour tous les utilisateurs.\n` +
+      `L'opération peut prendre quelques minutes.`
+    )) return;
+    setPromotingCgId(entry.id);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/cg/user/promote-to-central/${entry.id}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+      alert(`✅ CG partagé avec succès !\nL'identifiant central est #${data.central_cg_id}.\nLa vectorisation est en cours en arrière-plan.`);
+    } catch (e: any) {
+      alert(`Erreur lors du partage : ${e.message}`);
+    } finally {
+      setPromotingCgId(null);
     }
   };
 
@@ -990,6 +1017,16 @@ export const AdminView: React.FC = () => {
                               title="Voir les faits de couverture"
                             >
                               <BarChart2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handlePromoteToCentral(entry)}
+                              disabled={promotingCgId === entry.id}
+                              className="p-2 text-slate-300 hover:text-blue-600 transition-colors disabled:opacity-40"
+                              title="Promouvoir en CG centrale (partager avec tous les utilisateurs)"
+                            >
+                              {promotingCgId === entry.id
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Share2 className="w-4 h-4" />}
                             </button>
                             <button
                               onClick={() => handleDeleteUserCg(entry.id, entry.target_filename)}

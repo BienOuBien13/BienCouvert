@@ -97,6 +97,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const [error, setError] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userId, setUserId] = useState('');
+  // Consentement au partage communautaire du PDF
+  const [shareConsent, setShareConsent] = useState(false);
 
   useEffect(() => {
     loadInsuranceTypes();
@@ -320,6 +322,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 insurance_type_name: status.insurance_type_name
               });
               setStep('configure');
+              // Partage communautaire si l'utilisateur a coché la case
+              if (shareConsent && docType === 'CG') {
+                fetch(`${API_URL}/api/cg/user/promote-to-central/${cgId}`, {
+                  method: 'POST',
+                  credentials: 'include'
+                }).catch(e => console.warn('[promote-to-central] non-bloquant:', e));
+              }
               resolve();
             } else if (status.status === 'failed') {
               reject(new Error(status.error || 'Traitement échoué'));
@@ -754,6 +763,25 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               <p className="text-xs text-gray-500 mt-1">📎 {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} Mo)</p>
             )}
           </div>
+
+          {/* Consentement partage communautaire — uniquement pour les CG */}
+          {docType === 'CG' && (
+            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-xl border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={shareConsent}
+                onChange={e => setShareConsent(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded text-blue-600"
+              />
+              <span className="text-sm text-blue-900">
+                <strong>Partager avec la communauté AssurClair</strong>
+                <br />
+                <span className="text-xs text-blue-700 font-normal">
+                  En cochant cette case, vous autorisez le partage de ce document en lecture seule avec les autres utilisateurs, afin d'enrichir la base de référence commune. Aucune donnée personnelle ne sera partagée.
+                </span>
+              </span>
+            </label>
+          )}
 
           <button
             onClick={uploadCustomCG}
