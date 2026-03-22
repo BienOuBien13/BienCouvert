@@ -139,12 +139,21 @@ function parseStatus(
 }
 
 /**
- * Extrait un tableau structuré depuis une image de page PDF via Gemini Vision
+ * Extrait un tableau structuré depuis une image de page PDF via Gemini Vision.
+ *
+ * @param pageImageBase64    Image base64 de la page à analyser
+ * @param insurerCode        Code assureur (ex: "MAAF01")
+ * @param insuranceTypeCode  Code type assurance (ex: "AUT01")
+ * @param knownFormulaHeaders  En-têtes de formules détectées sur les pages précédentes.
+ *                             Passé pour les "pages de continuation" où les colonnes du
+ *                             tableau ne sont plus visibles en haut de page.
+ *                             Ex: ["TIERS", "TIERS ESSENTIEL+", "TOUS RISQUES"]
  */
 export async function extractTableFromPageImage(
   pageImageBase64: string,
   insurerCode: string,
-  insuranceTypeCode: string
+  insuranceTypeCode: string,
+  knownFormulaHeaders?: string[]
 ): Promise<ExtractedTable | null> {
   try {
     const ai = getAiClient();
@@ -155,9 +164,25 @@ export async function extractTableFromPageImage(
 
     const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
+    // ── Bloc de contexte injecté quand des en-têtes de pages précédentes sont connus ──
+    const continuationContext = (knownFormulaHeaders && knownFormulaHeaders.length > 0)
+      ? `
+═══ CONTEXTE — PAGE DE CONTINUATION ═══
+Cette page fait probablement partie d'un tableau commencé sur les pages précédentes.
+Les colonnes de formules identifiées sur les pages précédentes sont (dans l'ordre) :
+${knownFormulaHeaders.map((h, i) => `  ${i + 1}. "${h}"`).join('\n')}
+
+⚠️ RÈGLE STRICTE :
+- Si les en-têtes de colonnes NE SONT PAS visibles sur cette page, utilise EXACTEMENT ces noms (même orthographe, même ordre).
+- Ne les invente PAS et ne les renomme PAS.
+- Si tu vois des en-têtes sur cette page qui correspondent à ces noms, utilise-les — sinon utilise la liste ci-dessus.
+═══════════════════════════════════════
+`
+      : '';
+
     const prompt = `Tu es un expert en analyse de tableaux de garanties d'assurance français.
 Analyse cette image de page PDF et extrait la matrice complète garanties × formules.
-
+${continuationContext}
 ═══ ÉTAPE 1 — LÉGENDE (CRITIQUE — faire AVANT toute extraction) ═══
 Cherche PARTOUT sur la page une légende, un encadré "Légende", "Symboles", une note de bas de page ou un texte explicatif des symboles.
 Exemples fréquents :
@@ -168,29 +193,35 @@ Exemples fréquents :
 Reporte la légende dans le champ "legend" : { "symbole_brut": "included|excluded|optional" }
 Si aucune légende trouvée : "legend": null
 
-═══ ÉTAPE 2 — EXTRACTION DU TABLEAU ═══
-Pour chaque cellule, APPLIQUE la légende pour déterminer le statut et normalise la valeur :
+═══ ÉTAPE 2 — DÉTECTION DES EN-TÊTES ═══
+Identifie la LIGNE D'EN-TÊTES du tableau (noms des formules/produits).
+- Si les en-têtes couvrent plusieurs lignes (ex: zone géographique + nom formule), concatène : "Zone Europe — FORMULE 1"
+- Si cette page est une suite (voir contexte ci-dessus) et que les en-têtes ne sont pas visibles, utilise les noms fournis dans le contexte.
+- La première colonne s'appelle toujours "Garanties" (ou son équivalent visible).
+
+═══ ÉTAPE 3 — EXTRACTION DES LIGNES ═══
+Pour chaque cellule, APPLIQUE la légende pour normaliser la valeur :
 - Inclus (légende = "garanti"/"inclus"/"oui") → mettre "✓"
 - Exclu (légende = "non garanti"/"exclu"/"non") → mettre "✗"
 - Option (légende = "en option"/"sur option"/"optionnel") → mettre "○"
 - Cellule VIDE (vraiment vide, rien du tout) → mettre ""
 - Montant ou texte descriptif → mettre le texte exact ("1 500 €", "Jusqu'à 3000 €")
 
-Si PAS de légende, applique ce décodage standard :
+Si PAS de légende explicite, applique ce décodage standard :
 - ✓ ✔ ● • √ ■ ▪ ◆ "Oui" "Inclus" "Garanti" "Compris" → "✓"
 - ✗ ✘ × "Non" "Exclu" "Néant" □ ▫ → "✗"
 - X ou x seul (lettre, pas symbole) → "✗"
 - – — - (tiret seul) → "✗"  
 - ○ ◯ "Option" "En option" "En sus" △ → "○"
 
-⚠️ RÈGLES IMPORTANTES :
+⚠️ RÈGLES ABSOLUES À RESPECTER :
 1. LÉGENDE = PRIORITÉ ABSOLUE sur tout autre interprétation.
-2. Une cellule VIDE (pas de symbole) ≠ "exclu" : mets "" (chaîne vide).
-3. Les TITRES DE SECTION (lignes en gras/italique sans symboles dans les colonnes) : inclure le titre comme garantie mais mettre "" dans toutes les cellules.
-4. PAGE DE CONTINUATION : si les en-têtes de colonnes ne sont pas visibles sur cette page, déduis le nom des formules depuis le contexte visuel (alignement identique à d'autres pages).
-5. Identifie TOUTES les lignes (y compris sous-garanties en retrait ou à la ligne suivante).
-6. Identifie TOUTES les colonnes de formules.
-7. Symbole inconnu non présent dans la légende → mets le symbole exact tel quel.
+2. Une cellule VIDE (pas de symbole, pas de tiret) ≠ "exclu" : mets "" (chaîne vide).
+3. TITRES DE SECTION : certaines lignes sont des titres de section (ex: "GARANTIES OBLIGATOIRES", "DOMMAGES AU VÉHICULE") — elles sont souvent en gras, centrées, sans symboles. Pour ces lignes, inclure le titre dans "guarantee" ET ajouter "is_section": true. Mettre "" dans toutes les cellules de formule.
+4. Identifie TOUTES les lignes (y compris sous-garanties en retrait ou à la ligne suivante).
+5. Identifie TOUTES les colonnes de formules, sans en oublier.
+6. Symbole inconnu non présent dans la légende → mets le symbole exact tel quel.
+7. Si un montant est présent dans la cellule (ex: "1 000 €", "100%"), inclure le montant en plus du statut.
 
 ═══ FORMAT JSON STRICT (aucun autre texte) ═══
 {
@@ -199,12 +230,25 @@ Si PAS de légende, applique ce décodage standard :
   "headers": ["Garanties", "FORMULE 1", "FORMULE 2", "FORMULE 3"],
   "rows": [
     {
+      "guarantee": "GARANTIES OBLIGATOIRES",
+      "is_section": true,
+      "formulas": { "formule_1": "", "formule_2": "", "formule_3": "" }
+    },
+    {
       "guarantee": "Responsabilité civile",
       "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" }
     },
     {
-      "guarantee": "Assistance dépannage (serrurerie, plomberie)",
-      "formulas": { "formule_1": "✓", "formule_2": "✓", "formule_3": "✓" }
+      "guarantee": "Dommages tous accidents",
+      "formulas": { "formule_1": "✗", "formule_2": "✓", "formule_3": "✓" }
+    },
+    {
+      "guarantee": "Dommages collision (responsabilité partielle)",
+      "formulas": { "formule_1": "✗", "formule_2": "○", "formule_3": "✓" }
+    },
+    {
+      "guarantee": "Franchise : 300 €",
+      "formulas": { "formule_1": "", "formule_2": "300 €", "formule_3": "150 €" }
     }
   ],
   "confidence": 0.95
@@ -217,6 +261,10 @@ CLÉS DE FORMULES en snake_case :
 Si aucun tableau visible : {"has_table": false, "confidence": 1.0}
 
 RÉPONDS UNIQUEMENT AVEC LE JSON.`;
+
+    if (knownFormulaHeaders && knownFormulaHeaders.length > 0) {
+      console.log(`📌 [extractTable] Contexte continuation : ${knownFormulaHeaders.length} formules connues → [${knownFormulaHeaders.join(' | ')}]`);
+    }
 
     const result = await model.generateContent([
       prompt,
@@ -296,7 +344,10 @@ RÉPONDS UNIQUEMENT AVEC LE JSON.`;
 }
 
 /**
- * Convertit un tableau extrait en faits de couverture requêtables
+ * Convertit un tableau extrait en faits de couverture requêtables.
+ * Les lignes marquées `is_section: true` par Gemini sont ignorées.
+ * Les lignes dont toutes les cellules de formule sont vides sont également ignorées
+ * (elles correspondent à des titres de section non marqués explicitement).
  */
 export function tableToFacts(
   table: ExtractedTable,
@@ -319,36 +370,41 @@ export function tableToFacts(
     const guaranteeLabel: string = isArrayRow ? String(row[0] || '') : (row.guarantee || '');
     const guaranteeKey = normalizeGuaranteeKey(guaranteeLabel);
 
-    // Ignorer les lignes vides ou de titre (aucun symbole dans les colonnes de formule)
+    // Ignorer les lignes vides
     if (!guaranteeLabel.trim()) return;
+
+    // Ignorer les titres de section explicitement marqués par Gemini
+    if (!isArrayRow && row.is_section === true) {
+      console.log(`   ℹ️  [tableToFacts] Titre de section ignoré : "${guaranteeLabel}"`);
+      return;
+    }
+
+    // Collecter les valeurs de formule pour cette ligne
+    const cellValues: string[] = formulaHeaders.map((formulaLabel, colIndex) => {
+      const formulaKey = normalizeFormulaKey(formulaLabel);
+      if (isArrayRow) {
+        const rawCell = row[colIndex + 1];
+        return rawCell !== undefined ? String(rawCell) : '';
+      }
+      const formulas = row.formulas || {};
+      if (formulas[formulaKey] !== undefined) return String(formulas[formulaKey]);
+      const geminiKeys = Object.keys(formulas);
+      const matchingKey = geminiKeys.find(gk => normalizeFormulaKey(gk) === formulaKey);
+      if (matchingKey !== undefined) return String(formulas[matchingKey]);
+      if (colIndex < geminiKeys.length) return String(formulas[geminiKeys[colIndex]]);
+      return '';
+    });
+
+    // Ignorer les lignes où TOUTES les cellules de formule sont vides (titre de section non marqué)
+    const hasAnyContent = cellValues.some(v => v.trim() !== '');
+    if (!hasAnyContent) {
+      console.log(`   ℹ️  [tableToFacts] Ligne sans contenu (section ?) ignorée : "${guaranteeLabel}"`);
+      return;
+    }
 
     formulaHeaders.forEach((formulaLabel, colIndex) => {
       const formulaKey = normalizeFormulaKey(formulaLabel);
-
-      let symbol = '';
-
-      if (isArrayRow) {
-        // Format tableau : row[0]=garantie, row[1]=col1, row[2]=col2, ...
-        const rawCell = row[colIndex + 1];
-        symbol = rawCell !== undefined ? String(rawCell) : '';
-      } else {
-        // Format objet : { guarantee, formulas: { key: symbol } }
-        const formulas = row.formulas || {};
-        if (formulas[formulaKey] !== undefined) {
-          // Stratégie 1: clé exacte (notre normalisation de l'en-tête)
-          symbol = String(formulas[formulaKey]);
-        } else {
-          const geminiKeys = Object.keys(formulas);
-          // Stratégie 2: clé Gemini qui normalise vers la même valeur
-          const matchingKey = geminiKeys.find(gk => normalizeFormulaKey(gk) === formulaKey);
-          if (matchingKey !== undefined) {
-            symbol = String(formulas[matchingKey]);
-          } else if (colIndex < geminiKeys.length) {
-            // Stratégie 3: fallback positionnel
-            symbol = String(formulas[geminiKeys[colIndex]]);
-          }
-        }
-      }
+      const symbol = cellValues[colIndex];
 
       const parsed = parseStatus(symbol, table.legend);
       const coverageStatus = parsed.status;

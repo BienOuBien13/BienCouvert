@@ -314,6 +314,9 @@ export async function vectorizeCgByPages(
     let tablesExtracted = 0;
     let factsCreated = 0;
     const discoveredFormulaLabels = new Map<string, number>(); // label → nb de pages où il apparaît comme en-tête
+    // En-têtes de formules de la dernière page avec tableau détecté.
+    // Transmis à Vision pour les pages de continuation (tableau sur plusieurs pages).
+    let lastKnownFormulaHeaders: string[] = [];
     clearStopVectorization(centralCgId);
 
     // Traiter chaque page
@@ -374,11 +377,13 @@ export async function vectorizeCgByPages(
         
         // Rate-limit supplémentaire avant appel Vision
         await new Promise(r => setTimeout(r, 500));
-        
+
+        // Passer les en-têtes de la dernière page connue pour les pages de continuation
         const table = await extractTableFromPageImage(
           pageData.imageBase64,
           cg.insurer_code,
-          cg.insurance_type_code
+          cg.insurance_type_code,
+          lastKnownFormulaHeaders.length > 0 ? lastKnownFormulaHeaders : undefined
         );
         
         if (table) {
@@ -386,8 +391,13 @@ export async function vectorizeCgByPages(
           extractionConfidence = table.confidence;
           tablesExtracted++;
 
-          // Capturer les labels de formules depuis les en-têtes du tableau Vision
+          // Mettre à jour les en-têtes connus (carry-forward)
           if (table.headers && table.headers.length > 1) {
+            const newHeaders = table.headers.slice(1).filter((h: string) => h && h.trim().length > 1);
+            if (newHeaders.length > 0) {
+              lastKnownFormulaHeaders = newHeaders;
+            }
+            // Capturer les labels de formules depuis les en-têtes du tableau Vision
             table.headers.slice(1).forEach((h: string) => {
               if (h && h.trim().length > 1) {
                 const label = h.trim();
@@ -685,6 +695,8 @@ export async function vectorizeUserCgByPages(
     let tablesExtracted = 0;
     let factsCreated = 0;
     const discoveredFormulaLabels = new Map<string, number>(); // label → nb de pages où il apparaît comme en-tête
+    // En-têtes de formules de la dernière page avec tableau détecté (carry-forward pour pages de continuation)
+    let lastKnownFormulaHeaders: string[] = [];
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       console.log(`\n📄 [user_cg ${userCgId}] Page ${pageNum}/${numPages}...`);
@@ -712,10 +724,12 @@ export async function vectorizeUserCgByPages(
 
       if (hasTable || maybeTable) {
         console.log(`   📊 ${hasTable ? 'Tableau détecté' : 'Possible tableau'}, extraction Vision...`);
+        // Passer les en-têtes de la dernière page connue pour les pages de continuation
         const table = await extractTableFromPageImage(
           pageData.imageBase64,
           cg.insurer_code,
-          cg.insurance_type_code
+          cg.insurance_type_code,
+          lastKnownFormulaHeaders.length > 0 ? lastKnownFormulaHeaders : undefined
         );
 
         if (table) {
@@ -723,8 +737,13 @@ export async function vectorizeUserCgByPages(
           extractionConfidence = table.confidence;
           tablesExtracted++;
 
-          // Capturer les labels de formules depuis les en-têtes du tableau Vision
+          // Mettre à jour les en-têtes connus (carry-forward)
           if (table.headers && table.headers.length > 1) {
+            const newHeaders = table.headers.slice(1).filter((h: string) => h && h.trim().length > 1);
+            if (newHeaders.length > 0) {
+              lastKnownFormulaHeaders = newHeaders;
+            }
+            // Capturer les labels de formules depuis les en-têtes du tableau Vision
             table.headers.slice(1).forEach((h: string) => {
               if (h && h.trim().length > 1) {
                 const label = h.trim();
