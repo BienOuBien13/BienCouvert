@@ -9,8 +9,9 @@ yarn-error.log
 .env.*.local
 .env.secrets
 *.secrets
-# Exception: .env.production peut être commité (pas de secrets, juste config)
-!.env.production
+# ⚠️ Ne JAMAIS commiter .env.production (contient des credentials)
+BackEnd/.env.production
+FrontEnd/.env.production
 
 # Build outputs
 dist/

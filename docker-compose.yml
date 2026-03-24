@@ -8,8 +8,7 @@ services:
       context: ./BackEnd
       dockerfile: Dockerfile
     env_file:
-      - ./BackEnd/.env.production   # Config publique (commité, sans secrets)
-      - ./BackEnd/.env              # Secrets sur la VM (gitignore, surcharge .env.production)
+      - ./BackEnd/.env              # Secrets sur la VM (gitignore, jamais commité)
     environment:
       - REDIS_URL=redis://redis:6379  # Cache IA (container Redis interne)
       - OTEL_ENABLED=true            # Active la télémétrie OpenTelemetry
