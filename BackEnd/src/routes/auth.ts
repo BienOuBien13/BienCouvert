@@ -39,7 +39,11 @@ const authLimiter = rateLimit({
  * @returns Token JWT signé
  */
 function signToken(user: User) {
-  return jwt.sign({ id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(
+    { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, isAdmin: user.isAdmin || false, isPartner: user.isPartner || false },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
 }
 
 /**

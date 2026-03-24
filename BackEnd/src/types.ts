@@ -91,11 +91,12 @@ export interface UserProfileData {
  */
 export interface User {
   id: string;                    // Identifiant unique UUID
-  email: string;                 // Adresse email (utilisÃ©e pour la connexion)
-  firstName: string;             // PrÃ©nom de l'utilisateur
+  email: string;                 // Adresse email (utilisée pour la connexion)
+  firstName: string;             // Prénom de l'utilisateur
   lastName: string;              // Nom de famille de l'utilisateur
-  profile?: UserProfileData;     // DonnÃ©es du profil dÃ©taillÃ© (optionnel)
-  isAdmin?: boolean;             // Indicateur d'accÃ¨s administrateur (dÃ©faut: false)
+  profile?: UserProfileData;     // Données du profil détaillé (optionnel)
+  isAdmin?: boolean;             // Indicateur d'accès administrateur (défaut: false)
+  isPartner?: boolean;           // Accès à la vue partenaire (défaut: false)
 }
 
 /**

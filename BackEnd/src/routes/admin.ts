@@ -34,11 +34,26 @@ function authMiddleware(req: any, res: any, next: any) {
   return res.status(401).json({ message: 'Token invalide' });
 }
 
-function adminMiddleware(req: any, res: any, next: any) {
-  if (!req.user?.isAdmin) {
-    return res.status(403).json({ message: 'Accès réservé aux administrateurs' });
+/**
+ * Vérifie que l'utilisateur est admin.
+ * Priorité 1 : champ isAdmin dans le payload JWT (tokens émis après le fix).
+ * Priorité 2 : requête DB sur is_admin (tokens anciens sans isAdmin dans le payload).
+ */
+async function adminMiddleware(req: any, res: any, next: any) {
+  // Cas 1 : le token contient déjà isAdmin = true
+  if (req.user?.isAdmin === true) return next();
+
+  // Cas 2 : ancien token sans isAdmin → vérifier en DB
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(403).json({ message: 'Accès réservé aux administrateurs' });
+    const result = await query('SELECT is_admin FROM users WHERE id = $1', [userId]);
+    if (result.rows[0]?.is_admin === true) return next();
+  } catch (err) {
+    console.error('[adminMiddleware] DB check failed:', err);
   }
-  next();
+
+  return res.status(403).json({ message: 'Accès réservé aux administrateurs' });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
