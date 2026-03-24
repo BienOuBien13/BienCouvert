@@ -19,6 +19,7 @@ export interface ControlRow {
   expected_amount_pattern: string | null;
   optional_match: boolean;
   source_doc_hint: string | null;
+  source_cg_filename: string | null;
   notes: string | null;
 }
 
@@ -39,11 +40,12 @@ export interface ControlDetail {
   result: CheckResult;
   error: string | null;
   source_doc_hint: string | null;
+  source_cg_filename: string | null;
 }
 
 export interface ControlCheckReport {
   run_at: string;
-  filters: { insurer_code?: string; insurance_type_code?: string };
+  filters: { insurer_code?: string; insurance_type_code?: string; source_cg_filename?: string };
   total: number;
   passed: number;
   failed: number;
@@ -67,12 +69,15 @@ export interface ControlCheckReport {
  * Met à jour les colonnes last_check_* dans coverage_facts_control.
  *
  * @param pool       Instance pg.Pool connectée à la base de production
- * @param filters    Filtres optionnels (insurer_code et/ou insurance_type_code)
+ * @param filters    Filtres optionnels (insurer_code, insurance_type_code, source_cg_filename)
+ *   - source_cg_filename : si fourni, ne vérifie que les contrôles liés à ce fichier CG
+ *     ET compare contre les coverage_facts extraits spécifiquement depuis ce fichier
+ *     (JOIN central_cg ON target_filename).
  * @returns Rapport détaillé du run (total, passed, failed, not_found + détails)
  */
 export async function runControlCheck(
   pool: Pool,
-  filters: { insurer_code?: string; insurance_type_code?: string } = {}
+  filters: { insurer_code?: string; insurance_type_code?: string; source_cg_filename?: string } = {}
 ): Promise<ControlCheckReport> {
   const run_at = new Date().toISOString();
   const client = await pool.connect();
@@ -90,6 +95,10 @@ export async function runControlCheck(
       params.push(filters.insurance_type_code);
       conditions.push(`ctrl.insurance_type_code = $${params.length}`);
     }
+    if (filters.source_cg_filename) {
+      params.push(filters.source_cg_filename);
+      conditions.push(`ctrl.source_cg_filename = $${params.length}`);
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -98,8 +107,8 @@ export async function runControlCheck(
          id, insurer_code, insurance_type_code,
          formula_key, formula_label, guarantee_key, guarantee_label,
          expected_status, expected_amount_pattern, optional_match,
-         source_doc_hint, notes
-       FROM coverage_facts_control
+         source_doc_hint, source_cg_filename, notes
+       FROM coverage_facts_control ctrl
        ${whereClause}
        ORDER BY insurer_code, insurance_type_code, formula_key, guarantee_key`,
       params
@@ -120,8 +129,9 @@ export async function runControlCheck(
     }
 
     // ─── 2. Récupérer les coverage_facts correspondants en une seule requête ─
-    // On joint sur la clé composite (insurer_code, insurance_type_code, formula_key, guarantee_key).
-    // On prend le fait le plus récent par centrale CG (plus grande coverage_score ou dernier id).
+    // Si source_cg_filename est fourni : on joint avec central_cg pour ne tester
+    // que les faits extraits depuis ce fichier spécifique.
+    // Sinon : on prend le fait le plus récent toutes CG confondues.
     const factsResult = await client.query<{
       insurer_code: string;
       insurance_type_code: string;
@@ -130,21 +140,41 @@ export async function runControlCheck(
       coverage_status: string;
       coverage_amount: string | null;
     }>(
-      `SELECT DISTINCT ON (cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key)
-         cf.insurer_code,
-         cf.insurance_type_code,
-         cf.formula_key,
-         cf.guarantee_key,
-         cf.coverage_status,
-         cf.coverage_amount
-       FROM coverage_facts cf
-       WHERE cf.insurer_code = ANY($1::text[])
-         AND cf.insurance_type_code = ANY($2::text[])
-       ORDER BY cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key, cf.id DESC`,
-      [
-        [...new Set(controlRows.rows.map(r => r.insurer_code))],
-        [...new Set(controlRows.rows.map(r => r.insurance_type_code))],
-      ]
+      filters.source_cg_filename
+        ? `SELECT DISTINCT ON (cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key)
+             cf.insurer_code,
+             cf.insurance_type_code,
+             cf.formula_key,
+             cf.guarantee_key,
+             cf.coverage_status,
+             cf.coverage_amount
+           FROM coverage_facts cf
+           JOIN central_cg cg ON cf.central_cg_id = cg.id
+           WHERE cf.insurer_code = ANY($1::text[])
+             AND cf.insurance_type_code = ANY($2::text[])
+             AND (cg.target_filename = $3 OR cg.url LIKE '%' || $3 || '%')
+           ORDER BY cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key, cf.id DESC`
+        : `SELECT DISTINCT ON (cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key)
+             cf.insurer_code,
+             cf.insurance_type_code,
+             cf.formula_key,
+             cf.guarantee_key,
+             cf.coverage_status,
+             cf.coverage_amount
+           FROM coverage_facts cf
+           WHERE cf.insurer_code = ANY($1::text[])
+             AND cf.insurance_type_code = ANY($2::text[])
+           ORDER BY cf.insurer_code, cf.insurance_type_code, cf.formula_key, cf.guarantee_key, cf.id DESC`,
+      filters.source_cg_filename
+        ? [
+            [...new Set(controlRows.rows.map(r => r.insurer_code))],
+            [...new Set(controlRows.rows.map(r => r.insurance_type_code))],
+            filters.source_cg_filename,
+          ]
+        : [
+            [...new Set(controlRows.rows.map(r => r.insurer_code))],
+            [...new Set(controlRows.rows.map(r => r.insurance_type_code))],
+          ]
     );
 
     // Index les faits pour lookup O(1)
@@ -201,6 +231,7 @@ export async function runControlCheck(
         result,
         error,
         source_doc_hint: ctrl.source_doc_hint,
+        source_cg_filename: ctrl.source_cg_filename,
       });
     }
 

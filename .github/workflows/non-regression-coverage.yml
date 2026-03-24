@@ -14,6 +14,10 @@ on:
         description: 'Filtrer par code type assurance (ex: AUT01, HAB01, SAN01) — vide = tous'
         required: false
         default: ''
+      source_cg_filename:
+        description: 'Filtrer par fichier CG source (ex: MAT01_HAB01_002.pdf) — vide = tous'
+        required: false
+        default: ''
 
 jobs:
   non-regression:
@@ -45,6 +49,9 @@ jobs:
           fi
           if [ -n "${{ github.event.inputs.insurance_type_code }}" ]; then
             ARGS="$ARGS --type ${{ github.event.inputs.insurance_type_code }}"
+          fi
+          if [ -n "${{ github.event.inputs.source_cg_filename }}" ]; then
+            ARGS="$ARGS --filename ${{ github.event.inputs.source_cg_filename }}"
           fi
           npx ts-node src/scripts/run-control-check.ts $ARGS
         env:

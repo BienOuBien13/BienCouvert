@@ -7,6 +7,7 @@
 //   npx ts-node -e "require('dotenv').config({path:'.env.production'})" src/scripts/run-control-check.ts -- --insurer MAAF01
 //   npx ts-node -e "require('dotenv').config({path:'.env.production'})" src/scripts/run-control-check.ts -- --type AUT01
 //   npx ts-node -e "require('dotenv').config({path:'.env.production'})" src/scripts/run-control-check.ts -- --insurer MAAF01 --type AUT01
+//   npx ts-node -e "require('dotenv').config({path:'.env.production'})" src/scripts/run-control-check.ts -- --insurer MAT01 --type HAB01 --filename MAT01_HAB01_002.pdf
 //
 // Utilisé par le workflow GitHub Actions "non-regression-coverage.yml".
 // Sort avec exit code 1 si des contrôles échouent ou ne sont pas trouvés.
@@ -23,15 +24,17 @@ import { runControlCheck, ControlCheckReport } from '../services/controlCheckSer
 // Parsing des arguments CLI
 // ─────────────────────────────────────────────────────────────────────────────
 
-function parseArgs(): { insurer_code?: string; insurance_type_code?: string } {
+function parseArgs(): { insurer_code?: string; insurance_type_code?: string; source_cg_filename?: string } {
   const args = process.argv.slice(2);
-  const result: { insurer_code?: string; insurance_type_code?: string } = {};
+  const result: { insurer_code?: string; insurance_type_code?: string; source_cg_filename?: string } = {};
 
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === '--insurer' || args[i] === '-i') && args[i + 1]) {
       result.insurer_code = args[++i];
     } else if ((args[i] === '--type' || args[i] === '-t') && args[i + 1]) {
       result.insurance_type_code = args[++i];
+    } else if ((args[i] === '--filename' || args[i] === '-f') && args[i + 1]) {
+      result.source_cg_filename = args[++i];
     }
   }
 
@@ -49,6 +52,7 @@ function printReport(report: ControlCheckReport): void {
   console.log(`  Run at : ${report.run_at}`);
   if (report.filters.insurer_code) console.log(`  Filtre assureur     : ${report.filters.insurer_code}`);
   if (report.filters.insurance_type_code) console.log(`  Filtre type         : ${report.filters.insurance_type_code}`);
+  if (report.filters.source_cg_filename) console.log(`  Filtre fichier CG   : ${report.filters.source_cg_filename}`);
   console.log(SEP);
   console.log(`  Total contrôles : ${report.total}`);
   console.log(`  ✅ Passed       : ${report.passed}`);
@@ -67,6 +71,7 @@ function printReport(report: ControlCheckReport): void {
       console.log(`     Attendu  : ${f.expected_status}${f.expected_amount_pattern ? ` (pattern montant: ${f.expected_amount_pattern})` : ''}`);
       console.log(`     Obtenu   : ${f.actual_status ?? '—'} ${f.actual_amount ? `/ ${f.actual_amount}` : ''}`);
       if (f.source_doc_hint) console.log(`     Source   : ${f.source_doc_hint}`);
+      if (f.source_cg_filename) console.log(`     Fichier  : ${f.source_cg_filename}`);
       if (f.error) console.log(`     Erreur   : ${f.error}`);
       console.log('');
     }

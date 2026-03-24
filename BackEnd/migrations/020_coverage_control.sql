@@ -10,25 +10,23 @@
 CREATE TABLE IF NOT EXISTS coverage_facts_control (
     id                      SERIAL PRIMARY KEY,
 
-    -- Clé de jointure vers coverage_facts
-    insurer_code            TEXT NOT NULL,
+        insurer_code            TEXT NOT NULL,
     insurance_type_code     TEXT NOT NULL,
     formula_key             TEXT NOT NULL,   -- snake_case normalised
     formula_label           TEXT NOT NULL,   -- libellé lisible
     guarantee_key           TEXT NOT NULL,   -- snake_case normalised
     guarantee_label         TEXT NOT NULL,   -- libellé lisible
 
-    -- Valeur attendue
     expected_status         TEXT NOT NULL
-                                CHECK (expected_status IN ('included','excluded','optional','not_applicable')),
+          CHECK (expected_status IN ('included','excluded','optional','not_applicable')),
     expected_amount_pattern TEXT,            -- regex optionnel sur coverage_amount (NULL = pas de vérif montant)
     optional_match          BOOLEAN DEFAULT false,   -- true = 'optional' accepté comme équivalent à 'included'
 
-    -- Contexte documentaire
+
     source_doc_hint         TEXT,            -- ex: "MAAF Auto CG 2024_v2"
+    source_cg_filename      TEXT NOT NULL DEFAULT '',  -- '' = générique, 'MAT01_HAB01_002.pdf' = spécifique
     notes                   TEXT,
 
-    -- Résultat du dernier passage de vérification
     last_check_at           TIMESTAMP,
     last_check_result       TEXT
                                 CHECK (last_check_result IN ('passed','failed','not_found','pending')),
@@ -39,7 +37,7 @@ CREATE TABLE IF NOT EXISTS coverage_facts_control (
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    UNIQUE (insurer_code, insurance_type_code, formula_key, guarantee_key)
+    CONSTRAINT uq_ctrl_full_key UNIQUE (insurer_code, insurance_type_code, formula_key, guarantee_key, source_cg_filename)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ctrl_insurer_type
@@ -69,29 +67,25 @@ INSERT INTO coverage_facts_control
     (insurer_code, insurance_type_code, formula_key, formula_label,
      guarantee_key, guarantee_label, expected_status, notes, source_doc_hint)
 VALUES
--- Responsabilité civile TOUJOURS incluse en Tiers
 ('MAAF01','AUT01','tiers','Tiers',
  'responsabilite_civile','Responsabilité civile','included',
  'RC obligatoire en France quel que soit le niveau de formule','MAAF Auto CG'),
 
--- Dommages au véhicule exclu en Tiers de base
+
 ('MAAF01','AUT01','tiers','Tiers',
  'dommages_collision','Dommages collision','excluded',
  'Franchise dommages exclue en formule Tiers stricte','MAAF Auto CG'),
 
--- Vol exclu en Tiers strict
+
 ('MAAF01','AUT01','tiers','Tiers',
  'vol','Vol','excluded',
  NULL,'MAAF Auto CG'),
 
--- Bris de glace exclu en Tiers strict
+
 ('MAAF01','AUT01','tiers','Tiers',
  'bris_de_glaces','Bris de glaces','excluded',
  NULL,'MAAF Auto CG'),
 
--- =============================================================================
--- AUTO — Formule Tiers+ / Tiers Essentiel+ (intermédiaire)
--- =============================================================================
 ('MAAF01','AUT01','tiers_essentiel_plus','Tiers Essentiel+',
  'responsabilite_civile','Responsabilité civile','included',NULL,'MAAF Auto CG'),
 
@@ -110,9 +104,6 @@ VALUES
  'dommages_collision','Dommages collision','excluded',
  'Dommages propres exclus même en Tiers+','MAAF Auto CG'),
 
--- =============================================================================
--- AUTO — Formule Tous Risques
--- =============================================================================
 ('MAAF01','AUT01','tous_risques','Tous Risques',
  'responsabilite_civile','Responsabilité civile','included',NULL,'MAAF Auto CG'),
 
@@ -132,9 +123,6 @@ VALUES
 ('MAAF01','AUT01','tous_risques','Tous Risques',
  'assistance','Assistance','included',NULL,'MAAF Auto CG'),
 
--- =============================================================================
--- HABITATION HAB01 — Formule Essentielle
--- =============================================================================
 ('MAAF01','HAB01','essentielle','Essentielle',
  'incendie','Incendie','included',NULL,'MAAF Habitation CG'),
 
@@ -155,9 +143,6 @@ VALUES
  'equipements_electroniques','Équipements électroniques','excluded',
  'Option à souscrire séparément en formule Essentielle','MAAF Habitation CG'),
 
--- =============================================================================
--- HABITATION HAB01 — Formule Confort (intermédiaire)
--- =============================================================================
 ('MAAF01','HAB01','confort','Confort',
  'incendie','Incendie','included',NULL,'MAAF Habitation CG'),
 
@@ -171,9 +156,6 @@ VALUES
  'protection_juridique','Protection juridique','included',
  'PJ incluse dès Confort','MAAF Habitation CG'),
 
--- =============================================================================
--- HABITATION HAB01 — Formule Premium / Sérénité
--- =============================================================================
 ('MAAF01','HAB01','premium','Premium',
  'incendie','Incendie','included',NULL,'MAAF Habitation CG'),
 
@@ -187,9 +169,6 @@ VALUES
  'equipements_electroniques','Équipements électroniques','included',
  'Couverture appareils incluse en Premium','MAAF Habitation CG'),
 
--- =============================================================================
--- SANTÉ SAN01 — Formule Base
--- =============================================================================
 ('MAAF01','SAN01','base','Base',
  'hospitalisation','Hospitalisation','included',NULL,'MAAF Santé CG'),
 
@@ -204,9 +183,6 @@ VALUES
  'dentaire','Soins dentaires','included',
  'Remboursement partiel en Base','MAAF Santé CG'),
 
--- =============================================================================
--- SANTÉ SAN01 — Formule Renforcée
--- =============================================================================
 ('MAAF01','SAN01','renforcee','Renforcée',
  'hospitalisation','Hospitalisation','included',NULL,'MAAF Santé CG'),
 
@@ -221,7 +197,7 @@ VALUES
  'medecines_douces','Médecines douces (ostéopathie, etc.)','optional',
  'En option dans certaines versions','MAAF Santé CG')
 
-ON CONFLICT (insurer_code, insurance_type_code, formula_key, guarantee_key)
+ON CONFLICT ON CONSTRAINT uq_ctrl_full_key
 DO UPDATE SET
     formula_label          = EXCLUDED.formula_label,
     guarantee_label        = EXCLUDED.guarantee_label,
