@@ -14,6 +14,7 @@ import cgRoutes from './routes/cg';
 import contactRoutes from './routes/contact';
 import partnerRoutes from './routes/partner';
 import sinistreRoutes from './routes/sinistre';
+import adminRoutes from './routes/admin';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initTelemetry } from './telemetry';
@@ -262,6 +263,7 @@ app.use('/api/cg', csrfMiddleware, cgRoutes);                                // 
 app.use('/api/contact', csrfMiddleware, contactRoutes);                      // 📧 Prise de RDV avec CSRF
 app.use('/api/partner', csrfMiddleware, partnerRoutes);                      // 🤝 Vue partenaire
 app.use('/api/sinistre', csrfMiddleware, sinistreRoutes);                    // 🛡️ Assistant Sinistre
+app.use('/api/admin', csrfMiddleware, adminRoutes);                          // 🔬 Admin (non-régression, métriques)
 
 // ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
 /**
