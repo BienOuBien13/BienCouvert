@@ -4,6 +4,7 @@ import {
   ChevronDown, ChevronRight, Filter, BarChart3, Clock, Search,
   FileText, Loader2, Eye
 } from 'lucide-react';
+import { fetchCsrfToken } from '../services/authService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -56,7 +57,21 @@ interface SummaryRow {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const API = import.meta.env.VITE_API_URL || '';
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });
+const authHeader = () => ({
+  Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+  credentials: 'include' as const,
+});
+
+/** Parse la réponse — retourne le JSON ou lance une erreur lisible même si la réponse est du HTML */
+async function parseResponse(r: Response) {
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // La réponse est du HTML (erreur CSRF, 404 nginx, etc.)
+    throw new Error(`Erreur HTTP ${r.status} — ${r.statusText || 'réponse non-JSON reçue'}`);
+  }
+}
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="text-slate-400 text-xs">—</span>;
@@ -126,8 +141,12 @@ const ControlCheckPage: React.FC = () => {
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
     try {
-      const r = await fetch(`${API}/api/admin/control-check/summary`, { headers: authHeader() });
-      if (r.ok) setSummary(await r.json());
+      const r = await fetch(`${API}/api/admin/control-check/summary`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        credentials: 'include',
+      });
+      const data = await parseResponse(r);
+      if (r.ok) setSummary(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('[control-check/summary]', e);
     } finally {
@@ -149,16 +168,22 @@ const ControlCheckPage: React.FC = () => {
       if (filterType.trim())    body.insurance_type_code = filterType.trim();
       if (filterFile.trim())    body.source_cg_filename  = filterFile.trim();
 
+      // CSRF obligatoire pour les POST
+      const csrf = await fetchCsrfToken();
       const r = await fetch(`${API}/api/admin/control-check`, {
         method: 'POST',
-        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+          'Content-Type': 'application/json',
+          ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+        },
+        credentials: 'include',
         body: JSON.stringify(body),
       });
-      const data = await r.json();
-      if (!r.ok) { setRunError(data.message || 'Erreur inconnue'); return; }
+      const data = await parseResponse(r);
+      if (!r.ok) { setRunError(data.message || `Erreur HTTP ${r.status}`); return; }
       setReport(data);
       setShowOnlyFailures(data.failed > 0 || data.not_found > 0);
-      // Refresh summary
       loadSummary();
     } catch (e: any) {
       setRunError(e.message);
