@@ -8,53 +8,15 @@
  */
 
 import { Router } from 'express';
-import jwt from 'jsonwebtoken';
 import pool from '../db';
 import { runControlCheck } from '../services/controlCheckService';
 import { query } from '../db';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
+import { getTokenStats, resetTokenStats } from '../utils/geminiMetrics';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
-// ─── Middlewares ──────────────────────────────────────────────────────────────
-
-function authMiddleware(req: any, res: any, next: any) {
-  const cookieToken = req.cookies?.token;
-  let bearerToken: string | undefined;
-  const auth = req.headers.authorization;
-  if (auth) {
-    const parts = auth.split(' ');
-    if (parts.length === 2 && parts[0] === 'Bearer') bearerToken = parts[1];
-  }
-  const tokens = [cookieToken, bearerToken].filter(Boolean) as string[];
-  if (!tokens.length) return res.status(401).json({ message: 'Non authentifié' });
-  for (const token of tokens) {
-    try { req.user = jwt.verify(token, JWT_SECRET); return next(); } catch {}
-  }
-  return res.status(401).json({ message: 'Token invalide' });
-}
-
-/**
- * Vérifie que l'utilisateur est admin.
- * Priorité 1 : champ isAdmin dans le payload JWT (tokens émis après le fix).
- * Priorité 2 : requête DB sur is_admin (tokens anciens sans isAdmin dans le payload).
- */
-async function adminMiddleware(req: any, res: any, next: any) {
-  // Cas 1 : le token contient déjà isAdmin = true
-  if (req.user?.isAdmin === true) return next();
-
-  // Cas 2 : ancien token sans isAdmin → vérifier en DB
-  try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(403).json({ message: 'Accès réservé aux administrateurs' });
-    const result = await query('SELECT is_admin FROM users WHERE id = $1', [userId]);
-    if (result.rows[0]?.is_admin === true) return next();
-  } catch (err) {
-    console.error('[adminMiddleware] DB check failed:', err);
-  }
-
-  return res.status(403).json({ message: 'Accès réservé aux administrateurs' });
-}
+// authMiddleware et adminMiddleware sont importés depuis le module partagé ../middleware/auth
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/control-check
@@ -152,6 +114,19 @@ router.get('/control-check/summary', authMiddleware, adminMiddleware, async (_re
     console.error('[admin/control-check/summary]', err.message);
     res.status(500).json({ message: 'Erreur lors du résumé', error: err.message });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET  /api/admin/token-stats   — métriques de tokens Gemini (admin only)
+// POST /api/admin/token-stats/reset — remise à zéro des compteurs
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/token-stats', authMiddleware, adminMiddleware, (_req, res) => {
+  res.json(getTokenStats());
+});
+
+router.post('/token-stats/reset', authMiddleware, adminMiddleware, (_req, res) => {
+  resetTokenStats();
+  res.json({ ok: true, message: 'Compteurs remis à zéro' });
 });
 
 export default router;

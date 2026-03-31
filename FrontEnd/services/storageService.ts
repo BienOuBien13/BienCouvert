@@ -45,10 +45,11 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
 
 export const storageService = {
   /**
-   * Récupère toutes les polices d'un utilisateur
+   * Récupère toutes les polices de l'utilisateur authentifié
+   * (le backend utilise l'identité du JWT, userId côté client n'est plus accepté)
    */
-  getPolicies: async (userId: string): Promise<Policy[]> => {
-    return apiFetch(`/policies?userId=${userId}`, { method: 'GET' });
+  getPolicies: async (_userId?: string): Promise<Policy[]> => {
+    return apiFetch(`/policies`, { method: 'GET' });
   },
 
   /**

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { storage } from '../storage';
 import { analyzeClaim, generateClaimLetter, chatClaim, ClaimContext, ChatMessage } from '../services/geminiService';
+import { authMiddleware } from '../middleware/auth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes /api/sinistre — Assistant Sinistre BienCouvert
@@ -9,6 +10,9 @@ import { analyzeClaim, generateClaimLetter, chatClaim, ClaimContext, ChatMessage
 // ─────────────────────────────────────────────────────────────────────────────
 
 const router = Router();
+
+// Appliquer authMiddleware à toutes les routes sinistre
+router.use(authMiddleware);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -28,12 +32,12 @@ const mapSessionRow = (row: any) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/sinistre/sessions/:userId
-// Liste toutes les sessions sinistre d'un utilisateur
+// GET /api/sinistre/sessions
+// Liste toutes les sessions sinistre de l'utilisateur authentifié
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/sessions/:userId', async (req: Request, res: Response) => {
+router.get('/sessions', async (req: any, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user.id; // toujours extrait du JWT
     const result = await query(
       `SELECT cs.*, p.metadata->>'name' AS policy_name,
               i.label AS insurer, p.type AS policy_type
@@ -54,7 +58,7 @@ router.get('/sessions/:userId', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/sinistre/session/:id
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/session/:id', async (req: Request, res: Response) => {
+router.get('/session/:id', async (req: any, res: Response) => {
   try {
     const result = await query(
       `SELECT cs.*, p.metadata->>'name' AS policy_name,
@@ -66,6 +70,12 @@ router.get('/session/:id', async (req: Request, res: Response) => {
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+
+    // Vérification de propriété
+    if (result.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     res.json(mapSessionRow(result.rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: 'Erreur serveur', details: err.message });
@@ -77,7 +87,7 @@ router.get('/session/:id', async (req: Request, res: Response) => {
 // Envoyer un message et obtenir une réponse IA contextuelle
 // L'historique est persisté dans le champ messages de claim_sessions
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/session/:id/chat', async (req: Request, res: Response) => {
+router.post('/session/:id/chat', async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { message } = req.body;
@@ -97,6 +107,11 @@ router.post('/session/:id/chat', async (req: Request, res: Response) => {
     );
     if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
     const session = sessionResult.rows[0];
+
+    // Vérification de propriété
+    if (session.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
     const claimData: ClaimContext = session.claim_data || {};
     const analysis = session.analysis || null;
@@ -149,10 +164,10 @@ router.post('/session/:id/chat', async (req: Request, res: Response) => {
 // POST /api/sinistre/sessions
 // Créer une nouvelle session sinistre (étape 1 : qualification)
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/sessions', async (req: Request, res: Response) => {
+router.post('/sessions', async (req: any, res: Response) => {
   try {
-    const { userId, policyId, claimData, title } = req.body;
-    if (!userId) return res.status(400).json({ error: 'userId requis' });
+    const { policyId, claimData, title } = req.body;
+    const userId = req.user.id; // toujours extrait du JWT
 
     const result = await query(
       `INSERT INTO claim_sessions (user_id, policy_id, claim_data, title, status)
@@ -171,13 +186,18 @@ router.post('/sessions', async (req: Request, res: Response) => {
 // PATCH /api/sinistre/session/:id
 // Mettre à jour la qualification (claim_data, policy, title, status)
 // ─────────────────────────────────────────────────────────────────────────────
-router.patch('/session/:id', async (req: Request, res: Response) => {
+router.patch('/session/:id', async (req: any, res: Response) => {
   try {
     const { claimData, policyId, title, status } = req.body;
     const { id } = req.params;
 
-    const existing = await query('SELECT id FROM claim_sessions WHERE id = $1', [id]);
+    const existing = await query('SELECT id, user_id FROM claim_sessions WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+
+    // Vérification de propriété
+    if (existing.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
     const updates: string[] = [];
     const values: any[] = [];
@@ -206,7 +226,7 @@ router.patch('/session/:id', async (req: Request, res: Response) => {
 // POST /api/sinistre/session/:id/analyze
 // Analyser le sinistre avec l'IA et sauvegarder le résultat
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/session/:id/analyze', async (req: Request, res: Response) => {
+router.post('/session/:id/analyze', async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -224,6 +244,11 @@ router.post('/session/:id/analyze', async (req: Request, res: Response) => {
     );
     if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
     const session = sessionResult.rows[0];
+
+    // Vérification de propriété
+    if (session.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
     const claimData: ClaimContext = session.claim_data || {};
     const policyMeta = session.policy_metadata || {};
 
@@ -285,12 +310,12 @@ router.post('/session/:id/analyze', async (req: Request, res: Response) => {
 // POST /api/sinistre/session/:id/letter
 // Générer la lettre de déclaration de sinistre
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/session/:id/letter', async (req: Request, res: Response) => {
+router.post('/session/:id/letter', async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
+    const userId = req.user.id; // toujours extrait du JWT
 
-    // Charger session + utilisateur
+    // Charger session + vérifier propriété
     const sessionResult = await query(
       `SELECT cs.*, p.metadata AS policy_metadata,
               i.label AS insurer, p.type AS policy_type
@@ -302,6 +327,11 @@ router.post('/session/:id/letter', async (req: Request, res: Response) => {
     );
     if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
     const session = sessionResult.rows[0];
+
+    // Vérification de propriété
+    if (session.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
     if (!session.analysis) return res.status(400).json({ error: 'Analyse requise avant génération lettre' });
 
@@ -345,8 +375,14 @@ router.post('/session/:id/letter', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/sinistre/session/:id
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete('/session/:id', async (req: Request, res: Response) => {
+router.delete('/session/:id', async (req: any, res: Response) => {
   try {
+    // Vérifier la propriété avant suppression
+    const existing = await query('SELECT user_id FROM claim_sessions WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Session introuvable' });
+    if (existing.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
     await query('DELETE FROM claim_sessions WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err: any) {

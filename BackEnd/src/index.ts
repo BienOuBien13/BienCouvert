@@ -18,7 +18,6 @@ import adminRoutes from './routes/admin';
 import path from 'path';
 import './db';  // Initialisation de la connexion PostgreSQL
 import { initTelemetry } from './telemetry';
-import { getTokenStats, resetTokenStats } from './utils/geminiMetrics';
 import { initAuditTable } from './services/auditService';
 import { verifySmtpConnection } from './services/emailService';
 import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, initPartnerTables, purgeExpiredTokens } from './services/dbInitService';
@@ -265,24 +264,7 @@ app.use('/api/partner', csrfMiddleware, partnerRoutes);                      // 
 app.use('/api/sinistre', csrfMiddleware, sinistreRoutes);                    // 🛡️ Assistant Sinistre
 app.use('/api/admin', csrfMiddleware, adminRoutes);                          // 🔬 Admin (non-régression, métriques)
 
-// ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
-/**
- * GET /api/admin/token-stats
- * Retourne les statistiques de tokens Gemini pour la session en cours.
- * Accès restreint : endpoint admin uniquement (pas exposé publiquement).
- */
-app.get('/api/admin/token-stats', (req, res) => {
-  res.json(getTokenStats());
-});
-
-/**
- * POST /api/admin/token-stats/reset
- * Remet à zéro les compteurs en mémoire (ne remet pas à zéro les métriques OTel).
- */
-app.post('/api/admin/token-stats/reset', (req, res) => {
-  resetTokenStats();
-  res.json({ ok: true, message: 'Compteurs remis à zéro' });
-});
+// Les routes /api/admin/token-stats sont définies dans admin.ts (authMiddleware + adminMiddleware)
 
 
 // -----------------------------------------------------------------------------

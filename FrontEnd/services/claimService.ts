@@ -91,9 +91,9 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
 };
 
 export const claimService = {
-  /** Liste toutes les sessions sinistre d'un utilisateur */
-  getSessions: async (userId: string): Promise<ClaimSession[]> => {
-    return apiFetch(`/sinistre/sessions/${userId}`);
+  /** Liste toutes les sessions sinistre de l'utilisateur authentifié */
+  getSessions: async (_userId?: string): Promise<ClaimSession[]> => {
+    return apiFetch(`/sinistre/sessions`);
   },
 
   /** Récupère une session par ID */
@@ -101,16 +101,16 @@ export const claimService = {
     return apiFetch(`/sinistre/session/${id}`);
   },
 
-  /** Crée une nouvelle session */
+  /** Crée une nouvelle session (userId extrait du JWT côté backend) */
   createSession: async (
-    userId: string,
+    _userId: string,
     policyId: number | null,
     claimData: Partial<ClaimContext>,
     title: string
   ): Promise<ClaimSession> => {
     return apiFetch('/sinistre/sessions', {
       method: 'POST',
-      body: JSON.stringify({ userId, policyId, claimData, title }),
+      body: JSON.stringify({ policyId, claimData, title }),
     });
   },
 
@@ -130,11 +130,11 @@ export const claimService = {
     return apiFetch(`/sinistre/session/${sessionId}/analyze`, { method: 'POST', body: '{}' });
   },
 
-  /** Génère la lettre de déclaration */
-  generateLetter: async (sessionId: number, userId: string): Promise<{ letter: string; emailSubject: string }> => {
+  /** Génère la lettre de déclaration (userId extrait du JWT côté backend) */
+  generateLetter: async (sessionId: number, _userId?: string): Promise<{ letter: string; emailSubject: string }> => {
     return apiFetch(`/sinistre/session/${sessionId}/letter`, {
       method: 'POST',
-      body: JSON.stringify({ userId }),
+      body: '{}',
     });
   },
 

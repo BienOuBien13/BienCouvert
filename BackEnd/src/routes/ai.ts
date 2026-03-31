@@ -4,36 +4,28 @@ import { extractTableFromPageImage } from '../services/tableExtractionService';
 import { storage } from '../storage';
 import { query as dbQuery } from '../db';
 import { cacheGet, cacheSet, makeCacheKey } from '../services/cacheService';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 
 const router = Router();
 
 // Endpoint chat utilisé par le frontend : envoie un message, le contexte des
 // polices et l'historique. Réponse : `{ response: string }`.
-router.post('/chat', async (req, res) => {
+router.post('/chat', authMiddleware, async (req: any, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });
   try {
-    // Recharger les policies depuis la DB pour avoir les metadata complets
-    const policyIds = (policies || []).map((p: any) => p.id).filter(Boolean);
-    let enrichedPolicies = policies || [];
-    
-    if (policyIds.length > 0) {
-      console.log(`🔄 Rechargement de ${policyIds.length} policies depuis DB pour avoir metadata...`);
-      
-      // Récupérer toutes les policies de l'utilisateur (on suppose que req contient userId ou on l'extrait des policies)
-      const userId = policies[0]?.userId;
-      if (userId) {
-        const allPolicies = await storage.readPolicies(userId);
-        // Filtrer pour ne garder que celles demandées
-        enrichedPolicies = allPolicies.filter((p: any) => policyIds.includes(String(p.id)));
-        console.log(`✅ ${enrichedPolicies.length} policies rechargées avec metadata`);
-      } else {
-        console.warn('⚠️ Impossible de recharger policies : userId non trouvé');
-      }
-    }
+    // userId toujours extrait du JWT — jamais du body client
+    const userId: number = req.user.id;
 
-    // 🚀 Cache Redis : évite les appels Gemini répétés pour la même question/contexte
-    const cacheKey = makeCacheKey('chat', message, policyIds.sort().join(','));
+    // Valider les policy IDs côté serveur : seules les polices appartenant
+    // à l'utilisateur authentifié sont autorisées (protection IDOR sur le RAG)
+    const requestedIds = (policies || []).map((p: any) => parseInt(p.id)).filter((id: number) => !isNaN(id));
+    const ownedPolicies = await storage.readPolicies(userId);
+    const enrichedPolicies = ownedPolicies.filter((p: any) => requestedIds.includes(parseInt(p.id)));
+    const policyIds = enrichedPolicies.map((p: any) => String(p.id));
+
+    // 🚀 Cache Redis : clé incluant l'userId pour éviter tout cross-user cache bleed
+    const cacheKey = makeCacheKey('chat', String(userId), message, policyIds.sort().join(','));
     const cached = await cacheGet<string>(cacheKey);
     if (cached) {
       console.log('🎯 Cache hit — chat');
@@ -42,7 +34,6 @@ router.post('/chat', async (req, res) => {
     
     const response = await sendMessageToAssistant(message, enrichedPolicies, history || []);
 
-    // Mettre en cache 30 min (TTL configurable via CACHE_TTL env)
     await cacheSet(cacheKey, response);
 
     res.json({ response });
@@ -53,23 +44,17 @@ router.post('/chat', async (req, res) => {
 });
 
 // Endpoint chat STREAMING - envoie la réponse progressivement via SSE
-router.post('/chat/stream', async (req, res) => {
+router.post('/chat/stream', authMiddleware, async (req: any, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });
   
   try {
-    // Même enrichissement des policies que /chat
-    const policyIds = (policies || []).map((p: any) => p.id).filter(Boolean);
-    let enrichedPolicies = policies || [];
-    
-    if (policyIds.length > 0) {
-      const userId = policies[0]?.userId;
-      if (userId) {
-        const allPolicies = await storage.readPolicies(userId);
-        enrichedPolicies = allPolicies.filter((p: any) => policyIds.includes(String(p.id)));
-        console.log(`✅ ${enrichedPolicies.length} policies rechargées (streaming)`);
-      }
-    }
+    // userId toujours extrait du JWT — validation des policy IDs identique à /chat
+    const userId: number = req.user.id;
+    const requestedIds = (policies || []).map((p: any) => parseInt(p.id)).filter((id: number) => !isNaN(id));
+    const ownedPolicies = await storage.readPolicies(userId);
+    const enrichedPolicies = ownedPolicies.filter((p: any) => requestedIds.includes(parseInt(p.id)));
+    console.log(`✅ ${enrichedPolicies.length} policies validées (streaming)`);
     
     // Configuration SSE (Server-Sent Events)
     res.setHeader('Content-Type', 'text/event-stream');
@@ -135,7 +120,8 @@ router.post('/parse-text', async (req, res) => {
 });
 
 // Endpoint indexation d'un document CG depuis une URL
-router.post('/index-cg', async (req, res) => {
+// Protégé : admin uniquement (prévient l'injection de contenu dans la base RAG partagée)
+router.post('/index-cg', authMiddleware, adminMiddleware, async (req, res) => {
   const { provider, type, pdfUrl } = req.body;
   if (!provider || !type || !pdfUrl) return res.status(400).json({ message: 'Missing parameters' });
   try {
@@ -197,12 +183,18 @@ router.post('/coverage-details', async (req, res) => {
 // DEBUG: diagnostic état coverage_facts pour un userId
 // GET /api/ai/debug-coverage?userId=123
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/debug-coverage', async (req, res) => {
-  const userId = req.query.userId as string;
-  if (!userId) return res.status(400).json({ error: 'userId requis (query param)' });
+router.get('/debug-coverage', authMiddleware, async (req: any, res) => {
+  // Un utilisateur non-admin ne peut consulter que ses propres données
+  let userId: number;
+  if (req.user?.isAdmin && req.query.userId) {
+    userId = parseInt(req.query.userId as string);
+  } else {
+    userId = req.user.id;
+  }
+  if (isNaN(userId)) return res.status(400).json({ error: 'userId invalide' });
 
   try {
-    const policies = await storage.readPolicies(parseInt(userId));
+    const policies = await storage.readPolicies(userId);
     const policyInfo = policies.map((p: any) => ({
       id: p.id,
       name: p.name,

@@ -9,29 +9,10 @@
  */
 
 import { Router } from 'express';
-import jwt from 'jsonwebtoken';
 import { query } from '../db';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-
-// ─── Middlewares ──────────────────────────────────────────────────────────────
-
-function authMiddleware(req: any, res: any, next: any) {
-  const cookieToken = req.cookies?.token;
-  let bearerToken: string | undefined;
-  const auth = req.headers.authorization;
-  if (auth) {
-    const parts = auth.split(' ');
-    if (parts.length === 2 && parts[0] === 'Bearer') bearerToken = parts[1];
-  }
-  const tokens = [cookieToken, bearerToken].filter(Boolean) as string[];
-  if (!tokens.length) return res.status(401).json({ message: 'Non authentifié' });
-  for (const token of tokens) {
-    try { req.user = jwt.verify(token, JWT_SECRET); return next(); } catch {}
-  }
-  return res.status(401).json({ message: 'Token invalide' });
-}
 
 async function partnerMiddleware(req: any, res: any, next: any) {
   try {
@@ -171,10 +152,22 @@ router.get('/my-assignments', authMiddleware, partnerMiddleware, async (req: any
 /**
  * GET /api/partner/client/:email
  * Profil synthétique complet d'un client : user info + policies + RDV requests.
+ * Restreint : le partenaire doit avoir une assignation active pour ce client.
  */
-router.get('/client/:email', authMiddleware, partnerMiddleware, async (_req: any, res) => {
-  const email = decodeURIComponent((_req as any).params.email);
+router.get('/client/:email', authMiddleware, partnerMiddleware, async (req: any, res) => {
+  const email = decodeURIComponent(req.params.email);
+  const partnerId = req.user.id;
+
   try {
+    // Vérifier que ce partenaire a une assignation pour ce client
+    const assignmentCheck = await query(
+      `SELECT pa.id FROM partner_assignments pa WHERE pa.partner_id = $1 AND pa.client_email = $2 LIMIT 1`,
+      [partnerId, email]
+    );
+    if (assignmentCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'Accès refusé : aucune assignation pour ce client' });
+    }
+
     // Infos utilisateur
     const userResult = await query(
       `SELECT id, email, first_name, last_name, profile FROM users WHERE email = $1`,
