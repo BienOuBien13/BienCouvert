@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { useAuth } from '@/hooks/useAuth';
 
 function TabIcon({ name, color }: { name: React.ComponentProps<typeof Ionicons>['name']; color: string }) {
   return <Ionicons name={name} size={24} color={color} />;
@@ -12,6 +13,7 @@ function TabIcon({ name, color }: { name: React.ComponentProps<typeof Ionicons>[
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const { user } = useAuth();
 
   return (
     <Tabs
@@ -65,6 +67,15 @@ export default function TabLayout() {
         options={{
           title: 'Profil',
           tabBarIcon: ({ color }) => <TabIcon name="person-outline" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="admin"
+        options={{
+          title: 'Admin',
+          href: user?.isAdmin ? undefined : null,
+          tabBarIcon: ({ color }) => <TabIcon name="shield-checkmark-outline" color={color} />,
+          tabBarActiveTintColor: '#f59e0b',
         }}
       />
     </Tabs>

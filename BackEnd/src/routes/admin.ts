@@ -129,4 +129,89 @@ router.post('/token-stats/reset', authMiddleware, adminMiddleware, (_req, res) =
   res.json({ ok: true, message: 'Compteurs remis à zéro' });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/dashboard-stats
+// Statistiques agrégées pour le dashboard de monitoring
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/dashboard-stats', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM users)                                                                          AS total_users,
+        (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days')                           AS new_users_week,
+        (SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_LOGIN' AND timestamp >= CURRENT_DATE)          AS logins_today,
+        (SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_FAILED_LOGIN' AND timestamp >= CURRENT_DATE)   AS failed_logins_today,
+        (SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_LOGIN' AND timestamp >= NOW() - INTERVAL '7 days') AS logins_week,
+        (SELECT COUNT(DISTINCT user_id) FROM audit_logs WHERE action = 'USER_LOGIN' AND timestamp >= NOW() - INTERVAL '30 days') AS active_users_month
+    `);
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    console.error('[admin/dashboard-stats]', err.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des statistiques', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/users
+// Liste tous les utilisateurs avec leur nombre de contrats et dernière connexion
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/users', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        u.id,
+        u.email,
+        u.first_name,
+        u.last_name,
+        u.is_admin,
+        u.is_partner,
+        u.created_at,
+        COUNT(DISTINCT p.id)::int                                                AS policy_count,
+        MAX(al.timestamp)                                                        AS last_login
+      FROM users u
+      LEFT JOIN policies p  ON p.user_id = u.id
+      LEFT JOIN audit_logs al ON al.user_id = u.id AND al.action = 'USER_LOGIN'
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[admin/users]', err.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des utilisateurs', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/connection-logs?limit=100
+// Derniers événements de connexion (login, logout, échec, inscription)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/connection-logs', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const rawLimit = parseInt(String(req.query.limit || '100'), 10);
+  const limit = Math.min(isNaN(rawLimit) ? 100 : rawLimit, 500);
+  try {
+    const result = await query(
+      `SELECT
+         al.id,
+         al.action,
+         al.user_id,
+         al.user_email,
+         al.ip_address,
+         al.timestamp,
+         al.details,
+         u.first_name,
+         u.last_name
+       FROM audit_logs al
+       LEFT JOIN users u ON u.id = al.user_id
+       WHERE al.action IN ('USER_LOGIN', 'USER_LOGOUT', 'USER_FAILED_LOGIN', 'USER_REGISTER')
+       ORDER BY al.timestamp DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[admin/connection-logs]', err.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des logs', error: err.message });
+  }
+});
+
 export default router;
