@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2, FlaskConical
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2, FlaskConical, Settings
 } from 'lucide-react';
 import ControlCheckPage from './ControlCheckPage';
 
@@ -111,7 +111,7 @@ export const AdminView: React.FC = () => {
   const [factsIsUser, setFactsIsUser] = useState(false);
 
   // --- État de l'onglet User CG ---
-  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'controlCheck'>('central');
+  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'controlCheck' | 'ingestion'>('central');
   const [userCgList, setUserCgList] = useState<UserCgEntry[]>([]);
   const [userCgLoading, setUserCgLoading] = useState(false);
   const [userCgSearchTerm, setUserCgSearchTerm] = useState('');
@@ -524,6 +524,16 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <FlaskConical className="w-3.5 h-3.5" /> Non-régression
+        </button>
+        <button
+          onClick={() => setActiveTab('ingestion')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            activeTab === 'ingestion'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Wand2 className="w-3.5 h-3.5" /> Ingestion auto
         </button>
       </div>
 
@@ -1343,6 +1353,346 @@ export const AdminView: React.FC = () => {
       {activeTab === 'controlCheck' && (
         <ControlCheckPage />
       )}
+
+      {activeTab === 'ingestion' && (
+        <IngestionPanel />
+      )}
     </>
   );
 };
+
+// =============================================================================
+// IngestionPanel — Widget d'ingestion automatique de CG
+// =============================================================================
+const API = (import.meta as any).env?.VITE_API_URL ?? '';
+const TOKEN = () => localStorage.getItem('assurclair_token') || '';
+
+interface InsurerScope { code: string; label: string; fullName: string; websiteUrl: string; cgSearchEnabled: boolean; cgSearchPatterns: any; }
+interface TypeScope    { code: string; labelFr: string; }
+interface RunHistory   { run_id: string; started_at: string; last_updated: string; total: number; done: number; skipped: number; errors: number; in_progress: number; insurers: string[]; types: string[]; }
+interface JobDetail    { id: number; insurer_code: string; insurance_type_code: string; source_url: string | null; status: string; confidence: number | null; error_message: string | null; central_cg_id: number | null; pages_count: number | null; }
+
+const STATUS_COLORS: Record<string, string> = {
+  done:        'text-emerald-700 bg-emerald-50 border-emerald-200',
+  skipped:     'text-amber-600   bg-amber-50   border-amber-200',
+  error:       'text-red-600     bg-red-50     border-red-200',
+  vectorizing: 'text-blue-700   bg-blue-50    border-blue-200',
+  classifying: 'text-violet-700 bg-violet-50  border-violet-200',
+  fetching:    'text-sky-700    bg-sky-50     border-sky-200',
+  pending:     'text-slate-500  bg-slate-50   border-slate-200',
+};
+
+function IngestionPanel() {
+  const [scope, setScope]             = useState<{ insurers: InsurerScope[]; insurance_types: TypeScope[] } | null>(null);
+  const [loading, setLoading]         = useState(false);
+  const [selInsurers, setSelInsurers] = useState<string[]>([]);
+  const [selTypes, setSelTypes]       = useState<string[]>([]);
+  const [maxDocs, setMaxDocs]         = useState(2);
+  const [confThreshold, setConf]      = useState(0.70);
+  const [running, setRunning]         = useState(false);
+  const [statusMsg, setStatusMsg]     = useState<string | null>(null);
+  const [history, setHistory]         = useState<RunHistory[]>([]);
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const [jobDetails, setJobDetails]   = useState<Record<string, JobDetail[]>>({});
+  const [editPatterns, setEditPatterns] = useState<{ insurer: InsurerScope | null; open: boolean }>({ insurer: null, open: false });
+  const [patternDraft, setPatternDraft] = useState<{ cgPageUrls: string; pdfPatterns: string; excludePatterns: string; enabled: boolean }>({ cgPageUrls: '', pdfPatterns: '', excludePatterns: '', enabled: false });
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` };
+
+  const loadScope = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/admin/cg-ingestion/scope`, { headers });
+      const data = await res.json();
+      setScope(data);
+    } catch { /* silencieux */ }
+    setLoading(false);
+  };
+
+  const loadHistory = async () => {
+    try {
+      const res = await fetch(`${API}/api/admin/cg-ingestion/history?limit=20`, { headers });
+      const data = await res.json();
+      if (Array.isArray(data)) setHistory(data);
+    } catch { /* silencieux */ }
+  };
+
+  const pollStatus = async () => {
+    try {
+      const res = await fetch(`${API}/api/admin/cg-ingestion/status`, { headers });
+      const data = await res.json();
+      if (!data.running) {
+        setRunning(false);
+        setStatusMsg('Pipeline terminé ✅');
+        if (pollRef.current) clearInterval(pollRef.current);
+        loadHistory();
+      } else {
+        const counts = (data.counts as any[]) ?? [];
+        const done  = counts.find(c => c.status === 'done')?.count ?? 0;
+        const total = counts.reduce((s: number, c: any) => s + Number(c.count), 0);
+        setStatusMsg(`En cours… ${done}/${total} jobs`);
+      }
+    } catch { /* silencieux */ }
+  };
+
+  useEffect(() => {
+    loadScope();
+    loadHistory();
+    // Vérifier si un run est déjà en cours
+    fetch(`${API}/api/admin/cg-ingestion/status`, { headers })
+      .then(r => r.json())
+      .then(d => { if (d.running) { setRunning(true); pollRef.current = setInterval(pollStatus, 5000); } })
+      .catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const handleRun = async () => {
+    if (!selInsurers.length || !selTypes.length) { alert('Sélectionnez au moins un assureur et un type d\'assurance'); return; }
+    const res = await fetch(`${API}/api/admin/cg-ingestion/run`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ scope: 'targeted', insurers: selInsurers, insurance_types: selTypes, max_docs_per_combo: maxDocs, confidence_threshold: confThreshold }),
+    });
+    if (res.ok) {
+      setRunning(true);
+      setStatusMsg('Démarrage…');
+      pollRef.current = setInterval(pollStatus, 5000);
+    } else {
+      const err = await res.json();
+      alert(err.message ?? 'Erreur démarrage');
+    }
+  };
+
+  const handleStop = async () => {
+    await fetch(`${API}/api/admin/cg-ingestion/stop`, { method: 'POST', headers });
+    setStatusMsg('Arrêt demandé…');
+  };
+
+  const loadJobDetails = async (runId: string) => {
+    if (jobDetails[runId]) { setExpandedRun(expandedRun === runId ? null : runId); return; }
+    const res = await fetch(`${API}/api/admin/cg-ingestion/jobs/${runId}`, { headers });
+    const data = await res.json();
+    setJobDetails(prev => ({ ...prev, [runId]: data }));
+    setExpandedRun(runId);
+  };
+
+  const openEditPatterns = (ins: InsurerScope) => {
+    const p = ins.cgSearchPatterns ?? {};
+    setPatternDraft({
+      enabled: ins.cgSearchEnabled ?? false,
+      cgPageUrls:     (p.cg_page_urls ?? []).join('\n'),
+      pdfPatterns:    (p.pdf_url_patterns ?? []).join('\n'),
+      excludePatterns:(p.exclude_patterns ?? []).join('\n'),
+    });
+    setEditPatterns({ insurer: ins, open: true });
+  };
+
+  const savePatterns = async () => {
+    if (!editPatterns.insurer) return;
+    const payload = {
+      insurer_code: editPatterns.insurer.code,
+      cg_search_enabled: patternDraft.enabled,
+      cg_search_patterns: {
+        cg_page_urls:     patternDraft.cgPageUrls.split('\n').map(s => s.trim()).filter(Boolean),
+        pdf_url_patterns: patternDraft.pdfPatterns.split('\n').map(s => s.trim()).filter(Boolean),
+        exclude_patterns: patternDraft.excludePatterns.split('\n').map(s => s.trim()).filter(Boolean),
+      },
+    };
+    await fetch(`${API}/api/admin/cg-ingestion/insurer-patterns`, { method: 'PUT', headers, body: JSON.stringify(payload) });
+    await loadScope();
+    setEditPatterns({ insurer: null, open: false });
+  };
+
+  const toggle = (arr: string[], val: string, set: (a: string[]) => void) =>
+    set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val]);
+
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <Wand2 className="w-5 h-5 text-violet-600" /> Ingestion automatique de CG
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">Découverte, classification et vectorisation automatiques via agents IA</p>
+        </div>
+        <button onClick={loadScope} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="Actualiser"><RefreshCw className="w-4 h-4" /></button>
+      </div>
+
+      {loading && <div className="flex items-center gap-3 p-4"><Loader2 className="w-5 h-5 animate-spin text-violet-600" /><span className="text-sm text-slate-500">Chargement du périmètre…</span></div>}
+
+      {scope && (
+        <>
+          {/* ── Sélection périmètre ── */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">1. Sélection des assureurs</p>
+            <div className="flex flex-wrap gap-2">
+              {scope.insurers.map(ins => (
+                <button
+                  key={ins.code}
+                  onClick={() => toggle(selInsurers, ins.code, setSelInsurers)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                    selInsurers.includes(ins.code)
+                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
+                  }`}
+                >
+                  {ins.label}
+                  {ins.cgSearchEnabled && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Patterns configurés" />}
+                  <button
+                    onClick={e => { e.stopPropagation(); openEditPatterns(ins); }}
+                    className="ml-1 opacity-60 hover:opacity-100"
+                    title="Configurer les patterns de crawl"
+                  >
+                    <Settings className="w-3 h-3" />
+                  </button>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">2. Types d'assurance</p>
+            <div className="flex flex-wrap gap-2">
+              {scope.insurance_types.map(t => (
+                <button
+                  key={t.code}
+                  onClick={() => toggle(selTypes, t.code, setSelTypes)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                    selTypes.includes(t.code)
+                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
+                  }`}
+                >
+                  {t.labelFr}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-black uppercase text-slate-400">Docs max / combo</label>
+                <input type="number" min={1} max={10} value={maxDocs}
+                  onChange={e => setMaxDocs(Number(e.target.value))}
+                  className="w-16 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-center outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-black uppercase text-slate-400">Confiance min</label>
+                <input type="number" min={0} max={1} step={0.05} value={confThreshold}
+                  onChange={e => setConf(Number(e.target.value))}
+                  className="w-20 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-center outline-none"
+                />
+              </div>
+              <div className="flex gap-2 ml-auto">
+                {running ? (
+                  <button onClick={handleStop}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all">
+                    <X className="w-3.5 h-3.5" /> Arrêter
+                  </button>
+                ) : (
+                  <button onClick={handleRun}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-violet-700 shadow-lg shadow-violet-900/15 transition-all disabled:opacity-50"
+                    disabled={!selInsurers.length || !selTypes.length}>
+                    <Wand2 className="w-3.5 h-3.5" /> Lancer l'ingestion
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {(running || statusMsg) && (
+              <div className={`flex items-center gap-3 p-3 rounded-xl border ${
+                running ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              }`}>
+                {running ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <CheckCircle className="w-4 h-4 shrink-0" />}
+                <span className="text-xs font-bold">{statusMsg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Historique des runs ── */}
+          {history.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Historique des runs</p>
+                <button onClick={loadHistory} className="text-slate-400 hover:text-slate-600"><RefreshCw className="w-3.5 h-3.5" /></button>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {history.map(run => (
+                  <div key={run.run_id}>
+                    <button
+                      onClick={() => loadJobDetails(run.run_id)}
+                      className="w-full flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition-colors text-left"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-mono text-slate-400 truncate">{run.run_id}</p>
+                        <p className="text-[10px] text-slate-400">{new Date(run.started_at).toLocaleString('fr-FR')} · {run.insurers?.join(', ')}</p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">{run.done} ✅</span>
+                        {run.errors > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-red-50 text-red-600 border border-red-200">{run.errors} ❌</span>}
+                        {run.skipped > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-200">{run.skipped} ⏭</span>}
+                        {run.in_progress > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-200">{run.in_progress} ⏳</span>}
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${expandedRun === run.run_id ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {expandedRun === run.run_id && jobDetails[run.run_id] && (
+                      <div className="px-5 pb-3 space-y-1.5">
+                        {jobDetails[run.run_id].map(job => (
+                          <div key={job.id} className={`flex items-center gap-3 p-2.5 rounded-xl border text-xs ${STATUS_COLORS[job.status] ?? STATUS_COLORS.pending}`}>
+                            <span className="font-bold shrink-0">[{job.insurer_code}/{job.insurance_type_code}]</span>
+                            <span className={`px-2 py-0.5 rounded-lg font-bold text-[10px] border ${STATUS_COLORS[job.status] ?? STATUS_COLORS.pending}`}>{job.status}</span>
+                            {job.confidence !== null && <span className="text-[10px] opacity-70">{(job.confidence * 100).toFixed(0)}%</span>}
+                            {job.pages_count && <span className="text-[10px] opacity-70">{job.pages_count} pages</span>}
+                            <span className="text-[10px] truncate opacity-60">{job.source_url ?? '—'}</span>
+                            {job.error_message && <span className="text-[10px] text-red-500 truncate ml-auto" title={job.error_message}>⚠ {job.error_message.slice(0, 60)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Modal config patterns ── */}
+      {editPatterns.open && editPatterns.insurer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={() => setEditPatterns({ insurer: null, open: false })}>
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg p-8 space-y-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h4 className="font-black text-slate-900">Patterns — {editPatterns.insurer.label}</h4>
+              <button onClick={() => setEditPatterns({ insurer: null, open: false })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div onClick={() => setPatternDraft(p => ({ ...p, enabled: !p.enabled }))}
+                className={`w-10 h-5 rounded-full transition-colors ${patternDraft.enabled ? 'bg-violet-600' : 'bg-slate-200'}`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${patternDraft.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+              <span className="text-sm font-bold text-slate-700">Activer l'ingestion auto pour cet assureur</span>
+            </label>
+
+            {[['Pages CG à crawler (une URL par ligne)', 'cgPageUrls'], ['Patterns URL PDF à inclure', 'pdfPatterns'], ['Patterns URL à exclure', 'excludePatterns']].map(([label, key]) => (
+              <div key={key} className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-400">{label}</label>
+                <textarea
+                  rows={3}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-violet-400"
+                  value={(patternDraft as any)[key]}
+                  onChange={e => setPatternDraft(p => ({ ...p, [key]: e.target.value }))}
+                />
+              </div>
+            ))}
+
+            <div className="flex gap-3">
+              <button onClick={() => setEditPatterns({ insurer: null, open: false })} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold text-xs uppercase">Annuler</button>
+              <button onClick={savePatterns} className="flex-1 py-3 bg-violet-600 text-white rounded-2xl font-bold text-xs uppercase shadow-lg">Enregistrer</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -5,6 +5,13 @@
  * POST /api/admin/control-check          — lance un run de non-régression
  * GET  /api/admin/control-check/rows     — liste toutes les lignes de référence (+ dernier résultat)
  * GET  /api/admin/control-check/summary  — résumé agrégé par (assureur, type, fichier)
+ *
+ * POST /api/admin/cg-ingestion/run       — lance le pipeline agentique d'ingestion
+ * POST /api/admin/cg-ingestion/stop      — arrête le pipeline en cours
+ * GET  /api/admin/cg-ingestion/status    — état du pipeline en cours
+ * GET  /api/admin/cg-ingestion/history   — historique des runs
+ * GET  /api/admin/cg-ingestion/scope     — assureurs + types disponibles pour configurer le périmètre
+ * PUT  /api/admin/cg-ingestion/insurer-patterns — met à jour cg_search_patterns d'un assureur
  */
 
 import { Router } from 'express';
@@ -13,6 +20,12 @@ import { runControlCheck } from '../services/controlCheckService';
 import { query } from '../db';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getTokenStats, resetTokenStats } from '../utils/geminiMetrics';
+import {
+  runIngestion,
+  requestStopIngestion,
+  getCurrentRunId,
+  type IngestionScope,
+} from '../services/cgIngestionService';
 
 const router = Router();
 
@@ -211,6 +224,167 @@ router.get('/connection-logs', authMiddleware, adminMiddleware, async (req: any,
   } catch (err: any) {
     console.error('[admin/connection-logs]', err.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des logs', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/cg-ingestion/scope
+// Retourne les assureurs (avec leurs patterns) et les types d'assurance disponibles
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/cg-ingestion/scope', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  try {
+    const [insurers, types] = await Promise.all([
+      query(`SELECT code, label, full_name as "fullName", website_url as "websiteUrl",
+                    cg_search_enabled as "cgSearchEnabled",
+                    cg_search_patterns as "cgSearchPatterns"
+             FROM insurers WHERE is_active = true ORDER BY display_order`),
+      query(`SELECT code, label_fr as "labelFr" FROM insurance_types WHERE is_active = true ORDER BY display_order`),
+    ]);
+    res.json({ insurers: insurers.rows, insurance_types: types.rows });
+  } catch (err: any) {
+    console.error('[admin/cg-ingestion/scope]', err.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération du périmètre', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/admin/cg-ingestion/insurer-patterns
+// Met à jour cg_search_enabled et cg_search_patterns pour un assureur
+// Body: { insurer_code, cg_search_enabled, cg_search_patterns }
+// ─────────────────────────────────────────────────────────────────────────────
+router.put('/cg-ingestion/insurer-patterns', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const { insurer_code, cg_search_enabled, cg_search_patterns } = req.body || {};
+  if (!insurer_code) return res.status(400).json({ message: 'insurer_code requis' });
+  try {
+    await query(
+      `UPDATE insurers
+       SET cg_search_enabled  = $1,
+           cg_search_patterns = $2
+       WHERE code = $3`,
+      [
+        Boolean(cg_search_enabled),
+        cg_search_patterns ? JSON.stringify(cg_search_patterns) : '{}',
+        String(insurer_code).trim(),
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[admin/cg-ingestion/insurer-patterns]', err.message);
+    res.status(500).json({ message: 'Erreur mise à jour patterns', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/cg-ingestion/run
+// Lance le pipeline agentique. Exécuté en arrière-plan (fire-and-forget).
+// Body: { scope?, insurers?, insurance_types?, max_docs_per_combo?, confidence_threshold? }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/cg-ingestion/run', authMiddleware, adminMiddleware, async (req: any, res) => {
+  if (getCurrentRunId()) {
+    return res.status(409).json({
+      message: 'Un pipeline est déjà en cours',
+      run_id: getCurrentRunId(),
+    });
+  }
+  const scopeInput: IngestionScope = {
+    scope:               req.body?.scope               ?? 'targeted',
+    insurers:            req.body?.insurers             ?? [],
+    insurance_types:     req.body?.insurance_types      ?? [],
+    max_docs_per_combo:  Number(req.body?.max_docs_per_combo  ?? 2),
+    confidence_threshold: Number(req.body?.confidence_threshold ?? 0.70),
+  };
+  // Validation minimale
+  if (scopeInput.scope === 'targeted' && (!scopeInput.insurers?.length || !scopeInput.insurance_types?.length)) {
+    return res.status(400).json({ message: 'En mode "targeted", insurers[] et insurance_types[] sont requis' });
+  }
+  // Fire-and-forget : on répond immédiatement
+  res.json({ ok: true, message: 'Pipeline démarré en arrière-plan' });
+  runIngestion(scopeInput).catch(e => console.error('[cg-ingestion/run] Erreur critique:', e.message));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/cg-ingestion/stop
+// Demande l'arrêt graceful du pipeline en cours
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/cg-ingestion/stop', authMiddleware, adminMiddleware, (_req: any, res) => {
+  const runId = getCurrentRunId();
+  if (!runId) return res.json({ ok: false, message: 'Aucun pipeline en cours' });
+  requestStopIngestion();
+  res.json({ ok: true, message: 'Arrêt demandé — le pipeline s\'arrêtera après le document en cours' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/cg-ingestion/status
+// Retourne l'état du pipeline en cours (ou le dernier run_id)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/cg-ingestion/status', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  const runId = getCurrentRunId();
+  if (!runId) return res.json({ running: false });
+  try {
+    const rows = await query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM cg_ingestion_jobs WHERE run_id = $1
+       GROUP BY status`,
+      [runId]
+    );
+    res.json({ running: true, run_id: runId, counts: rows.rows });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erreur status', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/cg-ingestion/history?limit=50
+// Retourne l'historique des runs (groupés par run_id + stats)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/cg-ingestion/history', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const rawLimit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
+  try {
+    const runs = await query(
+      `SELECT
+         run_id,
+         MIN(created_at)                                                   AS started_at,
+         MAX(updated_at)                                                   AS last_updated,
+         COUNT(*)::int                                                     AS total,
+         COUNT(*) FILTER (WHERE status = 'done')::int                     AS done,
+         COUNT(*) FILTER (WHERE status = 'skipped')::int                  AS skipped,
+         COUNT(*) FILTER (WHERE status = 'error')::int                    AS errors,
+         COUNT(*) FILTER (WHERE status IN ('pending','fetching','classifying','vectorizing'))::int AS in_progress,
+         ARRAY_AGG(DISTINCT insurer_code)                                  AS insurers,
+         ARRAY_AGG(DISTINCT insurance_type_code)                           AS types
+       FROM cg_ingestion_jobs
+       GROUP BY run_id
+       ORDER BY MIN(created_at) DESC
+       LIMIT $1`,
+      [rawLimit]
+    );
+    res.json(runs.rows);
+  } catch (err: any) {
+    console.error('[admin/cg-ingestion/history]', err.message);
+    res.status(500).json({ message: 'Erreur historique', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/cg-ingestion/jobs/:run_id
+// Détail de tous les jobs d'un run
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/cg-ingestion/jobs/:run_id', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const { run_id } = req.params;
+  if (!run_id || !/^[0-9a-f-]{36}$/i.test(run_id)) {
+    return res.status(400).json({ message: 'run_id invalide' });
+  }
+  try {
+    const jobs = await query(
+      `SELECT id, insurer_code, insurance_type_code, source_url, status,
+              confidence, error_message, central_cg_id, pdf_sha256, pages_count,
+              created_at, updated_at
+       FROM cg_ingestion_jobs WHERE run_id = $1 ORDER BY created_at`,
+      [run_id]
+    );
+    res.json(jobs.rows);
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erreur jobs', error: err.message });
   }
 });
 
