@@ -1693,7 +1693,7 @@ function IngestionPanel() {
               <span className="text-sm font-bold text-slate-700">Activer l'ingestion auto pour cet assureur</span>
             </label>
 
-            {[['Pages CG à crawler (une URL par ligne)', 'cgPageUrls'], ['Patterns URL PDF à inclure', 'pdfPatterns'], ['Patterns URL à exclure', 'excludePatterns']].map(([label, key]) => (
+            {[['Pages CG ou PDFs directs (une URL par ligne)', 'cgPageUrls'], ['Patterns URL PDF à inclure', 'pdfPatterns'], ['Patterns URL à exclure', 'excludePatterns']].map(([label, key]) => (
               <div key={key} className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-slate-400">{label}</label>
                 <textarea

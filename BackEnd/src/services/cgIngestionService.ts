@@ -114,9 +114,11 @@ async function createJob(
  * Découvre les URLs de PDFs de CG sur le site de l'assureur.
  *
  * Stratégies utilisées dans l'ordre :
- *   1. cg_page_urls explicites dans cg_search_patterns  → crawl direct de la page
+ *   1. cg_page_urls explicites dans cg_search_patterns
+ *        → si URL se termine par .pdf : ajouté directement comme candidat
+ *        → sinon : crawl de la page HTML pour extraire les liens PDF
  *   2. Sitemap.xml de website_url  →  filtrage des entrées PDF
- *   3. Crawl de la page d'accueil  → liens href contenant "condition" / "cg"
+ *   3. Crawl de la page d'accueil  → liens href contenant "condition" / "/cg"
  *
  * Respect systématique de robots.txt (disallow détecté, pas traversé).
  */
@@ -131,7 +133,14 @@ async function agentHunter(
   },
   maxDocs: number
 ): Promise<HunterCandidate[]> {
-  const pdfPatterns = patterns.pdf_url_patterns ?? ['conditions-generales', 'notice-d-information', 'cg-', '_cg_', 'ipid'];
+  const pdfPatterns = patterns.pdf_url_patterns ?? [
+    'conditions-generales', 'conditions_generales',
+    'notice-d-information', 'notice_information',
+    'documents-cg', 'documents_cg',
+    '/cg-', '_cg_', '/cg/', '-cg_', '-cg.',
+    'ipid', 'notice-ipid',
+    'Habitation_', 'Auto_', 'Sante_', 'Prevoyance_', // patterns nommage assureurs FR
+  ];
   const excludePatterns = patterns.exclude_patterns ?? ['bulletin-adhesion', 'formulaire', 'mandat', 'charte'];
   const candidates: HunterCandidate[] = [];
 
@@ -199,8 +208,15 @@ async function agentHunter(
 
     // Stratégie 1 : cg_page_urls explicites
     const explicitUrls = patterns.cg_page_urls ?? [];
-    for (const pageUrl of explicitUrls.slice(0, 5)) {
+    for (const pageUrl of explicitUrls.slice(0, 10)) {
       if (!isAllowed(pageUrl)) continue;
+      // ── Cas A : URL directe vers un PDF ──────────────────────────────────
+      if (pageUrl.toLowerCase().endsWith('.pdf')) {
+        candidates.push({ url: pageUrl, probable_type: 'CG', confidence: 0.90 });
+        console.log(`[HUNTER/${insurerCode}] PDF direct: ${pageUrl}`);
+        continue;
+      }
+      // ── Cas B : Page HTML — on extrait les liens PDF qu'elle contient ────
       try {
         const html = await fetchHtml(pageUrl);
         const links = extractPdfLinks(html, pageUrl).filter(c => isAllowed(c.url));
