@@ -1405,7 +1405,11 @@ function IngestionPanel() {
     try {
       const res = await fetch(`${API}/api/admin/cg-ingestion/scope`, { headers });
       const data = await res.json();
-      setScope(data);
+      if (res.ok && data.insurers && data.insurance_types) {
+        setScope(data);
+      } else {
+        console.error('[IngestionPanel] scope error:', data?.error ?? data);
+      }
     } catch { /* silencieux */ }
     setLoading(false);
   };
