@@ -13,6 +13,7 @@ import { ClearDataModal } from './components/ClearDataModal';
 import { UserProfile } from './components/UserProfile';
 import { ExpertContact } from './components/ExpertContact';
 import { AdminView } from './components/AdminView';
+import MonitoringDashboard from './components/MonitoringDashboard';
 import PartnerDashboard from './components/PartnerDashboard';
 import ClaimAssistant from './components/ClaimAssistant';
 import { PolicyStats } from './components/PolicyStats';
@@ -26,7 +27,7 @@ import { storageService } from './services/storageService';
 import { 
   Database, LogOut, Sparkles, ShieldAlert,
   ArrowRight, CheckCircle2, Search, Zap, MessageSquare,
-  Rocket, Target, Flag, Info, Settings, Briefcase
+  Rocket, Target, Flag, Info, Settings, Briefcase, Activity
 } from 'lucide-react';
 
 function App() {
@@ -409,6 +410,8 @@ function App() {
         return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} /></div>;
       case 'admin':
         return <AdminView />;
+      case 'monitoring':
+        return <div className="animate-fadeIn"><MonitoringDashboard /></div>;
       case 'partner':
         return <div className="animate-fadeIn"><PartnerDashboard /></div>;
       case 'sinistre':
@@ -459,6 +462,16 @@ function App() {
              <span className="text-sm font-bold hidden sm:inline">Admin</span>
            </button>
            )}
+           {user?.isAdmin && (
+           <button
+             onClick={() => setActiveView('monitoring')}
+             className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'monitoring' ? 'bg-amber-500 text-white border-amber-500 shadow-amber-200' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:text-amber-600'}`}
+             title="Monitoring des connexions"
+           >
+             <Activity className="w-4 h-4" />
+             <span className="text-sm font-bold hidden sm:inline">Monitoring</span>
+           </button>
+           )}
            {user?.isPartner && (
            <button
              onClick={() => setActiveView('partner')}
@@ -488,7 +501,7 @@ function App() {
       </header>
 
       <main className="p-3 md:p-8 flex-1">
-        <div className={`${activeView === 'admin' || activeView === 'partner' || activeView === 'sinistre' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
+        <div className={`${activeView === 'admin' || activeView === 'monitoring' || activeView === 'partner' || activeView === 'sinistre' ? 'max-w-7xl' : 'max-w-xl'} mx-auto`}>{renderContent()}</div>
       </main>
 
       {/* Overlay détail des garanties d'une formule */}
