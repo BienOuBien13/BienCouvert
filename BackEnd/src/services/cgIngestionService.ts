@@ -74,6 +74,100 @@ const stopRequested = { value: false };
 export function requestStopIngestion() { stopRequested.value = true; }
 export function getCurrentRunId()      { return currentRunId; }
 
+// ─── Seed URLs connues par assureur ───────────────────────────────────────────
+/**
+ * Pages ou PDFs de référence pour les assureurs FR majeurs.
+ * Utilisées en priorité quand aucune cg_page_urls n'est configurée.
+ *
+ * Format des clés :
+ *   'CODE'        → pages génériques (tous types)
+ *   'CODE:TYPE'   → URL spécifique à un type d'assurance (priorité max)
+ *
+ * ⚠️  Mettre à jour quand un assureur change l'emplacement de ses CG.
+ * Sources vérifiées manuellement - confidence 0.95.
+ */
+const INSURER_SEED: Record<string, string[]> = {
+  // ── MMA (Covéa) ───────────────────────────────────────────────────────────
+  'MMA01:HAB01': [
+    'https://www.mma.fr/files/live/sites/mmafr/files/documents-cg/cg410/Habitation_MMA_410q.pdf',
+  ],
+  'MMA01': [
+    'https://www.mma.fr/vos-assurances/habitation.html',
+    'https://www.mma.fr/vos-assurances/auto.html',
+    'https://www.mma.fr/vos-assurances/sante.html',
+  ],
+
+  // ── MAAF (Covéa) ──────────────────────────────────────────────────────────
+  'MAA01': [
+    'https://www.maaf.fr/assurances/habitation/multirisques-habitation/conditions-generales.html',
+    'https://www.maaf.fr/assurances/auto/conditions-generales.html',
+    'https://www.maaf.fr/espace-client/telechargements.html',
+  ],
+
+  // ── Matmut ────────────────────────────────────────────────────────────────
+  'MAT01': [
+    'https://www.matmut.fr/assurance-habitation/conditions-generales/',
+    'https://www.matmut.fr/assurance-auto/conditions-generales/',
+    'https://www.matmut.fr/telechargements/',
+  ],
+
+  // ── Macif ─────────────────────────────────────────────────────────────────
+  'MAC01': [
+    'https://www.macif.fr/assurance/particuliers/assurances-habitation/documents',
+    'https://www.macif.fr/assurance/particuliers/assurances-auto/documents',
+    'https://www.macif.fr/assurance/particuliers/documents-contractuels',
+  ],
+
+  // ── MAIF ──────────────────────────────────────────────────────────────────
+  'MAI01': [
+    'https://www.maif.fr/assurances-auto/documents-contractuels.html',
+    'https://www.maif.fr/assurances-habitation/documents-contractuels.html',
+  ],
+
+  // ── AXA ───────────────────────────────────────────────────────────────────
+  'AXA01': [
+    'https://www.axa.fr/aide/documents-contractuels.html',
+    'https://www.axa.fr/aide/centre-de-telechargement.html',
+  ],
+
+  // ── Allianz ───────────────────────────────────────────────────────────────
+  'ALL01': [
+    'https://www.allianz.fr/aide/documents-contractuels.html',
+    'https://www.allianz.fr/aide/telechargements.html',
+  ],
+
+  // ── AG2R La Mondiale ──────────────────────────────────────────────────────
+  'AG201': [
+    'https://www.ag2rlamondiale.fr/aide/documents-contractuels',
+    'https://www.ag2rlamondiale.fr/telechargements',
+  ],
+
+  // ── Groupama ──────────────────────────────────────────────────────────────
+  'GRP01': [
+    'https://www.groupama.fr/votre-espace/documents/',
+  ],
+
+  // ── GMF ───────────────────────────────────────────────────────────────────
+  'GMF01': [
+    'https://www.gmf.fr/votre-assurance/documents-contractuels.html',
+  ],
+
+  // ── Direct Assurance ──────────────────────────────────────────────────────
+  'DIR01': [
+    'https://www.direct-assurance.fr/aide/documents-contractuels.html',
+  ],
+
+  // ── Crédit Agricole Assurances ────────────────────────────────────────────
+  'CRE01': [
+    'https://www.ca-assurances.com/documents-contractuels',
+  ],
+
+  // ── Malakoff Humanis ──────────────────────────────────────────────────────
+  'MAL01': [
+    'https://www.malakoffhumanis.com/telechargements/conditions-generales/',
+  ],
+};
+
 // ─── Helpers internes ─────────────────────────────────────────────────────────
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -192,6 +286,29 @@ async function agentHunter(
     }
     return found;
   };
+
+  // ── Étape -1 : Seed URLs codées en dur (assureurs FR connus) ────────────
+  // Priorité : CODE:TYPE (spécifique) > CODE (générique)
+  // Utilisé quand aucune cg_page_urls n'est configurée, avant tout crawl.
+  const seedKey   = `${insurerCode}:${insuranceTypeCode}`;
+  const seedUrls  = [...(INSURER_SEED[seedKey] ?? []), ...(INSURER_SEED[insurerCode] ?? [])];
+  for (const seedUrl of seedUrls) {
+    if (seedUrl.toLowerCase().endsWith('.pdf')) {
+      candidates.push({ url: seedUrl, probable_type: 'CG', confidence: 0.95 });
+      console.log(`[HUNTER/${insurerCode}] ✔ PDF seed (${seedKey}): ${seedUrl}`);
+    } else {
+      try {
+        const html = await fetchHtml(seedUrl);
+        const links = extractPdfLinks(html, seedUrl);
+        if (links.length > 0) {
+          candidates.push(...links.map(c => ({ ...c, confidence: 0.85 })));
+          console.log(`[HUNTER/${insurerCode}] Page seed: ${links.length} PDFs sur ${seedUrl}`);
+        }
+      } catch (e: any) {
+        console.log(`[HUNTER/${insurerCode}] Seed ${seedUrl} inaccessible: ${e.message}`);
+      }
+    }
+  }
 
   // ── Étape 0 : cg_page_urls TOUJOURS traitées, robots.txt ignoré ──────────
   // L'admin a explicitement fourni ces URLs → confiance totale, pas de filtre robots.
