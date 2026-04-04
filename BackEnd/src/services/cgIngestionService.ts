@@ -133,15 +133,21 @@ async function agentHunter(
   },
   maxDocs: number
 ): Promise<HunterCandidate[]> {
+  // pdfPatterns : si une URL matche, confiance boostée à 0.85. Sinon on garde 0.55.
+  // Le filtre n'est PAS exclusif : tous les PDFs du domaine passent, seul excludePatterns bloque.
   const pdfPatterns = patterns.pdf_url_patterns ?? [
     'conditions-generales', 'conditions_generales',
     'notice-d-information', 'notice_information',
     'documents-cg', 'documents_cg',
     '/cg-', '_cg_', '/cg/', '-cg_', '-cg.',
     'ipid', 'notice-ipid',
-    'Habitation_', 'Auto_', 'Sante_', 'Prevoyance_', // patterns nommage assureurs FR
+    'habitation_', 'auto_', 'sante_', 'prevoyance_',
+    'multirisque', 'garantie', 'contrat',
   ];
-  const excludePatterns = patterns.exclude_patterns ?? ['bulletin-adhesion', 'formulaire', 'mandat', 'charte'];
+  const excludePatterns = patterns.exclude_patterns ?? [
+    'bulletin-adhesion', 'formulaire', 'mandat', 'charte',
+    'cgv', 'mentions-legales', 'politique-cookies', 'plan-du-site',
+  ];
   const candidates: HunterCandidate[] = [];
 
   // Helper : fetch HTML avec timeout
@@ -165,7 +171,9 @@ async function agentHunter(
     req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
   });
 
-  // Helper : extraire URLs de PDF depuis HTML brut
+  // Helper : extraire TOUS les liens PDF depuis HTML brut.
+  // Logique : accept all PDFs du domaine, seuls les excludePatterns bloquent.
+  // Le CLASSIFIER Gemini décide si c'est une CG — pas le HUNTER.
   const extractPdfLinks = (html: string, baseUrl: string): HunterCandidate[] => {
     const found: HunterCandidate[] = [];
     const linkRegex = /href=["']([^"']+\.pdf[^"']*?)["']/gi;
@@ -174,15 +182,12 @@ async function agentHunter(
       try {
         const fullUrl = new URL(match[1], baseUrl).toString();
         const lower = fullUrl.toLowerCase();
-        const isExcluded = excludePatterns.some(p => lower.includes(p.toLowerCase()));
-        if (isExcluded) continue;
-        const isRelevant = pdfPatterns.some(p => lower.includes(p.toLowerCase()))
-          || lower.includes('condition')
-          || lower.includes('/cg/')
-          || lower.includes('ipid');
-        if (isRelevant) {
-          found.push({ url: fullUrl, probable_type: 'CG', confidence: 0.7 });
-        }
+        // Seul filtre : patterns explicitement exclus
+        if (excludePatterns.some(p => lower.includes(p.toLowerCase()))) continue;
+        // Confidence boostée si l'URL ressemble à une CG, sinon neutre (CLASSIFIER juge)
+        const boosted = pdfPatterns.some(p => lower.includes(p.toLowerCase()))
+          || lower.includes('condition') || lower.includes('/cg/') || lower.includes('ipid');
+        found.push({ url: fullUrl, probable_type: 'CG', confidence: boosted ? 0.75 : 0.55 });
       } catch { /* URL invalide, ignorée */ }
     }
     return found;
@@ -235,16 +240,13 @@ async function agentHunter(
         const urlMatches = sitemap.match(/<loc>([^<]+)<\/loc>/gi) ?? [];
         for (const m of urlMatches) {
           const u = m.replace(/<\/?loc>/gi, '').trim();
-          if (!u.endsWith('.pdf')) continue;
+          if (!u.toLowerCase().endsWith('.pdf')) continue;
           if (!isAllowed(u)) continue;
           const lower = u.toLowerCase();
-          const isExcluded = excludePatterns.some(p => lower.includes(p.toLowerCase()));
-          if (isExcluded) continue;
-          const isRelevant = pdfPatterns.some(p => lower.includes(p.toLowerCase()))
-            || lower.includes('condition');
-          if (isRelevant) {
-            candidates.push({ url: u, probable_type: 'CG', confidence: 0.75 });
-          }
+          if (excludePatterns.some(p => lower.includes(p.toLowerCase()))) continue;
+          // Tous les PDFs du domaine passent — CLASSIFIER juge la pertinence
+          const boosted = pdfPatterns.some(p => lower.includes(p.toLowerCase())) || lower.includes('condition');
+          candidates.push({ url: u, probable_type: 'CG', confidence: boosted ? 0.75 : 0.55 });
         }
         console.log(`[HUNTER/${insurerCode}] Sitemap: ${candidates.length} total après sitemap`);
       } catch { /* sitemap absent */ }
@@ -262,13 +264,18 @@ async function agentHunter(
 
   } catch (e: any) {
     console.warn(`[HUNTER/${insurerCode}] Impossible de lire robots.txt: ${e.message} — crawl ignoré`);
-    // Si robots.txt inaccessible et URL explicites fournies, on les utilise quand même
+    // Si robots.txt inaccessible, on traite quand même les URLs explicites
     const explicitUrls = patterns.cg_page_urls ?? [];
-    for (const pageUrl of explicitUrls.slice(0, 5)) {
+    for (const pageUrl of explicitUrls.slice(0, 10)) {
+      if (pageUrl.toLowerCase().endsWith('.pdf')) {
+        candidates.push({ url: pageUrl, probable_type: 'CG', confidence: 0.90 });
+        console.log(`[HUNTER/${insurerCode}] PDF direct (no-robots): ${pageUrl}`);
+        continue;
+      }
       try {
         const html = await fetchHtml(pageUrl);
         const links = extractPdfLinks(html, pageUrl);
-        candidates.push(...links.map(c => ({ ...c, confidence: 0.8 })));
+        candidates.push(...links.map(c => ({ ...c, confidence: 0.80 })));
       } catch { /* silencieux */ }
     }
   }
