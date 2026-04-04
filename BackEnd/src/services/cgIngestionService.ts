@@ -193,90 +193,83 @@ async function agentHunter(
     return found;
   };
 
-  // Vérifier robots.txt
-  try {
-    const base = new URL(websiteUrl);
-    const robotsUrl = `${base.protocol}//${base.host}/robots.txt`;
-    const robotsTxt = await fetchHtml(robotsUrl);
-    const disallowedPaths = robotsTxt
-      .split('\n')
-      .filter(l => /^disallow:/i.test(l.trim()))
-      .map(l => l.replace(/^disallow:\s*/i, '').trim().toLowerCase());
-    console.log(`[HUNTER/${insurerCode}] robots.txt: ${disallowedPaths.length} règles Disallow`);
-    // On ne crawle pas les chemins interdits — la liste est utilisée plus bas
-    const isAllowed = (url: string) => {
-      try {
-        const path = new URL(url).pathname.toLowerCase();
-        return !disallowedPaths.some(d => d && path.startsWith(d));
-      } catch { return true; }
-    };
-
-    // Stratégie 1 : cg_page_urls explicites
-    const explicitUrls = patterns.cg_page_urls ?? [];
-    for (const pageUrl of explicitUrls.slice(0, 10)) {
-      if (!isAllowed(pageUrl)) continue;
-      // ── Cas A : URL directe vers un PDF ──────────────────────────────────
-      if (pageUrl.toLowerCase().endsWith('.pdf')) {
-        candidates.push({ url: pageUrl, probable_type: 'CG', confidence: 0.90 });
-        console.log(`[HUNTER/${insurerCode}] PDF direct: ${pageUrl}`);
-        continue;
-      }
-      // ── Cas B : Page HTML — on extrait les liens PDF qu'elle contient ────
-      try {
-        const html = await fetchHtml(pageUrl);
-        const links = extractPdfLinks(html, pageUrl).filter(c => isAllowed(c.url));
-        candidates.push(...links.map(c => ({ ...c, confidence: 0.85 })));
-        console.log(`[HUNTER/${insurerCode}] Page explicite: ${links.length} PDFs trouvés`);
-      } catch (e: any) {
-        console.warn(`[HUNTER/${insurerCode}] Échec page ${pageUrl}: ${e.message}`);
-      }
+  // ── Étape 0 : cg_page_urls TOUJOURS traitées, robots.txt ignoré ──────────
+  // L'admin a explicitement fourni ces URLs → confiance totale, pas de filtre robots.
+  const explicitUrls = patterns.cg_page_urls ?? [];
+  for (const pageUrl of explicitUrls.slice(0, 20)) {
+    // Cas A : URL directe vers un PDF
+    if (pageUrl.toLowerCase().endsWith('.pdf')) {
+      candidates.push({ url: pageUrl, probable_type: 'CG', confidence: 0.95 });
+      console.log(`[HUNTER/${insurerCode}] ✔ PDF direct (admin): ${pageUrl}`);
+      continue;
     }
+    // Cas B : Page HTML à crawler
+    try {
+      const html = await fetchHtml(pageUrl);
+      const links = extractPdfLinks(html, pageUrl);
+      candidates.push(...links.map(c => ({ ...c, confidence: 0.85 })));
+      console.log(`[HUNTER/${insurerCode}] Page admin: ${links.length} PDFs trouvés sur ${pageUrl}`);
+    } catch (e: any) {
+      console.warn(`[HUNTER/${insurerCode}] Échec page admin ${pageUrl}: ${e.message}`);
+    }
+  }
 
-    // Stratégie 2 : Sitemap
-    if (candidates.length < maxDocs) {
+  // ── Étapes 1-3 : crawl automatique (avec respect robots.txt) ─────────────
+  // Seulement si on n'a pas encore assez de candidats
+  if (candidates.length < maxDocs) {
+    try {
+      const base = new URL(websiteUrl);
+      const robotsUrl = `${base.protocol}//${base.host}/robots.txt`;
+      let disallowedPaths: string[] = [];
+      try {
+        const robotsTxt = await fetchHtml(robotsUrl);
+        disallowedPaths = robotsTxt
+          .split('\n')
+          .filter(l => /^disallow:/i.test(l.trim()))
+          .map(l => l.replace(/^disallow:\s*/i, '').trim().toLowerCase())
+          .filter(Boolean);
+        console.log(`[HUNTER/${insurerCode}] robots.txt: ${disallowedPaths.length} règles Disallow`);
+      } catch {
+        console.log(`[HUNTER/${insurerCode}] robots.txt inaccessible (on continue quand même)`);
+      }
+
+      const isAllowed = (url: string) => {
+        try {
+          const path = new URL(url).pathname.toLowerCase();
+          return !disallowedPaths.some(d => path.startsWith(d));
+        } catch { return true; }
+      };
+
+      // Stratégie 1 : Sitemap
       try {
         const sitemapUrl = `${base.protocol}//${base.host}/sitemap.xml`;
         const sitemap = await fetchHtml(sitemapUrl);
         const urlMatches = sitemap.match(/<loc>([^<]+)<\/loc>/gi) ?? [];
+        let sitemapCount = 0;
         for (const m of urlMatches) {
           const u = m.replace(/<\/?loc>/gi, '').trim();
           if (!u.toLowerCase().endsWith('.pdf')) continue;
-          if (!isAllowed(u)) continue;
+          if (!isAllowed(u)) { console.log(`[HUNTER/${insurerCode}] robots.txt bloque: ${u}`); continue; }
           const lower = u.toLowerCase();
           if (excludePatterns.some(p => lower.includes(p.toLowerCase()))) continue;
-          // Tous les PDFs du domaine passent — CLASSIFIER juge la pertinence
           const boosted = pdfPatterns.some(p => lower.includes(p.toLowerCase())) || lower.includes('condition');
           candidates.push({ url: u, probable_type: 'CG', confidence: boosted ? 0.75 : 0.55 });
+          sitemapCount++;
         }
-        console.log(`[HUNTER/${insurerCode}] Sitemap: ${candidates.length} total après sitemap`);
-      } catch { /* sitemap absent */ }
-    }
+        console.log(`[HUNTER/${insurerCode}] Sitemap: ${sitemapCount} PDFs ajoutés`);
+      } catch { console.log(`[HUNTER/${insurerCode}] Sitemap absent/inaccessible`); }
 
-    // Stratégie 3 : crawl page d'accueil
-    if (candidates.length < maxDocs && isAllowed(websiteUrl)) {
-      try {
-        const html = await fetchHtml(websiteUrl);
-        const links = extractPdfLinks(html, websiteUrl).filter(c => isAllowed(c.url));
-        candidates.push(...links);
-        console.log(`[HUNTER/${insurerCode}] Homepage: ${links.length} PDFs trouvés`);
-      } catch { /* pas de page d'accueil accessible */ }
-    }
-
-  } catch (e: any) {
-    console.warn(`[HUNTER/${insurerCode}] Impossible de lire robots.txt: ${e.message} — crawl ignoré`);
-    // Si robots.txt inaccessible, on traite quand même les URLs explicites
-    const explicitUrls = patterns.cg_page_urls ?? [];
-    for (const pageUrl of explicitUrls.slice(0, 10)) {
-      if (pageUrl.toLowerCase().endsWith('.pdf')) {
-        candidates.push({ url: pageUrl, probable_type: 'CG', confidence: 0.90 });
-        console.log(`[HUNTER/${insurerCode}] PDF direct (no-robots): ${pageUrl}`);
-        continue;
+      // Stratégie 2 : crawl page d'accueil
+      if (candidates.length < maxDocs && isAllowed(websiteUrl)) {
+        try {
+          const html = await fetchHtml(websiteUrl);
+          const links = extractPdfLinks(html, websiteUrl).filter(c => isAllowed(c.url));
+          candidates.push(...links);
+          console.log(`[HUNTER/${insurerCode}] Homepage: ${links.length} PDFs trouvés`);
+        } catch (e: any) { console.log(`[HUNTER/${insurerCode}] Homepage inaccessible: ${e.message}`); }
       }
-      try {
-        const html = await fetchHtml(pageUrl);
-        const links = extractPdfLinks(html, pageUrl);
-        candidates.push(...links.map(c => ({ ...c, confidence: 0.80 })));
-      } catch { /* silencieux */ }
+    } catch (e: any) {
+      console.warn(`[HUNTER/${insurerCode}] Erreur crawl auto: ${e.message}`);
     }
   }
 
