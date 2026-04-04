@@ -6,6 +6,7 @@ import {
   Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2, FlaskConical, Settings
 } from 'lucide-react';
 import ControlCheckPage from './ControlCheckPage';
+import { fetchCsrfToken } from '../services/authService';
 
 // ---------------------------------------------------------------------------
 // Types pour la gestion des faits de couverture (coverage_facts)
@@ -1453,8 +1454,11 @@ function IngestionPanel() {
 
   const handleRun = async () => {
     if (!selInsurers.length || !selTypes.length) { alert('Sélectionnez au moins un assureur et un type d\'assurance'); return; }
+    const csrf = await fetchCsrfToken();
     const res = await fetch(`${API}/api/admin/cg-ingestion/run`, {
-      method: 'POST', headers,
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
       body: JSON.stringify({ scope: 'targeted', insurers: selInsurers, insurance_types: selTypes, max_docs_per_combo: maxDocs, confidence_threshold: confThreshold }),
     });
     if (res.ok) {
@@ -1462,13 +1466,18 @@ function IngestionPanel() {
       setStatusMsg('Démarrage…');
       pollRef.current = setInterval(pollStatus, 5000);
     } else {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({ message: `Erreur HTTP ${res.status}` }));
       alert(err.message ?? 'Erreur démarrage');
     }
   };
 
   const handleStop = async () => {
-    await fetch(`${API}/api/admin/cg-ingestion/stop`, { method: 'POST', headers });
+    const csrf = await fetchCsrfToken();
+    await fetch(`${API}/api/admin/cg-ingestion/stop`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+    });
     setStatusMsg('Arrêt demandé…');
   };
 
@@ -1502,7 +1511,13 @@ function IngestionPanel() {
         exclude_patterns: patternDraft.excludePatterns.split('\n').map(s => s.trim()).filter(Boolean),
       },
     };
-    await fetch(`${API}/api/admin/cg-ingestion/insurer-patterns`, { method: 'PUT', headers, body: JSON.stringify(payload) });
+    const csrf = await fetchCsrfToken();
+    await fetch(`${API}/api/admin/cg-ingestion/insurer-patterns`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+      body: JSON.stringify(payload),
+    });
     await loadScope();
     setEditPatterns({ insurer: null, open: false });
   };
