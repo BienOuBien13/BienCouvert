@@ -54,7 +54,7 @@ function StatCard({
   );
 }
 
-function LogRow({ log }: { log: ConnectionLog }) {
+function LogRow({ log }: { log: ConnectionLog; key?: React.Key }) {
   const meta = ACTION_META[log.action] ?? ACTION_META.USER_LOGOUT;
   const name = log.first_name
     ? `${log.first_name} ${log.last_name ?? ''}`.trim()
@@ -79,7 +79,7 @@ function LogRow({ log }: { log: ConnectionLog }) {
   );
 }
 
-function UserRow({ u }: { u: AdminUser }) {
+function UserRow({ u }: { u: AdminUser; key?: React.Key }) {
   const initials = ((u.first_name?.[0] ?? u.email[0]) + (u.last_name?.[0] ?? '')).toUpperCase();
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-white hover:border-slate-200 transition-colors">
