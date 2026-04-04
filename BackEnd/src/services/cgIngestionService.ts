@@ -214,60 +214,133 @@ async function agentHunter(
     }
   }
 
-  // ── Étapes 1-3 : crawl automatique (avec respect robots.txt) ─────────────
-  // Seulement si on n'a pas encore assez de candidats
+  // ── Étapes 1-N : découverte automatique ──────────────────────────────────
   if (candidates.length < maxDocs) {
     try {
       const base = new URL(websiteUrl);
-      const robotsUrl = `${base.protocol}//${base.host}/robots.txt`;
+      const origin = `${base.protocol}//${base.host}`;
+
+      // robots.txt — non bloquant
       let disallowedPaths: string[] = [];
       try {
-        const robotsTxt = await fetchHtml(robotsUrl);
+        const robotsTxt = await fetchHtml(`${origin}/robots.txt`);
         disallowedPaths = robotsTxt
           .split('\n')
           .filter(l => /^disallow:/i.test(l.trim()))
           .map(l => l.replace(/^disallow:\s*/i, '').trim().toLowerCase())
           .filter(Boolean);
-        console.log(`[HUNTER/${insurerCode}] robots.txt: ${disallowedPaths.length} règles Disallow`);
+        console.log(`[HUNTER/${insurerCode}] robots.txt: ${disallowedPaths.length} Disallow`);
       } catch {
-        console.log(`[HUNTER/${insurerCode}] robots.txt inaccessible (on continue quand même)`);
+        console.log(`[HUNTER/${insurerCode}] robots.txt inaccessible — on continue quand même`);
       }
 
       const isAllowed = (url: string) => {
         try {
-          const path = new URL(url).pathname.toLowerCase();
-          return !disallowedPaths.some(d => path.startsWith(d));
+          const p = new URL(url).pathname.toLowerCase();
+          return !disallowedPaths.some(d => p.startsWith(d));
         } catch { return true; }
       };
 
-      // Stratégie 1 : Sitemap
-      try {
-        const sitemapUrl = `${base.protocol}//${base.host}/sitemap.xml`;
-        const sitemap = await fetchHtml(sitemapUrl);
-        const urlMatches = sitemap.match(/<loc>([^<]+)<\/loc>/gi) ?? [];
-        let sitemapCount = 0;
-        for (const m of urlMatches) {
-          const u = m.replace(/<\/?loc>/gi, '').trim();
-          if (!u.toLowerCase().endsWith('.pdf')) continue;
-          if (!isAllowed(u)) { console.log(`[HUNTER/${insurerCode}] robots.txt bloque: ${u}`); continue; }
-          const lower = u.toLowerCase();
-          if (excludePatterns.some(p => lower.includes(p.toLowerCase()))) continue;
-          const boosted = pdfPatterns.some(p => lower.includes(p.toLowerCase())) || lower.includes('condition');
-          candidates.push({ url: u, probable_type: 'CG', confidence: boosted ? 0.75 : 0.55 });
-          sitemapCount++;
-        }
-        console.log(`[HUNTER/${insurerCode}] Sitemap: ${sitemapCount} PDFs ajoutés`);
-      } catch { console.log(`[HUNTER/${insurerCode}] Sitemap absent/inaccessible`); }
+      // ── Stratégie 1 : Sitemap(s) — avec support sitemap index ───────────
+      // On essaie plusieurs emplacements courants + on descend dans les sous-sitemaps
+      const sitemapCandidates = [
+        `${origin}/sitemap.xml`,
+        `${origin}/sitemap_index.xml`,
+        `${origin}/sitemap-index.xml`,
+        `${origin}/sitemaps/sitemap.xml`,
+        `${origin}/sitemap-documents.xml`,
+        `${origin}/sitemap-pdfs.xml`,
+      ];
 
-      // Stratégie 2 : crawl page d'accueil
+      const parsedSitemaps = new Set<string>();
+
+      const parseSitemap = async (url: string): Promise<void> => {
+        if (parsedSitemaps.has(url)) return;
+        parsedSitemaps.add(url);
+        try {
+          const xml = await fetchHtml(url);
+
+          // Sitemap index → descendre dans les sous-sitemaps
+          const subSitemaps = [...xml.matchAll(/<sitemap>[\s\S]*?<loc>([^<]+)<\/loc>/gi)]
+            .map(m => m[1].trim());
+          if (subSitemaps.length > 0) {
+            console.log(`[HUNTER/${insurerCode}] Sitemap index: ${subSitemaps.length} sous-sitemaps`);
+            for (const sub of subSitemaps.slice(0, 20)) {
+              await parseSitemap(sub);
+            }
+            return;
+          }
+
+          // Sitemap classique → extraire les PDFs
+          const urlMatches = [...xml.matchAll(/<loc>([^<]+)<\/loc>/gi)].map(m => m[1].trim());
+          let count = 0;
+          for (const u of urlMatches) {
+            if (!u.toLowerCase().endsWith('.pdf')) continue;
+            if (!isAllowed(u)) continue;
+            const lower = u.toLowerCase();
+            if (excludePatterns.some(p => lower.includes(p.toLowerCase()))) continue;
+            const boosted = pdfPatterns.some(p => lower.includes(p.toLowerCase())) || lower.includes('condition');
+            candidates.push({ url: u, probable_type: 'CG', confidence: boosted ? 0.75 : 0.55 });
+            count++;
+          }
+          if (count > 0) console.log(`[HUNTER/${insurerCode}] Sitemap ${url}: ${count} PDFs`);
+        } catch { /* sitemap absent ou inaccessible */ }
+      };
+
+      for (const sm of sitemapCandidates) {
+        await parseSitemap(sm);
+        if (candidates.length >= maxDocs) break;
+      }
+
+      // ── Stratégie 2 : pages de documents communes (assureurs FR) ─────────
+      // La majorité des sites d'assureurs rangent leurs CG dans des paths connus.
+      // On tente de les crawler directement sans passer par le JS.
+      if (candidates.length < maxDocs) {
+        const commonDocPaths = [
+          '/aide/documents-contractuels.html',
+          '/aide/documents-contractuels',
+          '/nous-connaitre/documents-legaux',
+          '/espace-client/documents',
+          '/documents-contractuels',
+          '/telechargements',
+          '/download',
+          '/conditions-generales',
+          '/nos-contrats/conditions-generales',
+          '/documents/conditions-generales',
+          '/documents-legaux',
+          '/informations-legales/conditions-generales',
+          '/nos-offres',
+          '/particuliers/nos-offres',
+          '/assurances/conditions-generales',
+        ];
+
+        for (const docPath of commonDocPaths) {
+          if (candidates.length >= maxDocs) break;
+          const docUrl = `${origin}${docPath}`;
+          if (!isAllowed(docUrl)) continue;
+          try {
+            const html = await fetchHtml(docUrl);
+            const links = extractPdfLinks(html, docUrl).filter(c => isAllowed(c.url));
+            if (links.length > 0) {
+              candidates.push(...links.map(c => ({ ...c, confidence: 0.75 })));
+              console.log(`[HUNTER/${insurerCode}] Page doc ${docPath}: ${links.length} PDFs`);
+            }
+          } catch { /* page absente */ }
+        }
+      }
+
+      // ── Stratégie 3 : page d'accueil (fallback) ───────────────────────────
       if (candidates.length < maxDocs && isAllowed(websiteUrl)) {
         try {
           const html = await fetchHtml(websiteUrl);
           const links = extractPdfLinks(html, websiteUrl).filter(c => isAllowed(c.url));
-          candidates.push(...links);
-          console.log(`[HUNTER/${insurerCode}] Homepage: ${links.length} PDFs trouvés`);
+          if (links.length > 0) {
+            candidates.push(...links);
+            console.log(`[HUNTER/${insurerCode}] Homepage: ${links.length} PDFs trouvés`);
+          }
         } catch (e: any) { console.log(`[HUNTER/${insurerCode}] Homepage inaccessible: ${e.message}`); }
       }
+
     } catch (e: any) {
       console.warn(`[HUNTER/${insurerCode}] Erreur crawl auto: ${e.message}`);
     }
