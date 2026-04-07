@@ -144,7 +144,7 @@ export default function TokenStatsPanel() {
   const totalTokens = stats.totalInputTokens + stats.totalOutputTokens;
 
   // Trie les fonctions
-  const fnEntries = Object.entries(stats.byFunction).sort(([, a], [, b]) => {
+  const fnEntries = (Object.entries(stats.byFunction) as [string, FunctionStatsDetail][]).sort(([, a], [, b]) => {
     const diff =
       sortBy === 'cost'   ? b.estimatedCostEur - a.estimatedCostEur :
       sortBy === 'calls'  ? b.calls - a.calls :
@@ -248,7 +248,7 @@ export default function TokenStatsPanel() {
       <div>
         <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">Par service</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {Object.entries(stats.byCategory).sort(([, a], [, b]) => b.estimatedCostEur - a.estimatedCostEur).map(([cat, cs]) => {
+          {(Object.entries(stats.byCategory) as [string, CategoryStats][]).sort(([, a], [, b]) => b.estimatedCostEur - a.estimatedCostEur).map(([cat, cs]) => {
             const cfg = CATEGORY_CONFIG[cat] ?? CATEGORY_CONFIG['Non catégorisé'];
             const pct = stats.estimatedCostEur > 0
               ? Math.round((cs.estimatedCostEur / stats.estimatedCostEur) * 100)
