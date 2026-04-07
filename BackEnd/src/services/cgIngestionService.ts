@@ -818,6 +818,37 @@ export async function runIngestion(scope: IngestionScope): Promise<{
 
             console.log(`✅ [${insurer.code}/${type.code}] Done — ${vecResult.pagesProcessed} pages, ${vecResult.factsCreated} faits`);
 
+            // ── Mettre à jour document_catalogue ─────────────────────────
+            try {
+              await pool.query(
+                `UPDATE document_catalogue
+                 SET matrix_status  = 'indexed',
+                     central_cg_id  = $1,
+                     current_url    = $2,
+                     current_sha256 = $3,
+                     indexed_at     = NOW(),
+                     classifier_result = $4,
+                     formula_hints  = $5,
+                     last_checked_at = NOW(),
+                     next_check_at  = NOW() + (check_frequency_days || ' days')::INTERVAL
+                 WHERE insurer_code = $6
+                   AND insurance_type_code = $7
+                   AND doc_type = $8`,
+                [
+                  centralCgId,
+                  candidate.url,
+                  fetched.sha256,
+                  JSON.stringify(classif),
+                  classif.formula_hints ?? [],
+                  classif.insurer_code,
+                  classif.insurance_type_code,
+                  (classif.document_type ?? 'CG').toUpperCase(),
+                ]
+              );
+            } catch (catErr: any) {
+              console.warn(`[CATALOGUE] Erreur mise à jour catalogue: ${catErr.message}`);
+            }
+
             // Pause inter-document pour ne pas saturer Gemini
             await sleep(3000);
 

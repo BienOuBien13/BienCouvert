@@ -12,6 +12,14 @@
  * GET  /api/admin/cg-ingestion/history   — historique des runs
  * GET  /api/admin/cg-ingestion/scope     — assureurs + types disponibles pour configurer le périmètre
  * PUT  /api/admin/cg-ingestion/insurer-patterns — met à jour cg_search_patterns d'un assureur
+ *
+ * GET  /api/admin/catalogue/matrix       — matrice complète du catalogue documentaire
+ * GET  /api/admin/catalogue/stats        — statistiques de couverture
+ * POST /api/admin/catalogue/sync         — synchroniser la matrice (nouvelles combinaisons)
+ * POST /api/admin/catalogue/discover     — lancer la découverte de documents
+ * POST /api/admin/catalogue/check        — vérifier les documents indexés
+ * POST /api/admin/catalogue/ingest/:id   — lancer l'ingestion d'une entrée découverte
+ * GET  /api/admin/catalogue/entry/:id    — détail d'une entrée catalogue
  */
 
 import { Router } from 'express';
@@ -26,6 +34,18 @@ import {
   getCurrentRunId,
   type IngestionScope,
 } from '../services/cgIngestionService';
+import {
+  getMatrix,
+  syncMatrix,
+  getEntry,
+  updateEntryStatus,
+} from '../catalogue/CatalogueAgent';
+import {
+  discoverBatch,
+  discoverForEntry,
+  checkBatch,
+} from '../catalogue/VersionTrackerAgent';
+import type { MatrixStatus } from '../catalogue/types';
 
 const router = Router();
 
@@ -385,6 +405,131 @@ router.get('/cg-ingestion/jobs/:run_id', authMiddleware, adminMiddleware, async 
     res.json(jobs.rows);
   } catch (err: any) {
     res.status(500).json({ message: 'Erreur jobs', error: err.message });
+  }
+});
+
+// =============================================================================
+// CATALOGUE DOCUMENTAIRE
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/catalogue/matrix
+// Matrice complète du catalogue documentaire avec labels et statistiques.
+// Query params : insurer_code, insurance_type_code, matrix_status
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/matrix', authMiddleware, adminMiddleware, async (req: any, res) => {
+  try {
+    const filters: { insurer_code?: string; insurance_type_code?: string; matrix_status?: MatrixStatus } = {};
+    if (req.query.insurer_code)        filters.insurer_code = String(req.query.insurer_code);
+    if (req.query.insurance_type_code) filters.insurance_type_code = String(req.query.insurance_type_code);
+    if (req.query.matrix_status)       filters.matrix_status = String(req.query.matrix_status) as MatrixStatus;
+    const result = await getMatrix(filters);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[admin/catalogue/matrix]', err.message);
+    res.status(500).json({ message: 'Erreur récupération matrice', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/catalogue/stats
+// Statistiques de couverture du catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/stats', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  try {
+    const result = await getMatrix();
+    res.json(result.stats);
+  } catch (err: any) {
+    console.error('[admin/catalogue/stats]', err.message);
+    res.status(500).json({ message: 'Erreur stats catalogue', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/catalogue/entry/:id
+// Détail d'une entrée catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/entry/:id', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID invalide' });
+  try {
+    const entry = await getEntry(id);
+    if (!entry) return res.status(404).json({ message: 'Entrée non trouvée' });
+    res.json(entry);
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erreur', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/sync
+// Synchronise la matrice (ajoute les nouvelles combinaisons assureur×type)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/sync', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  try {
+    const inserted = await syncMatrix();
+    res.json({ ok: true, inserted });
+  } catch (err: any) {
+    console.error('[admin/catalogue/sync]', err.message);
+    res.status(500).json({ message: 'Erreur sync matrice', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/discover
+// Lance la découverte de documents pour les entrées unknown/missing
+// Body: { limit? } — par défaut 20
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/discover', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const limit = Math.min(parseInt(String(req.body?.limit ?? 20), 10) || 20, 50);
+  res.json({ ok: true, message: `Découverte lancée (max ${limit} entrées)` });
+  discoverBatch(limit).catch(e => console.error('[catalogue/discover]', e.message));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/check
+// Vérifie les documents indexés dont next_check_at est dépassé
+// Body: { limit? } — par défaut 20
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/check', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const limit = Math.min(parseInt(String(req.body?.limit ?? 20), 10) || 20, 50);
+  res.json({ ok: true, message: `Vérification lancée (max ${limit} entrées)` });
+  checkBatch(limit).catch(e => console.error('[catalogue/check]', e.message));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/ingest/:id
+// Lance l'ingestion d'une entrée catalogue spécifique (discovered → indexed)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/ingest/:id', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID invalide' });
+
+  try {
+    const entry = await getEntry(id);
+    if (!entry) return res.status(404).json({ message: 'Entrée non trouvée' });
+
+    // Déterminer l'URL à ingérer
+    const url = entry.discovered_url || entry.current_url;
+    if (!url) return res.status(400).json({ message: 'Pas d\'URL disponible pour cette entrée' });
+
+    // Lancer l'ingestion via le pipeline existant (fire-and-forget)
+    if (getCurrentRunId()) {
+      return res.status(409).json({ message: 'Un pipeline d\'ingestion est déjà en cours' });
+    }
+
+    const scope: IngestionScope = {
+      scope: 'targeted',
+      insurers: [entry.insurer_code],
+      insurance_types: [entry.insurance_type_code],
+      max_docs_per_combo: 1,
+      confidence_threshold: 0.5,
+    };
+
+    res.json({ ok: true, message: `Ingestion lancée pour ${entry.insurer_code}/${entry.insurance_type_code}` });
+    runIngestion(scope).catch(e => console.error('[catalogue/ingest]', e.message));
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erreur ingestion', error: err.message });
   }
 });
 

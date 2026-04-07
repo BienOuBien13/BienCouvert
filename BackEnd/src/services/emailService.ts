@@ -243,3 +243,26 @@ export async function sendRdvNotificationEmail(params: {
     });
   }
 }
+
+// -----------------------------------------------------------------------------
+// E-mail générique — utilisé par le WatchdogScheduler et modules internes
+// -----------------------------------------------------------------------------
+export async function sendEmail(params: {
+  to: string;
+  subject: string;
+  text?: string;
+  html?: string;
+}): Promise<void> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.warn('[sendEmail] SMTP non configuré — email non envoyé');
+    return;
+  }
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: params.to,
+    subject: params.subject,
+    text: params.text,
+    html: params.html,
+  });
+}
