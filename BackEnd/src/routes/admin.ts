@@ -27,7 +27,7 @@ import pool from '../db';
 import { runControlCheck } from '../services/controlCheckService';
 import { query } from '../db';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
-import { getTokenStats, resetTokenStats } from '../utils/geminiMetrics';
+import { getTokenStats, resetTokenStats, setBudgetThreshold, getBudgetThreshold } from '../utils/geminiMetrics';
 import {
   runIngestion,
   requestStopIngestion,
@@ -165,6 +165,18 @@ router.get('/token-stats', authMiddleware, adminMiddleware, (_req, res) => {
 router.post('/token-stats/reset', authMiddleware, adminMiddleware, (_req, res) => {
   resetTokenStats();
   res.json({ ok: true, message: 'Compteurs remis à zéro' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/admin/token-stats/budget
+// Définit le seuil de budget mensuel (en EUR) pour l'alerte FinOps
+// Body: { budget_eur: number }
+// ─────────────────────────────────────────────────────────────────────────────
+router.put('/token-stats/budget', authMiddleware, adminMiddleware, (req: any, res) => {
+  const v = parseFloat(String(req.body?.budget_eur ?? ''));
+  if (isNaN(v) || v < 0) return res.status(400).json({ message: 'budget_eur doit être un nombre >= 0' });
+  setBudgetThreshold(v);
+  res.json({ ok: true, budget_eur: v, message: `Seuil budget défini à ${v} EUR` });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

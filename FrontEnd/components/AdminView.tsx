@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import ControlCheckPage from './ControlCheckPage';
 import CataloguePanel from './CataloguePanel';
+import TokenStatsPanel from './TokenStatsPanel';
 import { fetchCsrfToken } from '../services/authService';
 
 // ---------------------------------------------------------------------------
@@ -546,6 +547,16 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <ListChecks className="w-3.5 h-3.5" /> Catalogue
+        </button>
+        <button
+          onClick={() => setActiveTab('finops')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            activeTab === 'finops'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <BarChart2 className="w-3.5 h-3.5" /> FinOps
         </button>
       </div>
 
@@ -1372,6 +1383,10 @@ export const AdminView: React.FC = () => {
 
       {activeTab === 'catalogue' && (
         <CataloguePanel />
+      )}
+
+      {activeTab === 'finops' && (
+        <TokenStatsPanel />
       )}
     </>
   );

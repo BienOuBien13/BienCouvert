@@ -13,6 +13,55 @@
 import { getMeter } from '../telemetry';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Catégories FinOps : regroupement fonctionnel des services
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ServiceCategory =
+  | 'Agents BMAD'
+  | 'Ingestion auto'
+  | 'Analyse contrats'
+  | 'Sinistres'
+  | 'Non catégorisé';
+
+const FUNCTION_CATEGORIES: Record<string, ServiceCategory> = {
+  // Agents BMAD (chat orchestré)
+  intentAgent:          'Agents BMAD',
+  analysisAgent:        'Agents BMAD',
+  advisorAgent:         'Agents BMAD',
+  claimsAgent:          'Agents BMAD',
+  optimizerAgent:       'Agents BMAD',
+  orchestrator_general: 'Agents BMAD',
+  'orchestrator_general(stream)': 'Agents BMAD',
+  // Pipeline d'ingestion automatique
+  cgClassifier:             'Ingestion auto',
+  ingestionAgent_extract:   'Ingestion auto',
+  // Services utilisateur (analyse de contrats)
+  summarizePolicy:          'Analyse contrats',
+  searchPolicyInfo_rag:     'Analyse contrats',
+  searchPolicyInfo_internet:'Analyse contrats',
+  getCoverageAnalysis:      'Analyse contrats',
+  detectDuplicates:         'Analyse contrats',
+  generateShareableReport:  'Analyse contrats',
+  // Gestion sinistres
+  analyzeClaim:         'Sinistres',
+  generateClaimLetter:  'Sinistres',
+  chatClaim:            'Sinistres',
+};
+
+export function getCategoryForFunction(fnName: string): ServiceCategory {
+  return FUNCTION_CATEGORIES[fnName] ?? 'Non catégorisé';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Budget mensuel (seuil d'alerte, configurable en runtime)
+// ─────────────────────────────────────────────────────────────────────────────
+
+let budgetThresholdEur: number = parseFloat(process.env.GEMINI_BUDGET_EUR || '50');
+
+export function getBudgetThreshold(): number  { return budgetThresholdEur; }
+export function setBudgetThreshold(v: number) { budgetThresholdEur = v; }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Compteurs OTel (Prometheus-style monotonic counters)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -156,13 +205,29 @@ export function trackGeminiClient(rawClient: any) {
 // Stats JSON (pour GET /api/admin/token-stats)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface FunctionStatsDetail extends FunctionStats {
+  category: ServiceCategory;
+  estimatedCostEur: number;
+}
+
+export interface CategoryStats {
+  calls:        number;
+  inputTokens:  number;
+  outputTokens: number;
+  estimatedCostEur: number;
+}
+
 export interface TokenStats {
-  startedAt:       string;
-  totalCalls:      number;
+  startedAt:         string;
+  totalCalls:        number;
   totalInputTokens:  number;
   totalOutputTokens: number;
-  estimatedCostEur: number; // estimatif gemini-2.5-flash
-  byFunction: Record<string, FunctionStats>;
+  estimatedCostEur:  number;
+  budgetThresholdEur: number;
+  budgetUsedPercent:  number;
+  budgetAlert:        boolean;
+  byFunction: Record<string, FunctionStatsDetail>;
+  byCategory: Record<ServiceCategory, CategoryStats>;
 }
 
 /** Coût estimatif Gemini 2.5 Flash (tarifs Mars 2026, non garanti) */
@@ -174,13 +239,47 @@ export function getTokenStats(): TokenStats {
   const estUsd =
     (totalInputTokens  / 1_000_000) * COST_PER_1M_INPUT  +
     (totalOutputTokens / 1_000_000) * COST_PER_1M_OUTPUT;
+  const estimatedCostEur = Math.round(estUsd * USD_TO_EUR * 10_000) / 10_000;
+
+  // Enrichir par fonction + agréger par catégorie
+  const byFunction: Record<string, FunctionStatsDetail> = {};
+  const byCategory: Record<string, CategoryStats> = {};
+
+  for (const [fn, stats] of Object.entries(memStats)) {
+    const fnUsd =
+      (stats.inputTokens  / 1_000_000) * COST_PER_1M_INPUT  +
+      (stats.outputTokens / 1_000_000) * COST_PER_1M_OUTPUT;
+    const fnCostEur = Math.round(fnUsd * USD_TO_EUR * 10_000) / 10_000;
+    const category = getCategoryForFunction(fn);
+
+    byFunction[fn] = { ...stats, category, estimatedCostEur: fnCostEur };
+
+    if (!byCategory[category]) {
+      byCategory[category] = { calls: 0, inputTokens: 0, outputTokens: 0, estimatedCostEur: 0 };
+    }
+    byCategory[category].calls        += stats.calls;
+    byCategory[category].inputTokens  += stats.inputTokens;
+    byCategory[category].outputTokens += stats.outputTokens;
+    byCategory[category].estimatedCostEur = Math.round(
+      (byCategory[category].estimatedCostEur + fnCostEur) * 10_000
+    ) / 10_000;
+  }
+
+  const budgetUsedPercent = budgetThresholdEur > 0
+    ? Math.round((estimatedCostEur / budgetThresholdEur) * 100 * 10) / 10
+    : 0;
+
   return {
-    startedAt:         startedAt.toISOString(),
+    startedAt: startedAt.toISOString(),
     totalCalls,
     totalInputTokens,
     totalOutputTokens,
-    estimatedCostEur: Math.round(estUsd * USD_TO_EUR * 10_000) / 10_000,
-    byFunction: { ...memStats },
+    estimatedCostEur,
+    budgetThresholdEur,
+    budgetUsedPercent,
+    budgetAlert: budgetThresholdEur > 0 && estimatedCostEur >= budgetThresholdEur * 0.80,
+    byFunction,
+    byCategory: byCategory as Record<ServiceCategory, CategoryStats>,
   };
 }
 
