@@ -1416,18 +1416,11 @@ const STATUS_COLORS: Record<string, string> = {
 function IngestionPanel() {
   const [scope, setScope]             = useState<{ insurers: InsurerScope[]; insurance_types: TypeScope[] } | null>(null);
   const [loading, setLoading]         = useState(false);
-  const [selInsurers, setSelInsurers] = useState<string[]>([]);
-  const [selTypes, setSelTypes]       = useState<string[]>([]);
-  const [maxDocs, setMaxDocs]         = useState(2);
-  const [confThreshold, setConf]      = useState(0.70);
-  const [running, setRunning]         = useState(false);
-  const [statusMsg, setStatusMsg]     = useState<string | null>(null);
   const [history, setHistory]         = useState<RunHistory[]>([]);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [jobDetails, setJobDetails]   = useState<Record<string, JobDetail[]>>({});
   const [editPatterns, setEditPatterns] = useState<{ insurer: InsurerScope | null; open: boolean }>({ insurer: null, open: false });
   const [patternDraft, setPatternDraft] = useState<{ cgPageUrls: string; pdfPatterns: string; excludePatterns: string; enabled: boolean }>({ cgPageUrls: '', pdfPatterns: '', excludePatterns: '', enabled: false });
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` };
 
@@ -1453,63 +1446,10 @@ function IngestionPanel() {
     } catch { /* silencieux */ }
   };
 
-  const pollStatus = async () => {
-    try {
-      const res = await fetch(`${API}/api/admin/cg-ingestion/status`, { headers });
-      const data = await res.json();
-      if (!data.running) {
-        setRunning(false);
-        setStatusMsg('Pipeline terminé ✅');
-        if (pollRef.current) clearInterval(pollRef.current);
-        loadHistory();
-      } else {
-        const counts = (data.counts as any[]) ?? [];
-        const done  = counts.find(c => c.status === 'done')?.count ?? 0;
-        const total = counts.reduce((s: number, c: any) => s + Number(c.count), 0);
-        setStatusMsg(`En cours… ${done}/${total} jobs`);
-      }
-    } catch { /* silencieux */ }
-  };
-
   useEffect(() => {
     loadScope();
     loadHistory();
-    // Vérifier si un run est déjà en cours
-    fetch(`${API}/api/admin/cg-ingestion/status`, { headers })
-      .then(r => r.json())
-      .then(d => { if (d.running) { setRunning(true); pollRef.current = setInterval(pollStatus, 5000); } })
-      .catch(() => {});
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
-
-  const handleRun = async () => {
-    if (!selInsurers.length || !selTypes.length) { alert('Sélectionnez au moins un assureur et un type d\'assurance'); return; }
-    const csrf = await fetchCsrfToken();
-    const res = await fetch(`${API}/api/admin/cg-ingestion/run`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-      body: JSON.stringify({ scope: 'targeted', insurers: selInsurers, insurance_types: selTypes, max_docs_per_combo: maxDocs, confidence_threshold: confThreshold }),
-    });
-    if (res.ok) {
-      setRunning(true);
-      setStatusMsg('Démarrage…');
-      pollRef.current = setInterval(pollStatus, 5000);
-    } else {
-      const err = await res.json().catch(() => ({ message: `Erreur HTTP ${res.status}` }));
-      alert(err.message ?? 'Erreur démarrage');
-    }
-  };
-
-  const handleStop = async () => {
-    const csrf = await fetchCsrfToken();
-    await fetch(`${API}/api/admin/cg-ingestion/stop`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-    });
-    setStatusMsg('Arrêt demandé…');
-  };
 
   const loadJobDetails = async (runId: string) => {
     if (jobDetails[runId]) { setExpandedRun(expandedRun === runId ? null : runId); return; }
@@ -1552,9 +1492,6 @@ function IngestionPanel() {
     setEditPatterns({ insurer: null, open: false });
   };
 
-  const toggle = (arr: string[], val: string, set: (a: string[]) => void) =>
-    set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val]);
-
   return (
     <div className="space-y-6 animate-fadeIn">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1571,89 +1508,31 @@ function IngestionPanel() {
 
       {scope && (
         <>
-          {/* ── Sélection périmètre ── */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">1. Sélection des assureurs</p>
+          {/* ── Bannière redirection Catalogue ── */}
+          <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+            <Wand2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-black text-blue-800">Pour lancer une ingestion ciblée</p>
+              <p className="text-xs text-blue-600 mt-0.5">Utilisez l'onglet <strong>Catalogue</strong> → sélectionnez les entrées manquantes → <strong>Rechercher &amp; Indexer</strong>. Gemini + Google Search trouvera et indexera les documents automatiquement.</p>
+            </div>
+          </div>
+
+          {/* ── Patterns par assureur ── */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Patterns de crawl par assureur</p>
             <div className="flex flex-wrap gap-2">
               {scope.insurers.map(ins => (
                 <button
                   key={ins.code}
-                  onClick={() => toggle(selInsurers, ins.code, setSelInsurers)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                    selInsurers.includes(ins.code)
-                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
-                  }`}
+                  onClick={() => openEditPatterns(ins)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:bg-violet-50 transition-all"
                 >
                   {ins.label}
                   {ins.cgSearchEnabled && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Patterns configurés" />}
-                  <button
-                    onClick={e => { e.stopPropagation(); openEditPatterns(ins); }}
-                    className="ml-1 opacity-60 hover:opacity-100"
-                    title="Configurer les patterns de crawl"
-                  >
-                    <Settings className="w-3 h-3" />
-                  </button>
+                  <Settings className="w-3 h-3 text-slate-400" />
                 </button>
               ))}
             </div>
-
-            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">2. Types d'assurance</p>
-            <div className="flex flex-wrap gap-2">
-              {scope.insurance_types.map(t => (
-                <button
-                  key={t.code}
-                  onClick={() => toggle(selTypes, t.code, setSelTypes)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                    selTypes.includes(t.code)
-                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
-                  }`}
-                >
-                  {t.labelFr}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-6 flex-wrap">
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-black uppercase text-slate-400">Docs max / combo</label>
-                <input type="number" min={1} max={10} value={maxDocs}
-                  onChange={e => setMaxDocs(Number(e.target.value))}
-                  className="w-16 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-center outline-none"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-black uppercase text-slate-400">Confiance min</label>
-                <input type="number" min={0} max={1} step={0.05} value={confThreshold}
-                  onChange={e => setConf(Number(e.target.value))}
-                  className="w-20 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-center outline-none"
-                />
-              </div>
-              <div className="flex gap-2 ml-auto">
-                {running ? (
-                  <button onClick={handleStop}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all">
-                    <X className="w-3.5 h-3.5" /> Arrêter
-                  </button>
-                ) : (
-                  <button onClick={handleRun}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-violet-700 shadow-lg shadow-violet-900/15 transition-all disabled:opacity-50"
-                    disabled={!selInsurers.length || !selTypes.length}>
-                    <Wand2 className="w-3.5 h-3.5" /> Lancer l'ingestion
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {(running || statusMsg) && (
-              <div className={`flex items-center gap-3 p-3 rounded-xl border ${
-                running ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              }`}>
-                {running ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <CheckCircle className="w-4 h-4 shrink-0" />}
-                <span className="text-xs font-bold">{statusMsg}</span>
-              </div>
-            )}
           </div>
 
           {/* ── Historique des runs ── */}

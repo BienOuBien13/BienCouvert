@@ -50,6 +50,10 @@ import {
   stopWatchdog,
   isWatchdogRunning,
 } from '../catalogue/WatchdogScheduler';
+import {
+  launchSmartIngestion,
+  getJobStatus,
+} from '../catalogue/CatalogueIngestionService';
 import type { MatrixStatus } from '../catalogue/types';
 
 const router = Router();
@@ -516,7 +520,7 @@ router.post('/catalogue/check', authMiddleware, adminMiddleware, async (req: any
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/catalogue/ingest/:id
-// Lance l'ingestion d'une entrée catalogue spécifique (discovered → indexed)
+// Lance l'ingestion d'une entrée catalogue spécifique (via CatalogueIngestionService)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/catalogue/ingest/:id', authMiddleware, adminMiddleware, async (req: any, res) => {
   const id = parseInt(req.params.id, 10);
@@ -526,25 +530,8 @@ router.post('/catalogue/ingest/:id', authMiddleware, adminMiddleware, async (req
     const entry = await getEntry(id);
     if (!entry) return res.status(404).json({ message: 'Entrée non trouvée' });
 
-    // Déterminer l'URL à ingérer
-    const url = entry.discovered_url || entry.current_url;
-    if (!url) return res.status(400).json({ message: 'Pas d\'URL disponible pour cette entrée' });
-
-    // Lancer l'ingestion via le pipeline existant (fire-and-forget)
-    if (getCurrentRunId()) {
-      return res.status(409).json({ message: 'Un pipeline d\'ingestion est déjà en cours' });
-    }
-
-    const scope: IngestionScope = {
-      scope: 'targeted',
-      insurers: [entry.insurer_code],
-      insurance_types: [entry.insurance_type_code],
-      max_docs_per_combo: 1,
-      confidence_threshold: 0.5,
-    };
-
-    res.json({ ok: true, message: `Ingestion lancée pour ${entry.insurer_code}/${entry.insurance_type_code}` });
-    runIngestion(scope).catch(e => console.error('[catalogue/ingest]', e.message));
+    const jobId = await launchSmartIngestion([id]);
+    res.json({ ok: true, job_id: jobId, message: `Ingestion lancée pour ${entry.insurer_code}/${entry.insurance_type_code}` });
   } catch (err: any) {
     res.status(500).json({ message: 'Erreur ingestion', error: err.message });
   }
@@ -572,6 +559,122 @@ router.post('/catalogue/watchdog/start', authMiddleware, adminMiddleware, async 
 router.post('/catalogue/watchdog/stop', authMiddleware, adminMiddleware, (_req: any, res) => {
   stopWatchdog();
   res.json({ ok: true, message: 'Veille automatique arrêtée' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/entry
+// Ajoute manuellement une entrée dans le catalogue documentaire
+// Body: { insurer_code, insurance_type_code, doc_type, url? }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/entry', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const { insurer_code, insurance_type_code, doc_type, url } = req.body ?? {};
+  if (!insurer_code || !insurance_type_code || !doc_type) {
+    return res.status(400).json({ message: 'Champs requis : insurer_code, insurance_type_code, doc_type' });
+  }
+  const validDocTypes = ['CG', 'IPID', 'notice', 'tableau_garanties'];
+  if (!validDocTypes.includes(doc_type)) {
+    return res.status(400).json({ message: `doc_type invalide. Valeurs acceptées : ${validDocTypes.join(', ')}` });
+  }
+  try {
+    const result = await pool.query<{ id: number }>(
+      `INSERT INTO document_catalogue
+         (insurer_code, insurance_type_code, doc_type, matrix_status, current_url, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+       ON CONFLICT (insurer_code, insurance_type_code, doc_type) DO UPDATE
+         SET current_url = EXCLUDED.current_url, updated_at = NOW()
+       RETURNING id`,
+      [insurer_code, insurance_type_code, doc_type, url ? 'discovered' : 'unknown', url ?? null]
+    );
+    res.json({ ok: true, id: result.rows[0].id, message: 'Entrée ajoutée au catalogue' });
+  } catch (err: any) {
+    console.error('[admin/catalogue/entry POST]', err.message);
+    res.status(500).json({ message: 'Erreur ajout entrée', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/admin/catalogue/entry/:id
+// Supprime une entrée du catalogue documentaire
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/catalogue/entry/:id', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID invalide' });
+  try {
+    const result = await pool.query(
+      `DELETE FROM document_catalogue WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Entrée non trouvée' });
+    res.json({ ok: true, message: 'Entrée supprimée' });
+  } catch (err: any) {
+    console.error('[admin/catalogue/entry DELETE]', err.message);
+    res.status(500).json({ message: 'Erreur suppression', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/admin/catalogue/entry/:id/url
+// Définit l'URL courante d'une entrée catalogue (saisie manuelle)
+// Body: { url: string }
+// ─────────────────────────────────────────────────────────────────────────────
+router.put('/catalogue/entry/:id/url', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const id  = parseInt(req.params.id, 10);
+  const url = String(req.body?.url ?? '').trim();
+  if (isNaN(id))  return res.status(400).json({ message: 'ID invalide' });
+  if (!url)       return res.status(400).json({ message: 'URL requise' });
+  // Validation basique de l'URL
+  try { new URL(url); } catch { return res.status(400).json({ message: 'URL invalide' }); }
+  try {
+    const result = await pool.query(
+      `UPDATE document_catalogue
+       SET current_url = $1, discovered_url = $1, matrix_status = 'discovered',
+           last_checked_at = NOW(), updated_at = NOW()
+       WHERE id = $2 RETURNING id`,
+      [url, id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Entrée non trouvée' });
+    res.json({ ok: true, message: 'URL mise à jour' });
+  } catch (err: any) {
+    console.error('[admin/catalogue/entry/url PUT]', err.message);
+    res.status(500).json({ message: 'Erreur mise à jour URL', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/smart-ingest
+// Lance l'ingestion intelligente (SmartSearch + ingest) pour N entrées catalogue
+// Body: { catalogue_ids: number[] }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/smart-ingest', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const catalogue_ids: number[] = req.body?.catalogue_ids;
+  if (!Array.isArray(catalogue_ids) || catalogue_ids.length === 0) {
+    return res.status(400).json({ message: 'catalogue_ids requis (tableau non vide)' });
+  }
+  if (catalogue_ids.length > 20) {
+    return res.status(400).json({ message: 'Maximum 20 entrées par batch' });
+  }
+  const ids = catalogue_ids.map(Number).filter(n => !isNaN(n) && n > 0);
+  if (ids.length === 0) {
+    return res.status(400).json({ message: 'Aucun ID valide fourni' });
+  }
+  try {
+    const jobId = await launchSmartIngestion(ids);
+    res.json({ ok: true, job_id: jobId, message: `Job d'ingestion lancé pour ${ids.length} entrée(s)` });
+  } catch (err: any) {
+    console.error('[admin/catalogue/smart-ingest]', err.message);
+    res.status(500).json({ message: 'Erreur lancement ingestion', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/catalogue/job/:job_id
+// Retourne l'état d'un job d'ingestion catalogue (polling frontend)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/job/:job_id', authMiddleware, adminMiddleware, (req: any, res) => {
+  const jobId = req.params.job_id;
+  const job   = getJobStatus(jobId);
+  if (!job) return res.status(404).json({ message: 'Job non trouvé (peut-être expiré)' });
+  res.json(job);
 });
 
 export default router;

@@ -871,3 +871,191 @@ export async function runIngestion(scope: IngestionScope): Promise<{
     stopRequested.value = false;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ingestion ciblée depuis le Catalogue documentaire
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface IngestCatalogueResult {
+  success:        boolean;
+  central_cg_id?: number;
+  pages?:         number;
+  sha256?:        string;
+  error?:         string;
+}
+
+/**
+ * Ingère un document depuis une URL connue, vers une entrée spécifique du catalogue.
+ * Réutilise les agents FETCHER + CLASSIFIER + VECTORIZER (privés au fichier).
+ *
+ * Différences vs runIngestion :
+ *  - Pas de HUNTER (URL fournie directement)
+ *  - Seuil de confiance abaissé à 0.4 (entrée sélectionnée manuellement)
+ *  - Force les codes assureur/type depuis le catalogue (hints prioritaires)
+ */
+export async function ingestDocumentForCatalogue(params: {
+  catalogueId:        number;
+  insurerCode:        string;
+  insuranceTypeCode:  string;
+  pdfUrl:             string;
+  onProgress?:        (step: string, message: string) => void;
+}): Promise<IngestCatalogueResult> {
+  const { catalogueId, insurerCode, insuranceTypeCode, pdfUrl, onProgress } = params;
+  const progress = (step: string, msg: string) => { if (onProgress) onProgress(step, msg); };
+
+  try {
+    // ── Charger les référentiels ─────────────────────────────────────────────
+    const [insurerRows, typeRows] = await Promise.all([
+      pool.query<{ code: string; full_name: string }>(
+        `SELECT code, full_name FROM insurers WHERE is_active = true ORDER BY display_order`
+      ),
+      pool.query<{ code: string; label_fr: string }>(
+        `SELECT code, label_fr FROM insurance_types WHERE is_active = true ORDER BY display_order`
+      ),
+    ]);
+
+    // ── FETCHER ──────────────────────────────────────────────────────────────
+    progress('fetching', `Téléchargement du PDF : ${pdfUrl.slice(0, 70)}…`);
+    const fetched = await agentFetcher(pdfUrl);
+
+    if (!fetched) {
+      await pool.query(
+        `UPDATE document_catalogue SET matrix_status = 'error', notes = $1, updated_at = NOW() WHERE id = $2`,
+        ['PDF inaccessible ou invalide', catalogueId]
+      );
+      return { success: false, error: 'Téléchargement échoué — vérifiez l\'URL et que le fichier est un PDF valide' };
+    }
+
+    // ── Dédup SHA-256 ────────────────────────────────────────────────────────
+    const dupCheck = await pool.query<{ id: number; central_cg_id: number | null }>(
+      `SELECT j.id, j.central_cg_id
+       FROM cg_ingestion_jobs j
+       WHERE j.pdf_sha256 = $1 AND j.status = 'done' AND j.central_cg_id IS NOT NULL
+       LIMIT 1`,
+      [fetched.sha256]
+    );
+    if (dupCheck.rows.length > 0) {
+      const existingCgId = dupCheck.rows[0].central_cg_id!;
+      await pool.query(
+        `UPDATE document_catalogue
+         SET matrix_status = 'indexed', central_cg_id = $1, current_sha256 = $2,
+             current_url = $3, indexed_at = NOW(), updated_at = NOW()
+         WHERE id = $4`,
+        [existingCgId, fetched.sha256, pdfUrl, catalogueId]
+      );
+      progress('done', `Document déjà indexé (SHA-256 identique) → central_cg #${existingCgId}`);
+      return { success: true, central_cg_id: existingCgId, sha256: fetched.sha256 };
+    }
+
+    // ── CLASSIFIER ───────────────────────────────────────────────────────────
+    progress('classifying', 'Identification du document par Gemini…');
+    await sleep(500); // rate-limit Gemini
+
+    const insurer = insurerRows.rows.find(i => i.code === insurerCode);
+    const type    = typeRows.rows.find(t => t.code === insuranceTypeCode);
+
+    let classif = await agentClassifier(
+      fetched.buffer,
+      insurerRows.rows,
+      typeRows.rows,
+      insurer?.full_name ?? insurerCode,
+      type?.label_fr    ?? insuranceTypeCode
+    );
+
+    // Si le classifier échoue ou retourne une très faible confiance,
+    // on synthétise un résultat minimal à partir des hints (l'utilisateur a sélectionné explicitement)
+    if (!classif || classif.confidence < 0.35) {
+      console.warn(`[CATALOGUE/CLASSIFIER] Confiance faible (${classif?.confidence ?? 0}) → fallback sur hints`);
+      classif = {
+        insurer_code:         insurerCode,
+        insurer_name:         insurer?.full_name ?? insurerCode,
+        insurance_type_code:  insuranceTypeCode,
+        document_type:        'CG',
+        formula_hints:        [],
+        confidence:           classif?.confidence ?? 0.30,
+        language:             'fr',
+        is_cg:                true,
+        detail:               'Classifié par hints catalogue (faible confiance)',
+      };
+    }
+
+    // Forcer les codes depuis le catalogue (l'utilisateur sait ce qu'il ingère)
+    classif.insurer_code        = insurerCode;
+    classif.insurance_type_code = insuranceTypeCode;
+
+    // ── INSERT central_cg ─────────────────────────────────────────────────────
+    const fileName   = `${insurerCode}_${insuranceTypeCode}_${Date.now()}.pdf`;
+    const pdfBase64  = fetched.buffer.toString('base64');
+    const insertRes  = await pool.query<{ id: number }>(
+      `INSERT INTO central_cg
+         (insurer_code, insurance_type_code, document_type_code,
+          url, target_filename, pdf_base64, status, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+       RETURNING id`,
+      [
+        classif.insurer_code,
+        classif.insurance_type_code,
+        (classif.document_type ?? 'CG').toUpperCase(),
+        pdfUrl,
+        fileName,
+        pdfBase64,
+        JSON.stringify({
+          formula_hints:  classif.formula_hints,
+          detail:         classif.detail,
+          confidence:     classif.confidence,
+          ingested_at:    new Date().toISOString(),
+          source_url:     pdfUrl,
+          catalogue_id:   catalogueId,
+        }),
+      ]
+    );
+    const centralCgId = insertRes.rows[0].id;
+
+    // ── VECTORIZER ───────────────────────────────────────────────────────────
+    progress('vectorizing', `Vectorisation page par page (central_cg #${centralCgId})…`);
+    const vecResult = await vectorizeCgByPages(pool as Pool, centralCgId, pdfUrl, pdfBase64);
+
+    // ── Mettre à jour document_catalogue ─────────────────────────────────────
+    await pool.query(
+      `UPDATE document_catalogue
+       SET matrix_status   = 'indexed',
+           central_cg_id   = $1,
+           current_url     = $2,
+           current_sha256  = $3,
+           indexed_at      = NOW(),
+           classifier_result = $4,
+           formula_hints   = $5,
+           last_checked_at = NOW(),
+           next_check_at   = NOW() + (check_frequency_days || ' days')::INTERVAL,
+           updated_at      = NOW()
+       WHERE id = $6`,
+      [
+        centralCgId,
+        pdfUrl,
+        fetched.sha256,
+        JSON.stringify(classif),
+        classif.formula_hints ?? [],
+        catalogueId,
+      ]
+    );
+
+    progress('done', `Vectorisé — ${vecResult.pagesProcessed} pages, ${vecResult.factsCreated} faits`);
+
+    return {
+      success:        true,
+      central_cg_id:  centralCgId,
+      pages:          vecResult.pagesProcessed,
+      sha256:         fetched.sha256,
+    };
+
+  } catch (err: any) {
+    console.error(`[ingestDocumentForCatalogue] Erreur pour catalogue#${catalogueId}:`, err.message);
+    try {
+      await pool.query(
+        `UPDATE document_catalogue SET matrix_status = 'error', notes = $1, updated_at = NOW() WHERE id = $2`,
+        [err.message?.slice(0, 500), catalogueId]
+      );
+    } catch { /* silencieux */ }
+    return { success: false, error: err.message };
+  }
+}
