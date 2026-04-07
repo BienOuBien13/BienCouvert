@@ -46,6 +46,7 @@ export interface CatalogueEntry {
 // ─── Résultats du CatalogueAgent ──────────────────────────────────────────────
 
 export interface MatrixCell {
+  id: number;
   insurer_code: string;
   insurer_label: string;
   insurance_type_code: string;

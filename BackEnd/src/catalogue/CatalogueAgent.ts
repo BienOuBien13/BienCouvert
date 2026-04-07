@@ -43,6 +43,7 @@ export async function getMatrix(filters?: {
 
   const cellsQuery = await pool.query<MatrixCell>(
     `SELECT
+       dc.id,
        dc.insurer_code,
        COALESCE(i.label, dc.insurer_code) AS insurer_label,
        dc.insurance_type_code,
@@ -63,9 +64,9 @@ export async function getMatrix(filters?: {
 
   const cells = cellsQuery.rows;
 
-  // Statistiques
+  // Statistiques (même alias dc pour que WHERE s'applique correctement)
   const statsQuery = await pool.query<{ matrix_status: string; count: string }>(
-    `SELECT matrix_status, COUNT(*)::int AS count FROM document_catalogue ${where} GROUP BY matrix_status`,
+    `SELECT matrix_status, COUNT(*)::int AS count FROM document_catalogue dc ${where} GROUP BY matrix_status`,
     params
   );
   const countsMap: Record<string, number> = {};

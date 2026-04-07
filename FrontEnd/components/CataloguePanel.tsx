@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Database, RefreshCw, Search, Download, CheckCircle, AlertTriangle,
-  XCircle, HelpCircle, Eye, Play, BarChart3
+  XCircle, HelpCircle, Eye, Play, BarChart3, WifiOff, Wifi
 } from 'lucide-react';
+import { fetchCsrfToken } from '../services/authService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,8 +70,16 @@ export default function CataloguePanel() {
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [watchdogRunning, setWatchdogRunning] = useState<boolean | null>(null);
 
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` };
+
+  const loadWatchdog = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/admin/catalogue/watchdog`, { headers });
+      if (res.ok) { const d = await res.json(); setWatchdogRunning(d.running); }
+    } catch { /* silencieux */ }
+  }, []);
 
   const loadMatrix = useCallback(async () => {
     setLoading(true);
@@ -90,17 +99,23 @@ export default function CataloguePanel() {
     setLoading(false);
   }, [filterInsurer, filterType, filterStatus]);
 
-  useEffect(() => { loadMatrix(); }, [loadMatrix]);
+  useEffect(() => { loadMatrix(); loadWatchdog(); }, [loadMatrix, loadWatchdog]);
 
   const doAction = async (endpoint: string, body?: any) => {
     setActionMsg(null);
     try {
+      const csrf = await fetchCsrfToken();
       const res = await fetch(`${API}/api/admin/catalogue/${endpoint}`, {
-        method: 'POST', headers, body: body ? JSON.stringify(body) : undefined,
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...headers, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
       });
       const d = await res.json();
+      if (!res.ok) { setActionMsg(`Erreur ${res.status}: ${d.message ?? 'Inconnu'}`); return; }
       setActionMsg(d.message || 'OK');
-      setTimeout(() => loadMatrix(), 2000);
+      if (endpoint.startsWith('watchdog')) { loadWatchdog(); }
+      setTimeout(() => loadMatrix(), 1000);
     } catch (e: any) {
       setActionMsg(`Erreur: ${e.message}`);
     }
@@ -156,6 +171,19 @@ export default function CataloguePanel() {
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-sm font-medium text-amber-700">
           <CheckCircle className="w-4 h-4" /> Vérifier indexés
         </button>
+        {/* Veille automatique */}
+        {watchdogRunning === false && (
+          <button onClick={() => doAction('watchdog/start')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-sm font-medium text-emerald-700 border border-emerald-200">
+            <Wifi className="w-4 h-4" /> Activer veille auto
+          </button>
+        )}
+        {watchdogRunning === true && (
+          <button onClick={() => doAction('watchdog/stop')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-sm font-medium text-red-700 border border-red-200">
+            <WifiOff className="w-4 h-4" /> Désactiver veille auto
+          </button>
+        )}
         {actionMsg && (
           <span className="self-center text-sm text-slate-500 italic">{actionMsg}</span>
         )}
@@ -220,7 +248,7 @@ export default function CataloguePanel() {
                         </a>
                       )}
                       {(cell.matrix_status === 'discovered' || cell.matrix_status === 'outdated') && (
-                        <button onClick={() => doAction(`ingest/${(cell as any).id ?? 0}`)}
+                        <button onClick={() => doAction(`ingest/${cell.id}`)}
                           className="p-1 rounded hover:bg-blue-50" title="Lancer l'ingestion">
                           <Play className="w-3.5 h-3.5 text-blue-600" />
                         </button>

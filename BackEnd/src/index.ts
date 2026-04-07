@@ -21,7 +21,6 @@ import { initTelemetry } from './telemetry';
 import { initAuditTable } from './services/auditService';
 import { verifySmtpConnection } from './services/emailService';
 import { initPasswordResetsTable, initEmailVerificationsTable, initRdvRequestsTable, initPartnerTables, purgeExpiredTokens } from './services/dbInitService';
-import { startWatchdog } from './catalogue/WatchdogScheduler';
 
 // -----------------------------------------------------------------------------
 // Point d'entrée principal du serveur backend AssurClair
@@ -284,8 +283,6 @@ initAuditTable().then(async () => {
   // Purge quotidienne des tokens expirés
   purgeExpiredTokens();
   setInterval(purgeExpiredTokens, 24 * 60 * 60 * 1000);
-  // Démarrage du watchdog catalogue (vérification périodique des documents)
-  startWatchdog().catch(e => console.warn('[WatchdogScheduler] Échec démarrage:', e.message));
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`AssurClair backend listening on 0.0.0.0:${PORT}`);
   });

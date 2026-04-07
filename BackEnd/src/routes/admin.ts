@@ -45,6 +45,11 @@ import {
   discoverForEntry,
   checkBatch,
 } from '../catalogue/VersionTrackerAgent';
+import {
+  startWatchdog,
+  stopWatchdog,
+  isWatchdogRunning,
+} from '../catalogue/WatchdogScheduler';
 import type { MatrixStatus } from '../catalogue/types';
 
 const router = Router();
@@ -531,6 +536,30 @@ router.post('/catalogue/ingest/:id', authMiddleware, adminMiddleware, async (req
   } catch (err: any) {
     res.status(500).json({ message: 'Erreur ingestion', error: err.message });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET  /api/admin/catalogue/watchdog       — état du watchdog
+// POST /api/admin/catalogue/watchdog/start — démarrer la veille automatique
+// POST /api/admin/catalogue/watchdog/stop  — arrêter la veille automatique
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/watchdog', authMiddleware, adminMiddleware, (_req: any, res) => {
+  res.json({ running: isWatchdogRunning() });
+});
+
+router.post('/catalogue/watchdog/start', authMiddleware, adminMiddleware, async (_req: any, res) => {
+  if (isWatchdogRunning()) return res.json({ ok: false, message: 'Watchdog déjà actif' });
+  try {
+    await startWatchdog();
+    res.json({ ok: true, message: 'Veille automatique démarrée (check 6h, discovery 12h)' });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erreur démarrage watchdog', error: err.message });
+  }
+});
+
+router.post('/catalogue/watchdog/stop', authMiddleware, adminMiddleware, (_req: any, res) => {
+  stopWatchdog();
+  res.json({ ok: true, message: 'Veille automatique arrêtée' });
 });
 
 export default router;
