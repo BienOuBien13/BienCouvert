@@ -5,11 +5,13 @@ import { storage } from '../storage';
 import { query as dbQuery } from '../db';
 import { cacheGet, cacheSet, makeCacheKey } from '../services/cacheService';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
+import { orchestratorAgent } from '../agents';
 
 const router = Router();
 
 // Endpoint chat utilisé par le frontend : envoie un message, le contexte des
 // polices et l'historique. Réponse : `{ response: string }`.
+// Utilise l'OrchestratorAgent BMAD pour un routage intelligent vers les agents spécialisés.
 router.post('/chat', authMiddleware, async (req: any, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });
@@ -17,26 +19,42 @@ router.post('/chat', authMiddleware, async (req: any, res) => {
     // userId toujours extrait du JWT — jamais du body client
     const userId: number = req.user.id;
 
-    // Valider les policy IDs côté serveur : seules les polices appartenant
-    // à l'utilisateur authentifié sont autorisées (protection IDOR sur le RAG)
+    // Valider les policy IDs côté serveur (protection IDOR sur le RAG)
     const requestedIds = (policies || []).map((p: any) => parseInt(p.id)).filter((id: number) => !isNaN(id));
     const ownedPolicies = await storage.readPolicies(userId);
     const enrichedPolicies = ownedPolicies.filter((p: any) => requestedIds.includes(parseInt(p.id)));
     const policyIds = enrichedPolicies.map((p: any) => String(p.id));
 
-    // 🚀 Cache Redis : clé incluant l'userId pour éviter tout cross-user cache bleed
-    const cacheKey = makeCacheKey('chat', String(userId), message, policyIds.sort().join(','));
+    // Cache Redis (clé userId-safe)
+    const cacheKey = makeCacheKey('chat-bmad', String(userId), message, policyIds.sort().join(','));
     const cached = await cacheGet<string>(cacheKey);
     if (cached) {
-      console.log('🎯 Cache hit — chat');
+      console.log('🎯 Cache hit — chat-bmad');
       return res.json({ response: cached });
     }
-    
-    const response = await sendMessageToAssistant(message, enrichedPolicies, history || []);
 
-    await cacheSet(cacheKey, response);
+    // Profil utilisateur pour personnalisation
+    const userProfile = await storage.readAnalysisProfile(userId).catch(() => null);
 
-    res.json({ response });
+    // Orchestration multi-agent BMAD
+    const result = await orchestratorAgent.run({
+      message,
+      userId,
+      policies: enrichedPolicies,
+      history: history || [],
+      userProfile: userProfile || undefined,
+    });
+
+    await cacheSet(cacheKey, result.response);
+
+    res.json({
+      response: result.response,
+      _meta: {
+        intent: result.intent,
+        agentsUsed: result.agentsUsed,
+        processingMs: result.processingMs,
+      },
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Chat error' });
@@ -44,37 +62,46 @@ router.post('/chat', authMiddleware, async (req: any, res) => {
 });
 
 // Endpoint chat STREAMING - envoie la réponse progressivement via SSE
+// Utilise l'OrchestratorAgent BMAD avec streaming chunk-par-chunk.
 router.post('/chat/stream', authMiddleware, async (req: any, res) => {
   const { message, policies, history } = req.body;
   if (!message) return res.status(400).json({ message: 'Missing message' });
-  
+
   try {
-    // userId toujours extrait du JWT — validation des policy IDs identique à /chat
     const userId: number = req.user.id;
     const requestedIds = (policies || []).map((p: any) => parseInt(p.id)).filter((id: number) => !isNaN(id));
     const ownedPolicies = await storage.readPolicies(userId);
     const enrichedPolicies = ownedPolicies.filter((p: any) => requestedIds.includes(parseInt(p.id)));
-    console.log(`✅ ${enrichedPolicies.length} policies validées (streaming)`);
-    
-    // Configuration SSE (Server-Sent Events)
+    console.log(`✅ ${enrichedPolicies.length} policies validées (streaming BMAD)`);
+
+    // Configuration SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
-    
-    // Callback pour chaque chunk reçu
+
     const onChunk = (chunk: string) => {
       res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
     };
-    
-    // Appeler la fonction de streaming
-    await sendMessageToAssistantStream(message, enrichedPolicies, history || [], onChunk);
-    
-    // Signaler la fin du stream
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+
+    const userProfile = await storage.readAnalysisProfile(userId).catch(() => null);
+
+    const result = await orchestratorAgent.runStream(
+      {
+        message,
+        userId,
+        policies: enrichedPolicies,
+        history: history || [],
+        userProfile: userProfile || undefined,
+      },
+      onChunk,
+    );
+
+    // Envoyer les métadonnées BMAD à la fin
+    res.write(`data: ${JSON.stringify({ done: true, _meta: { intent: result.intent, agentsUsed: result.agentsUsed, processingMs: result.processingMs } })}\n\n`);
     res.end();
   } catch (e) {
-    console.error('❌ Chat streaming error:', e);
+    console.error('❌ Chat streaming BMAD error:', e);
     res.write(`data: ${JSON.stringify({ error: 'Erreur lors de la génération de la réponse' })}\n\n`);
     res.end();
   }
@@ -94,6 +121,7 @@ router.post('/search-policy', async (req, res) => {
 });
 
 // Endpoint détection de doublons/optimisations entre polices avec profil utilisateur
+// Deux modes : BMAD OptimizerAgent (recommandé) ou legacy geminiService
 router.post('/detect-duplicates', async (req, res) => {
   const { policies, profile } = req.body;
   if (!policies || !Array.isArray(policies)) return res.status(400).json({ message: 'Invalid policies' });
@@ -103,6 +131,37 @@ router.post('/detect-duplicates', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Duplicate detection error' });
+  }
+});
+
+// ── Endpoint BMAD OptimizerAgent — analyse portefeuille + circuit ─────────────
+// POST /api/ai/optimize  { policies: Policy[], includeCircuit?: boolean }
+router.post('/optimize', authMiddleware, async (req: any, res) => {
+  const { policies, includeCircuit } = req.body;
+  if (!policies || !Array.isArray(policies)) {
+    return res.status(400).json({ message: 'Invalid policies' });
+  }
+  try {
+    const userId: number = req.user.id;
+    const userProfile = await storage.readAnalysisProfile(userId).catch(() => null);
+
+    const { optimizerAgent } = require('../agents');
+    const result = await optimizerAgent.optimize(
+      { policies, userProfile: userProfile || undefined },
+      includeCircuit
+        ? {
+            ragCacheHit: false,
+            ragChunksFound: 0,
+            policyCount: policies.length,
+            hasUserProfile: !!userProfile,
+            intentConfidence: 1,
+          }
+        : undefined,
+    );
+    res.json(result);
+  } catch (e) {
+    console.error('optimize error:', e);
+    res.status(500).json({ message: 'Optimize error' });
   }
 });
 

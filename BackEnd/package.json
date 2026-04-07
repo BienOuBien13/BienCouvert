@@ -8,7 +8,9 @@
     "start": "node dist/index.js",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No unit tests yet — typecheck acts as smoke test' && npm run typecheck"
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "keywords": [],
   "author": "",
@@ -48,11 +50,14 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.12",
     "@types/express": "^4.17.17",
+    "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.2",
     "@types/multer": "^1.4.7",
     "@types/node": "^20.3.1",
     "@types/pg": "^8.10.9",
+    "jest": "^30.3.0",
     "nodemon": "^2.0.22",
+    "ts-jest": "^29.4.9",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.6"
   }

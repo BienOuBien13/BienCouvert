@@ -1,0 +1,17 @@
+{
+  "preset": "ts-jest",
+  "testEnvironment": "node",
+  "roots": ["<rootDir>/src"],
+  "testMatch": ["**/__tests__/**/*.test.ts"],
+  "transform": {
+    "^.+\\.tsx?$": ["ts-jest", { "tsconfig": { "module": "commonjs" } }]
+  },
+  "collectCoverageFrom": ["src/agents/**/*.ts"],
+  "coverageThreshold": {
+    "global": {
+      "branches": 60,
+      "functions": 70,
+      "lines": 70
+    }
+  }
+}

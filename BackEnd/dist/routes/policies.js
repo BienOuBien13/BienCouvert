@@ -45,6 +45,7 @@ const geminiService_1 = require("../services/geminiService");
 const db_1 = require("../db");
 const db_2 = __importDefault(require("../db"));
 const pageVectorizationService_1 = require("../services/pageVectorizationService");
+const auth_1 = require("../middleware/auth");
 // -----------------------------------------------------------------------------
 // Routes /policies
 // - Gestion des polices/contrats : création, lecture, mise à jour, suppression.
@@ -77,14 +78,20 @@ async function savePdfToDisk(buffer, subDir, filename) {
 }
 /**
  * Route GET /api/policies
- * Liste toutes les polices d'assurance.
- * Si le paramètre query ?userId=xxx est fourni, filtre les polices pour cet utilisateur uniquement.
- * Sinon, retourne toutes les polices (utile pour l'admin).
+ * Liste les polices de l'utilisateur authentifié.
+ * Les admins peuvent filtrer par ?userId=xxx pour voir les polices d'un autre utilisateur.
  */
-router.get('/', async (req, res) => {
+router.get('/', auth_1.authMiddleware, async (req, res) => {
     try {
-        const userId = req.query.userId;
-        const policies = await storage_1.storage.readPolicies(userId ? parseInt(userId) : undefined);
+        // Les admins peuvent interroger n'importe quel userId via query param
+        let targetUserId;
+        if (req.user.isAdmin && req.query.userId) {
+            targetUserId = parseInt(req.query.userId);
+        }
+        else {
+            targetUserId = req.user.id;
+        }
+        const policies = await storage_1.storage.readPolicies(targetUserId);
         res.json(policies);
     }
     catch (err) {
@@ -100,13 +107,13 @@ router.get('/', async (req, res) => {
  * - JSON avec fileData en base64 (pour upload depuis le frontend)
  * Génère automatiquement un résumé via l'IA si un document est fourni.
  */
-router.post('/', upload.single('file'), async (req, res) => {
+router.post('/', auth_1.authMiddleware, upload.single('file'), async (req, res) => {
     try {
         const body = req.body;
-        // Validation du userId : doit être un entier valide
-        const userId = body.userId ? parseInt(body.userId) : null;
-        if (!userId || isNaN(userId)) {
-            return res.status(400).json({ message: 'Valid userId is required' });
+        // userId toujours extrait du JWT — jamais du body client
+        const userId = req.user.id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Non authentifié' });
         }
         // Validation des codes requis
         if (!body.insurerCode || !body.insurance_type_code) {
@@ -160,12 +167,12 @@ router.post('/', upload.single('file'), async (req, res) => {
  * Permet de modifier toutes les propriétés de la police, y compris le document attaché.
  * Supporte les mêmes modes d'upload que la création (multipart ou JSON base64).
  */
-router.put('/:id', upload.single('file'), async (req, res) => {
+router.put('/:id', auth_1.authMiddleware, upload.single('file'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (isNaN(id))
             return res.status(400).json({ message: 'Invalid policy id' });
-        // Vérifier que la police existe et appartient à l'utilisateur
+        // Vérifier que la police existe
         const existing = await (0, db_1.query)(`SELECT p.*, i.label AS insurer_label
        FROM policies p
        LEFT JOIN insurers i ON i.code = p.insurer_code
@@ -173,6 +180,10 @@ router.put('/:id', upload.single('file'), async (req, res) => {
         if (existing.rows.length === 0)
             return res.status(404).json({ message: 'Not found' });
         const current = existing.rows[0];
+        // Vérification de propriété : seul le propriétaire ou un admin peut modifier
+        if (!req.user?.isAdmin && current.user_id !== req.user.id) {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
         const currentMeta = current.metadata || {};
         const body = req.body;
         // Construire l'objet de mise à jour en fusionnant l'existant avec les nouvelles valeurs
@@ -240,7 +251,7 @@ router.put('/:id', upload.single('file'), async (req, res) => {
  * Options : tableau de libellés correspondant aux guarantee_label des coverage_facts
  *   (ex: ["Bris de glace", "Protection juridique"])
  */
-router.patch('/:id/options', async (req, res) => {
+router.patch('/:id/options', auth_1.authMiddleware, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         if (isNaN(id))
@@ -249,10 +260,14 @@ router.patch('/:id/options', async (req, res) => {
         if (formula === undefined && options === undefined) {
             return res.status(400).json({ message: 'At least one of formula or options is required' });
         }
-        // Récupérer la police existante (valeurs actuelles)
-        const result = await (0, db_1.query)('SELECT metadata FROM policies WHERE id = $1', [id]);
+        // Récupérer la police existante + vérifier la propriété
+        const result = await (0, db_1.query)('SELECT metadata, user_id FROM policies WHERE id = $1', [id]);
         if (result.rows.length === 0)
             return res.status(404).json({ message: 'Policy not found' });
+        // Vérification de propriété
+        if (!req.user?.isAdmin && result.rows[0].user_id !== req.user.id) {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
         const existingMeta = result.rows[0].metadata || {};
         // Fusionner uniquement ce qui est fourni
         const updatedMeta = {
@@ -293,16 +308,20 @@ router.patch('/:id/options', async (req, res) => {
  *   }]
  * }
  */
-router.get('/:id/available-options', async (req, res) => {
+router.get('/:id/available-options', auth_1.authMiddleware, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         if (isNaN(id))
             return res.status(400).json({ message: 'Invalid policy id' });
-        // Récupérer la police avec ses liens CG et ses options souscrites
-        const policyResult = await (0, db_1.query)(`SELECT p.metadata, p.central_cg_id, p.user_cg_id
+        // Récupérer la police avec ses liens CG, ses options souscrites et son propriétaire
+        const policyResult = await (0, db_1.query)(`SELECT p.metadata, p.central_cg_id, p.user_cg_id, p.user_id
        FROM policies p WHERE p.id = $1`, [id]);
         if (policyResult.rows.length === 0)
             return res.status(404).json({ message: 'Policy not found' });
+        // Vérification de propriété
+        if (!req.user?.isAdmin && policyResult.rows[0].user_id !== req.user.id) {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
         const row = policyResult.rows[0];
         const meta = row.metadata || {};
         const formula = meta.formula || null;
@@ -388,10 +407,18 @@ router.get('/:id/available-options', async (req, res) => {
  * Route DELETE /api/policies/:id
  * Suppression d'une police d'assurance par son ID.
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', auth_1.authMiddleware, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        // La suppression se fait directement dans PostgreSQL via DELETE
+        if (isNaN(id))
+            return res.status(400).json({ message: 'Invalid policy id' });
+        // Vérifier la propriété avant suppression
+        const ownerResult = await (0, db_1.query)('SELECT user_id FROM policies WHERE id = $1', [id]);
+        if (ownerResult.rows.length === 0)
+            return res.status(404).json({ message: 'Policy not found' });
+        if (!req.user?.isAdmin && ownerResult.rows[0].user_id !== req.user.id) {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
         await storage_1.storage.deletePolicy(id);
         res.json({ ok: true });
     }
@@ -485,7 +512,7 @@ router.get('/central-cg', async (req, res) => {
  * Ajout d'une nouvelle entrée au référentiel central des CG.
  * Permet d'indexer un nouveau document CG avec ses métadonnées.
  */
-router.post('/central-cg', async (req, res) => {
+router.post('/central-cg', auth_1.authMiddleware, auth_1.adminMiddleware, async (req, res) => {
     try {
         console.log('📥 Réception POST /central-cg, body:', JSON.stringify({ ...req.body, pdfData: req.body.pdfData ? '[PDF DATA]' : undefined }, null, 2));
         // Extraction des champs

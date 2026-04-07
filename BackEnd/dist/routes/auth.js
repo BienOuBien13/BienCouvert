@@ -38,7 +38,7 @@ const authLimiter = (0, express_rate_limit_1.default)({
  * @returns Token JWT signé
  */
 function signToken(user) {
-    return jsonwebtoken_1.default.sign({ id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, JWT_SECRET, { expiresIn: '7d' });
+    return jsonwebtoken_1.default.sign({ id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, isAdmin: user.isAdmin || false, isPartner: user.isPartner || false }, JWT_SECRET, { expiresIn: '7d' });
 }
 /**
  * Middleware d'authentification qui vérifie la validité du token JWT.

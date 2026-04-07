@@ -20,9 +20,9 @@ const cg_1 = __importDefault(require("./routes/cg"));
 const contact_1 = __importDefault(require("./routes/contact"));
 const partner_1 = __importDefault(require("./routes/partner"));
 const sinistre_1 = __importDefault(require("./routes/sinistre"));
+const admin_1 = __importDefault(require("./routes/admin"));
 require("./db"); // Initialisation de la connexion PostgreSQL
 const telemetry_1 = require("./telemetry");
-const geminiMetrics_1 = require("./utils/geminiMetrics");
 const auditService_1 = require("./services/auditService");
 const emailService_1 = require("./services/emailService");
 const dbInitService_1 = require("./services/dbInitService");
@@ -34,9 +34,6 @@ const dbInitService_1 = require("./services/dbInitService");
 // -----------------------------------------------------------------------------
 // Chargement des variables d'environnement depuis le fichier .env
 dotenv_1.default.config();
-// Bypass SSL Zscaler/corporate proxy pour les appels HTTPS sortants (Gemini, etc.)
-// Identique à ce que font les scripts bulk – nécessaire sur les postes avec inspection TLS.
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Initialisation de la télémétrie OTel (avant tout appel Gemini)
 (0, telemetry_1.initTelemetry)();
 // -----------------------------------------------------------------------------
@@ -149,7 +146,22 @@ doubleCsrfProtection, // Middleware pour valider token CSRF
         return req.ip || req.socket.remoteAddress || 'unknown';
     }
 });
-exports.csrfProtection = doubleCsrfProtection;
+// Origines des apps natives Capacitor (non vulnérables au CSRF)
+const NATIVE_APP_ORIGINS = ['capacitor://localhost', 'https://localhost'];
+/**
+ * Middleware CSRF qui bypass la protection pour les apps natives Capacitor.
+ * Les apps mobiles natives ne sont pas vulnérables au CSRF :
+ * - Elles ne s'exécutent pas dans un contexte de navigation web
+ * - L'origine capacitor://localhost / https://localhost ne peut pas être usurpée
+ * - L'authentification JWT Bearer assure déjà la sécurité des requêtes
+ */
+const csrfMiddleware = (req, res, next) => {
+    const origin = req.headers.origin || '';
+    if (NATIVE_APP_ORIGINS.includes(origin))
+        return next();
+    return doubleCsrfProtection(req, res, next);
+};
+exports.csrfProtection = csrfMiddleware;
 // -----------------------------------------------------------------------------
 // Rate Limiting (Protection contre les attaques par force brute)
 // Limite le nombre de requêtes par IP pour prévenir les abus
@@ -213,36 +225,23 @@ app.get('/api/csrf-token', (req, res) => {
 });
 // Montage des routes principales de l'API
 // 🔒 authLimiter est appliqué directement sur les routes /login et /register (dans auth.ts)
-// login et register sont exclus du CSRF : déjà protégés par rate limiting + bcrypt + JWT
+// login, register et forgot-password sont exclus du CSRF : protégés par rate limiting + bcrypt + JWT
 // Les autres routes auth (logout, reset-password, etc.) gardent la protection CSRF
-app.use('/api/auth/login', auth_1.default); // 🔓 Login sans CSRF (mobile-friendly)
-app.use('/api/auth/register', auth_1.default); // 🔓 Register sans CSRF (mobile-friendly)
-app.use('/api/auth/forgot-password', auth_1.default); // 🔓 Forgot password sans CSRF
-app.use('/api/auth', doubleCsrfProtection, auth_1.default); // 🔒 Autres routes auth avec CSRF
-app.use('/api/policies', doubleCsrfProtection, policies_1.default); // 🔒 Policies avec CSRF
-app.use('/api/ai', aiLimiter, doubleCsrfProtection, ai_1.default); // 🔒 AI avec CSRF + rate limit strict
+const NO_CSRF_AUTH_PATHS = ['/login', '/register', '/forgot-password'];
+app.use('/api/auth', (req, res, next) => {
+    if (NO_CSRF_AUTH_PATHS.includes(req.path))
+        return next(); // 🔓 Mobile-friendly : bypass CSRF
+    csrfMiddleware(req, res, next); // 🔒 CSRF pour les autres routes auth
+}, auth_1.default);
+app.use('/api/policies', csrfMiddleware, policies_1.default); // 🔒 Policies avec CSRF
+app.use('/api/ai', aiLimiter, csrfMiddleware, ai_1.default); // 🔒 AI avec CSRF + rate limit strict
 app.use('/api/masterdata', masterdataLimiter, masterdata_1.default); // 📊 Master Data (lecture seule, pas de CSRF)
-app.use('/api/cg', doubleCsrfProtection, cg_1.default); // 📄 Conditions Générales avec CSRF
-app.use('/api/contact', doubleCsrfProtection, contact_1.default); // 📧 Prise de RDV avec CSRF
-app.use('/api/partner', doubleCsrfProtection, partner_1.default); // 🤝 Vue partenaire
-app.use('/api/sinistre', doubleCsrfProtection, sinistre_1.default); // 🛡️ Assistant Sinistre
-// ─── Métriques Gemini (admin) ──────────────────────────────────────────────────
-/**
- * GET /api/admin/token-stats
- * Retourne les statistiques de tokens Gemini pour la session en cours.
- * Accès restreint : endpoint admin uniquement (pas exposé publiquement).
- */
-app.get('/api/admin/token-stats', (req, res) => {
-    res.json((0, geminiMetrics_1.getTokenStats)());
-});
-/**
- * POST /api/admin/token-stats/reset
- * Remet à zéro les compteurs en mémoire (ne remet pas à zéro les métriques OTel).
- */
-app.post('/api/admin/token-stats/reset', (req, res) => {
-    (0, geminiMetrics_1.resetTokenStats)();
-    res.json({ ok: true, message: 'Compteurs remis à zéro' });
-});
+app.use('/api/cg', csrfMiddleware, cg_1.default); // 📄 Conditions Générales avec CSRF
+app.use('/api/contact', csrfMiddleware, contact_1.default); // 📧 Prise de RDV avec CSRF
+app.use('/api/partner', csrfMiddleware, partner_1.default); // 🤝 Vue partenaire
+app.use('/api/sinistre', csrfMiddleware, sinistre_1.default); // 🛡️ Assistant Sinistre
+app.use('/api/admin', csrfMiddleware, admin_1.default); // 🔬 Admin (non-régression, métriques)
+// Les routes /api/admin/token-stats sont définies dans admin.ts (authMiddleware + adminMiddleware)
 // -----------------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '4000', 10); // Port configurable via variable d'environnement
 // Initialisation de la table d'audit au démarrage
