@@ -25,7 +25,7 @@ export interface SmartSearchResult {
   pdf_url:    string | null;
   page_url:   string | null;
   confidence: number;
-  strategy:   'google_cse' | 'gemini_grounding' | 'site_crawl' | 'gemini_knowledge' | 'not_found';
+  strategy:   'google_cse' | 'web_search' | 'gemini_grounding' | 'site_crawl' | 'gemini_knowledge' | 'not_found';
   notes:      string;
 }
 
@@ -71,10 +71,12 @@ async function fetchRaw(url: string, timeout = 12_000, redirectsLeft = MAX_REDIR
             const next = new URL(res.headers.location, url).toString();
             return resolve(fetchRaw(next, timeout, redirectsLeft - 1));
           }
-          if (code < 200 || code >= 400) { req.destroy(); return reject(new Error(`HTTP ${code}`)); }
           let data = '';
           res.on('data', (chunk: string) => { data += chunk; });
-          res.on('end', () => resolve(data));
+          res.on('end', () => {
+            if (code < 200 || code >= 400) return reject(new Error(`HTTP ${code}: ${data.slice(0, 300)}`));
+            resolve(data);
+          });
         },
       );
       req.on('error', reject);
@@ -255,7 +257,85 @@ async function tryGoogleCSE(p: SearchParams): Promise<SmartSearchResult | null> 
         } catch { /* page inaccessible */ }
       }
     } catch (e: any) {
-      console.warn(`[SmartSearch] CSE query failed: ${(e.message || '').slice(0, 100)}`);
+      const msg = (e.message || '').slice(0, 300);
+      if (msg.includes('403')) {
+        console.error(`[SmartSearch] ⚠️  CSE 403 — Enable "Custom Search API" at https://console.cloud.google.com/apis/library/customsearch.googleapis.com | Details: ${msg}`);
+      } else {
+        console.warn(`[SmartSearch] CSE query failed: ${msg}`);
+      }
+    }
+  }
+  return null;
+}
+
+// ─── Stratégie 1b : DuckDuckGo web search (sans API key) ─────────────────────
+
+async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> {
+  const queries = [
+    `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF`,
+    `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf`,
+    `site:${p.website_url ? new URL(p.website_url).hostname : p.insurer_full_name.toLowerCase() + '.fr'} ${p.doc_type_label} ${p.insurance_type_label} PDF`,
+  ];
+
+  for (const q of queries) {
+    try {
+      // DuckDuckGo HTML lite — simple to parse, no CAPTCHA
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
+      const html = await fetchRaw(ddgUrl, 12_000);
+
+      // Extract result URLs from DuckDuckGo HTML
+      const resultUrls: string[] = [];
+      // DDG lite wraps results in <a class="result__a" href="...">
+      const aRx = /class="result__a"[^>]*href="([^"]+)"/gi;
+      let am: RegExpExecArray | null;
+      while ((am = aRx.exec(html)) !== null) {
+        try {
+          // DDG sometimes wraps URLs in redirect: //duckduckgo.com/l/?uddg=ENCODED_URL
+          let href = am[1];
+          const uddgMatch = href.match(/[?&]uddg=([^&]+)/);
+          if (uddgMatch) href = decodeURIComponent(uddgMatch[1]);
+          if (href.startsWith('http')) resultUrls.push(href);
+        } catch { /* */ }
+      }
+
+      // Also extract any plain href to PDF
+      const pdfHrefRx = /href="(https?[^"]+\.pdf[^"]*)"/gi;
+      let pm: RegExpExecArray | null;
+      while ((pm = pdfHrefRx.exec(html)) !== null) {
+        try {
+          let href = pm[1];
+          const uddgMatch = href.match(/[?&]uddg=([^&]+)/);
+          if (uddgMatch) href = decodeURIComponent(uddgMatch[1]);
+          if (href.startsWith('http') && !resultUrls.includes(href)) resultUrls.push(href);
+        } catch { /* */ }
+      }
+
+      if (resultUrls.length === 0) continue;
+
+      // Direct PDF hits from search results
+      const directPdfs = resultUrls.filter(u => u.toLowerCase().includes('.pdf'));
+      if (directPdfs.length > 0) {
+        const best = await pickBestPdf(directPdfs, p);
+        if (best) {
+          return { pdf_url: best.url, page_url: ddgUrl, confidence: 0.90, strategy: 'web_search',
+            notes: `PDF trouvé via recherche web (score ${best.score})` };
+        }
+      }
+
+      // Follow top result pages → extract PDFs
+      for (const pageUrl of resultUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 5)) {
+        try {
+          const pageHtml = await fetchRaw(pageUrl, 8_000);
+          const pdfs = extractPdfLinks(pageHtml, pageUrl);
+          const best = await pickBestPdf(pdfs, p, 15);
+          if (best) {
+            return { pdf_url: best.url, page_url: pageUrl, confidence: 0.85, strategy: 'web_search',
+              notes: `PDF extrait de résultat web ${pageUrl.slice(0, 60)} (score ${best.score})` };
+          }
+        } catch { /* page inaccessible */ }
+      }
+    } catch (e: any) {
+      console.warn(`[SmartSearch] Web search failed: ${(e.message || '').slice(0, 150)}`);
     }
   }
   return null;
@@ -269,10 +349,10 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
 
   const siteHint = p.website_url ? ` sur le site ${p.website_url}` : '';
 
-  // Two attempts with different prompts
+  // Two attempts with different prompts — natural language first, JSON second
   const prompts = [
-    `Trouve le lien direct vers le fichier PDF des ${p.doc_type_label} ${p.insurance_type_label} de ${p.insurer_full_name}${siteHint}. Donne l'URL du PDF (.pdf) et l'URL de la page web où il est disponible. Réponds en JSON: {"pdf_url":"https://...","page_url":"https://...","notes":"..."}`,
-    `Où télécharger le PDF des ${p.doc_type_label} assurance ${p.insurance_type_label} ${p.insurer_full_name} ? Donne tous les liens trouvés. JSON: {"pdf_url":"...", "page_url":"...", "notes":"..."}`,
+    `Cherche sur Google : ${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF\n\nDonne-moi TOUS les liens que tu trouves, surtout les liens vers des fichiers PDF (.pdf) et les pages de téléchargement${siteHint}. Liste chaque URL sur une ligne séparée.`,
+    `Je cherche le document PDF "${p.doc_type_label}" de l'assureur ${p.insurer_full_name} pour l'assurance ${p.insurance_type_label}. Recherche sur internet et donne-moi l'URL exacte du PDF à télécharger. Si tu ne trouves pas le PDF direct, donne l'URL de la page de téléchargement.`,
   ];
 
   for (const prompt of prompts) {
@@ -576,6 +656,11 @@ export async function smartSearchForDocument(params: {
     const cse = await tryGoogleCSE(p);
     if (cse?.pdf_url || cse?.page_url) { console.log(`[SmartSearch]  ✅ CSE ${Date.now() - t0}ms`); return cse; }
   }
+
+  // 1b. DuckDuckGo web search (no API key needed — mimics "Googling it")
+  console.log('[SmartSearch]  → Strat 1b: DuckDuckGo web search');
+  const webSearch = await tryWebSearch(p);
+  if (webSearch?.pdf_url) { console.log(`[SmartSearch]  ✅ WebSearch ${Date.now() - t0}ms`); return webSearch; }
 
   // 2. Gemini + Google Search grounding
   console.log('[SmartSearch]  → Strat 2: Gemini + grounding');
