@@ -268,76 +268,166 @@ async function tryGoogleCSE(p: SearchParams): Promise<SmartSearchResult | null> 
   return null;
 }
 
-// ─── Stratégie 1b : DuckDuckGo web search (sans API key) ─────────────────────
+// ─── Stratégie 1b : Web search multi-moteur (sans API key) ───────────────────
+
+/** Extract all URLs from raw HTML using multiple heuristics */
+function extractAllUrls(html: string): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  // Generic href extraction
+  const rx = /href=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(html)) !== null) {
+    let href = m[1];
+    // DuckDuckGo redirect unwrap
+    const uddg = href.match(/[?&]uddg=([^&]+)/);
+    if (uddg) href = decodeURIComponent(uddg[1]);
+    // Bing redirect unwrap
+    const bingR = href.match(/[?&]r=([^&]+)/);
+    if (bingR && href.includes('bing.com/ck')) { try { href = decodeURIComponent(bingR[1]); } catch {} }
+    if (href.startsWith('http') && !seen.has(href)) { seen.add(href); urls.push(href); }
+  }
+  return urls;
+}
+
+async function searchGoogle(query: string): Promise<string[]> {
+  try {
+    // Google search with french locale — browser-like request
+    const url = `https://www.google.fr/search?q=${encodeURIComponent(query)}&hl=fr&num=15`;
+    const html = await fetchRaw(url, 12_000);
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    // Google wraps results in <a href="/url?q=ENCODED_URL&..."> or direct links
+    const rx = /\/url\?q=(https?[^&"]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(html)) !== null) {
+      try {
+        let href = decodeURIComponent(m[1]);
+        // Remove tracking fragments
+        href = href.split('#')[0];
+        if (!seen.has(href) && !href.includes('google.') && !href.includes('youtube.') && !href.includes('webcache.')) {
+          seen.add(href);
+          urls.push(href);
+        }
+      } catch { /* */ }
+    }
+    // Also extract any direct PDF links
+    const pdfRx = /href="(https?[^"]+\.pdf[^"]*)"/gi;
+    let pm: RegExpExecArray | null;
+    while ((pm = pdfRx.exec(html)) !== null) {
+      try {
+        const href = decodeURIComponent(pm[1]);
+        if (!seen.has(href)) { seen.add(href); urls.push(href); }
+      } catch { /* */ }
+    }
+    console.log(`[SmartSearch]    Google scrape: ${urls.length} URLs found`);
+    return urls;
+  } catch (e: any) {
+    console.log(`[SmartSearch]    Google scrape failed: ${(e.message || '').slice(0, 100)}`);
+    return [];
+  }
+}
+
+async function searchDDG(query: string): Promise<string[]> {
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const html = await fetchRaw(url, 12_000);
+    const urls = extractAllUrls(html).filter(u => !u.includes('duckduckgo.com'));
+    console.log(`[SmartSearch]    DDG: ${urls.length} URLs found`);
+    return urls;
+  } catch (e: any) {
+    console.log(`[SmartSearch]    DDG failed: ${(e.message || '').slice(0, 100)}`);
+    return [];
+  }
+}
+
+async function searchBing(query: string): Promise<string[]> {
+  try {
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=fr&count=15`;
+    const html = await fetchRaw(url, 12_000);
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    // Bing result links are in <a href="https://..."> or redirect via /ck/a
+    const rx = /href="(https?:\/\/(?!www\.bing\.com)[^"]+)"/gi;
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(html)) !== null) {
+      let href = m[1];
+      // Bing redirect unwrap
+      const bingR = href.match(/[?&]r=(https?[^&]+)/);
+      if (bingR) { try { href = decodeURIComponent(bingR[1]); } catch {} }
+      if (!seen.has(href) && !href.includes('bing.com') && !href.includes('microsoft.com')) {
+        seen.add(href);
+        urls.push(href);
+      }
+    }
+    console.log(`[SmartSearch]    Bing: ${urls.length} URLs found`);
+    return urls;
+  } catch (e: any) {
+    console.log(`[SmartSearch]    Bing failed: ${(e.message || '').slice(0, 100)}`);
+    return [];
+  }
+}
 
 async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> {
+  let siteHost: string | null = null;
+  try { if (p.website_url) siteHost = new URL(p.website_url).hostname; } catch { /* */ }
+
+  // Build search queries — same as what a human would type in Google
   const queries = [
     `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF`,
-    `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf`,
-    `site:${p.website_url ? new URL(p.website_url).hostname : p.insurer_full_name.toLowerCase() + '.fr'} ${p.doc_type_label} ${p.insurance_type_label} PDF`,
+    `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF${siteHost ? ` site:${siteHost}` : ''}`,
   ];
 
   for (const q of queries) {
-    try {
-      // DuckDuckGo HTML lite — simple to parse, no CAPTCHA
-      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
-      const html = await fetchRaw(ddgUrl, 12_000);
+    console.log(`[SmartSearch]    query: "${q}"`);
 
-      // Extract result URLs from DuckDuckGo HTML
-      const resultUrls: string[] = [];
-      // DDG lite wraps results in <a class="result__a" href="...">
-      const aRx = /class="result__a"[^>]*href="([^"]+)"/gi;
-      let am: RegExpExecArray | null;
-      while ((am = aRx.exec(html)) !== null) {
-        try {
-          // DDG sometimes wraps URLs in redirect: //duckduckgo.com/l/?uddg=ENCODED_URL
-          let href = am[1];
-          const uddgMatch = href.match(/[?&]uddg=([^&]+)/);
-          if (uddgMatch) href = decodeURIComponent(uddgMatch[1]);
-          if (href.startsWith('http')) resultUrls.push(href);
-        } catch { /* */ }
+    // Try all search engines in parallel
+    const [googleUrls, ddgUrls, bingUrls] = await Promise.all([
+      searchGoogle(q),
+      searchDDG(q),
+      searchBing(q),
+    ]);
+
+    // Merge and deduplicate, keeping order (Google first as most reliable)
+    const seen = new Set<string>();
+    const allUrls: string[] = [];
+    for (const u of [...googleUrls, ...ddgUrls, ...bingUrls]) {
+      if (!seen.has(u)) { seen.add(u); allUrls.push(u); }
+    }
+
+    console.log(`[SmartSearch]    Total unique URLs: ${allUrls.length}`);
+    if (allUrls.length === 0) continue;
+
+    // Direct PDF hits from search results
+    const directPdfs = allUrls.filter(u => u.toLowerCase().includes('.pdf'));
+    console.log(`[SmartSearch]    Direct PDFs: ${directPdfs.length}`);
+    if (directPdfs.length > 0) {
+      const best = await pickBestPdf(directPdfs, p);
+      if (best) {
+        return { pdf_url: best.url, page_url: null, confidence: 0.90, strategy: 'web_search',
+          notes: `PDF trouvé via recherche web (score ${best.score})` };
       }
+    }
 
-      // Also extract any plain href to PDF
-      const pdfHrefRx = /href="(https?[^"]+\.pdf[^"]*)"/gi;
-      let pm: RegExpExecArray | null;
-      while ((pm = pdfHrefRx.exec(html)) !== null) {
-        try {
-          let href = pm[1];
-          const uddgMatch = href.match(/[?&]uddg=([^&]+)/);
-          if (uddgMatch) href = decodeURIComponent(uddgMatch[1]);
-          if (href.startsWith('http') && !resultUrls.includes(href)) resultUrls.push(href);
-        } catch { /* */ }
-      }
-
-      if (resultUrls.length === 0) continue;
-
-      // Direct PDF hits from search results
-      const directPdfs = resultUrls.filter(u => u.toLowerCase().includes('.pdf'));
-      if (directPdfs.length > 0) {
-        const best = await pickBestPdf(directPdfs, p);
+    // Follow top result pages → extract PDFs
+    const pagesToCrawl = allUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 8);
+    console.log(`[SmartSearch]    Following ${pagesToCrawl.length} pages for PDFs…`);
+    for (const pageUrl of pagesToCrawl) {
+      try {
+        const pageHtml = await fetchRaw(pageUrl, 8_000);
+        const pdfs = extractPdfLinks(pageHtml, pageUrl);
+        const best = await pickBestPdf(pdfs, p, 15);
         if (best) {
-          return { pdf_url: best.url, page_url: ddgUrl, confidence: 0.90, strategy: 'web_search',
-            notes: `PDF trouvé via recherche web (score ${best.score})` };
+          return { pdf_url: best.url, page_url: pageUrl, confidence: 0.85, strategy: 'web_search',
+            notes: `PDF extrait de ${pageUrl.slice(0, 60)} (score ${best.score})` };
         }
-      }
-
-      // Follow top result pages → extract PDFs
-      for (const pageUrl of resultUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 5)) {
-        try {
-          const pageHtml = await fetchRaw(pageUrl, 8_000);
-          const pdfs = extractPdfLinks(pageHtml, pageUrl);
-          const best = await pickBestPdf(pdfs, p, 15);
-          if (best) {
-            return { pdf_url: best.url, page_url: pageUrl, confidence: 0.85, strategy: 'web_search',
-              notes: `PDF extrait de résultat web ${pageUrl.slice(0, 60)} (score ${best.score})` };
-          }
-        } catch { /* page inaccessible */ }
-      }
-    } catch (e: any) {
-      console.warn(`[SmartSearch] Web search failed: ${(e.message || '').slice(0, 150)}`);
+      } catch { /* page inaccessible */ }
     }
   }
+
+  console.log('[SmartSearch]    Web search: no PDF found across all engines');
   return null;
 }
 
