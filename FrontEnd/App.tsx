@@ -21,6 +21,7 @@ import CoverageDetailPage from './components/CoverageDetailPage';
 import Footer from './components/Footer';
 import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
+import IngestionJobBadge from './components/IngestionJobBadge';
 import { Policy, Message, User, AppView, UserProfileData } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
@@ -520,6 +521,9 @@ function App() {
       </div>
 
       <BottomNav activeView={activeView} setActiveView={setActiveView} />
+
+      {/* Badge flottant ingestion catalogue — visible sur toutes les pages (admins) */}
+      {user?.isAdmin && <IngestionJobBadge />}
 
       <ClearDataModal 
         isOpen={isClearModalOpen} 

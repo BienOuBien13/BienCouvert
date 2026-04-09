@@ -53,6 +53,9 @@ import {
 import {
   launchSmartIngestion,
   getJobStatus,
+  listRecentJobs,
+  requestStopJob,
+  requestCancelEntry,
 } from '../catalogue/CatalogueIngestionService';
 import type { MatrixStatus } from '../catalogue/types';
 
@@ -650,20 +653,57 @@ router.post('/catalogue/smart-ingest', authMiddleware, adminMiddleware, async (r
   if (!Array.isArray(catalogue_ids) || catalogue_ids.length === 0) {
     return res.status(400).json({ message: 'catalogue_ids requis (tableau non vide)' });
   }
-  if (catalogue_ids.length > 20) {
-    return res.status(400).json({ message: 'Maximum 20 entrées par batch' });
+  if (catalogue_ids.length > 100) {
+    return res.status(400).json({ message: 'Maximum 100 entrées par batch' });
   }
   const ids = catalogue_ids.map(Number).filter(n => !isNaN(n) && n > 0);
   if (ids.length === 0) {
     return res.status(400).json({ message: 'Aucun ID valide fourni' });
   }
   try {
-    const jobId = await launchSmartIngestion(ids);
+    const rawDelay = req.body?.delay_between_entries_ms;
+    const delayMs  = rawDelay != null
+      ? Math.min(Math.max(Number(rawDelay), 1000), 30000)
+      : undefined;
+    const jobId = await launchSmartIngestion(ids, delayMs != null ? { delay_between_entries_ms: delayMs } : undefined);
     res.json({ ok: true, job_id: jobId, message: `Job d'ingestion lancé pour ${ids.length} entrée(s)` });
   } catch (err: any) {
     console.error('[admin/catalogue/smart-ingest]', err.message);
     res.status(500).json({ message: 'Erreur lancement ingestion', error: err.message });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/catalogue/jobs
+// Liste les jobs récents (max 10) — permet de restaurer un job en cours lors d'un rechargement de page
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/catalogue/jobs', authMiddleware, adminMiddleware, (_req: any, res) => {
+  res.json(listRecentJobs());
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/job/:job_id/stop
+// Demande l'arrêt total d'un job (toutes les entrées non traitées → 'cancelled').
+// L'entrée en cours de traitement se termine normalement puis le job s'arrête.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/job/:job_id/stop', authMiddleware, adminMiddleware, (req: any, res) => {
+  const { job_id } = req.params;
+  const ok = requestStopJob(job_id);
+  if (!ok) return res.status(404).json({ message: 'Job non trouvé (peut-être expiré)' });
+  res.json({ ok: true, message: "Arrêt demandé — le job s'arrêtera après l'entrée en cours" });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/catalogue/job/:job_id/cancel-entry/:catalogue_id
+// Annule une seule entrée du job (si elle n'a pas encore démarré son traitement).
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/catalogue/job/:job_id/cancel-entry/:catalogue_id', authMiddleware, adminMiddleware, (req: any, res) => {
+  const { job_id } = req.params;
+  const catalogueId = parseInt(req.params.catalogue_id, 10);
+  if (isNaN(catalogueId)) return res.status(400).json({ message: 'catalogue_id invalide' });
+  const ok = requestCancelEntry(job_id, catalogueId);
+  if (!ok) return res.status(404).json({ message: 'Job non trouvé (peut-être expiré)' });
+  res.json({ ok: true, message: `Annulation demandée pour la ligne #${catalogueId}` });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

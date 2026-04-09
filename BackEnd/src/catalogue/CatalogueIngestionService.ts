@@ -24,7 +24,8 @@ export type EntryStep =
   | 'classifying'
   | 'vectorizing'
   | 'done'
-  | 'error';
+  | 'error'
+  | 'cancelled';
 
 export interface EntryJobStatus {
   catalogue_id:         number;
@@ -48,14 +49,20 @@ export interface CatalogueJob {
   total:      number;
   done:       number;
   errors:     number;
+  cancelled:  number;   // entrées annulées (unitaire ou arrêt total)
   statuses:   EntryJobStatus[];
   completed:  boolean;
+  delay_ms:   number;   // délai inter-documents (ms) pour séquencer la charge
 }
 
 // ─── Registre en mémoire (max 10 jobs conservés) ─────────────────────────────
 
-const jobRegistry = new Map<string, CatalogueJob>();
-const MAX_JOBS_KEPT = 10;
+const jobRegistry    = new Map<string, CatalogueJob>();
+const MAX_JOBS_KEPT  = 10;
+
+// Registres de demandes d'arrêt/annulation (nettoyés en fin de job)
+const stopRegistry   = new Set<string>();                    // job_ids → arrêt total
+const cancelRegistry = new Map<string, Set<number>>();       // job_id → catalogue_ids à sauter
 
 function pruneOldJobs() {
   if (jobRegistry.size <= MAX_JOBS_KEPT) return;
@@ -80,13 +87,40 @@ export function listRecentJobs(): CatalogueJob[] {
     .slice(0, MAX_JOBS_KEPT);
 }
 
+/**
+ * Demande l'arrêt total d'un job (toutes les entrées pending seront marquées 'cancelled').
+ * L'entrée en cours de traitement finit normalement, puis le job s'arrête.
+ */
+export function requestStopJob(jobId: string): boolean {
+  if (!jobRegistry.has(jobId)) return false;
+  stopRegistry.add(jobId);
+  return true;
+}
+
+/**
+ * Demande l'annulation d'une seule entrée catalogue dans un job actif.
+ * L'entrée sera sautée avant son traitement (si elle n'a pas encore démarré).
+ */
+export function requestCancelEntry(jobId: string, catalogueId: number): boolean {
+  if (!jobRegistry.has(jobId)) return false;
+  if (!cancelRegistry.has(jobId)) cancelRegistry.set(jobId, new Set());
+  cancelRegistry.get(jobId)!.add(catalogueId);
+  return true;
+}
+
 // ─── Lancement du job ─────────────────────────────────────────────────────────
 
 /**
  * Lance un job d'ingestion pour une liste d'IDs catalogue.
  * Retourne immédiatement le job_id ; le traitement se fait en arrière-plan.
+ *
+ * @param options.delay_between_entries_ms Délai (ms) entre deux documents (1 000–30 000, défaut 3 000).
+ *   Augmenter cette valeur pour réduire la charge sur la base de données lors de gros batchs.
  */
-export async function launchSmartIngestion(catalogueIds: number[]): Promise<string> {
+export async function launchSmartIngestion(
+  catalogueIds: number[],
+  options?: { delay_between_entries_ms?: number }
+): Promise<string> {
   if (catalogueIds.length === 0) throw new Error('Aucun ID catalogue fourni');
 
   // Charger les entrées catalogue depuis la DB
@@ -123,6 +157,7 @@ export async function launchSmartIngestion(catalogueIds: number[]): Promise<stri
 
   const jobId    = crypto.randomUUID();
   const now      = new Date().toISOString();
+  const delayMs  = Math.min(Math.max(options?.delay_between_entries_ms ?? 3000, 1000), 30000);
 
   const statuses: EntryJobStatus[] = entries.map(e => ({
     catalogue_id:        e.id,
@@ -143,15 +178,17 @@ export async function launchSmartIngestion(catalogueIds: number[]): Promise<stri
     total:      entries.length,
     done:       0,
     errors:     0,
+    cancelled:  0,
     statuses,
     completed:  false,
+    delay_ms:   delayMs,
   };
 
   jobRegistry.set(jobId, job);
   pruneOldJobs();
 
   // Traitement asynchrone
-  runJob(job, entries).catch(e => {
+  runJob(job, entries, delayMs).catch(e => {
     console.error(`[CatalogueJob ${jobId}] Erreur critique:`, e.message);
     job.completed = true;
   });
@@ -175,13 +212,38 @@ async function runJob(
     doc_type: string;
     current_url: string | null;
     discovered_url: string | null;
-  }[]
+  }[],
+  delayMs: number
 ) {
   for (let i = 0; i < entries.length; i++) {
     const e   = entries[i];
     const ejs = job.statuses[i];
 
-    ejs.started_at = new Date().toISOString();
+    // ── Vérifier arrêt total du job ────────────────────────────────────────────
+    if (stopRegistry.has(job.job_id)) {
+      const ts = new Date().toISOString();
+      for (let j = i; j < job.statuses.length; j++) {
+        if (!['done', 'error', 'cancelled'].includes(job.statuses[j].step)) {
+          job.statuses[j].step         = 'cancelled';
+          job.statuses[j].message      = 'Arrêt demandé par l’administrateur';
+          job.statuses[j].completed_at = ts;
+          job.cancelled++;
+        }
+      }
+      break;
+    }
+
+    // ── Vérifier annulation unitaire ─────────────────────────────────────────────
+    const cancelSet = cancelRegistry.get(job.job_id);
+    if (cancelSet?.has(e.id)) {
+      cancelSet.delete(e.id);
+      ejs.step         = 'cancelled';
+      ejs.message      = 'Annulé manuellement';
+      ejs.completed_at = new Date().toISOString();
+      job.cancelled++;
+      continue;
+    }
+
     ejs.step       = 'pending';
     ejs.message    = 'Démarrage…';
 
@@ -294,9 +356,12 @@ async function runJob(
 
     ejs.completed_at = new Date().toISOString();
 
-    // Petit délai entre documents pour éviter le rate limiting
-    if (i < entries.length - 1) await sleep(3000);
+    // Délai séquenceur inter-documents (contrôle la charge DB/Gemini)
+    if (i < entries.length - 1) await sleep(delayMs);
   }
 
+  // Nettoyage des registres de contrôle
+  stopRegistry.delete(job.job_id);
+  cancelRegistry.delete(job.job_id);
   job.completed = true;
 }

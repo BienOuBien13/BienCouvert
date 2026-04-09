@@ -129,6 +129,7 @@ export default function CataloguePanel() {
   const [selected,        setSelected]        = useState<Set<number>>(new Set());
   const [activeJobId,     setActiveJobId]     = useState<string | null>(null);
   const [jobData,         setJobData]         = useState<CatalogueJob | null>(null);
+  const [ingestDelay,     setIngestDelay]     = useState<number>(3000);  // délai séquenceur ms
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [editUrl,         setEditUrl]         = useState<{ id: number; value: string } | null>(null);
   const [showAddModal,    setShowAddModal]    = useState(false);
@@ -168,6 +169,14 @@ export default function CataloguePanel() {
 
   useEffect(() => { loadMatrix(); loadScope(); loadWatchdog(); }, [loadMatrix, loadScope, loadWatchdog]);
 
+  // Recharger la matrice quand le badge global signale la fin d'un job
+  useEffect(() => {
+    const handler = () => setTimeout(() => loadMatrix(), 500);
+    window.addEventListener('ingestion:job-completed', handler);
+    return () => window.removeEventListener('ingestion:job-completed', handler);
+  }, [loadMatrix]);
+
+  // Polling local (utilisé uniquement pour mettre à jour jobData dans le panneau visible ici)
   useEffect(() => {
     if (!activeJobId) return;
     if (pollRef.current) clearInterval(pollRef.current);
@@ -177,7 +186,7 @@ export default function CataloguePanel() {
         if (res.ok) {
           const job: CatalogueJob = await res.json();
           setJobData(job);
-          if (job.completed) { clearInterval(pollRef.current!); pollRef.current = null; setTimeout(() => loadMatrix(), 500); }
+          if (job.completed) { clearInterval(pollRef.current!); pollRef.current = null; }
         }
       } catch { /* silencieux */ }
     }, 2000);
@@ -226,8 +235,10 @@ export default function CataloguePanel() {
   const doSmartIngest = async (ids: number[]) => {
     if (ids.length === 0) { showFlash('err', 'Aucune entrée sélectionnée'); return; }
     try {
-      const d = await apiPost('smart-ingest', { catalogue_ids: ids });
+      const d = await apiPost('smart-ingest', { catalogue_ids: ids, delay_between_entries_ms: ingestDelay });
       setActiveJobId(d.job_id); setJobData(null); setSelected(new Set());
+      // Notifier le badge global (persistance cross-page)
+      window.dispatchEvent(new CustomEvent('ingestion:job-launched', { detail: d.job_id }));
       showFlash('ok', `Job lancé (${ids.length} entrée${ids.length > 1 ? 's' : ''})`);
     } catch (e: any) { showFlash('err', e.message); }
   };
@@ -363,6 +374,17 @@ export default function CataloguePanel() {
             <span className="text-xs font-black text-blue-700">
               {selectedIds.length} sélectionnée{selectedIds.length > 1 ? 's' : ''}
             </span>
+            {/* Sélecteur de cadence d'ingestion */}
+            <select
+              value={ingestDelay}
+              onChange={e => setIngestDelay(Number(e.target.value))}
+              title="Délai entre deux documents (séquencement charge DB)"
+              className="px-2 py-1 text-[10px] font-bold bg-white border border-blue-200 rounded-lg outline-none text-blue-700 cursor-pointer"
+            >
+              <option value={3000}>Rapide (3s)</option>
+              <option value={10000}>Normal (10s)</option>
+              <option value={20000}>Prudent (20s)</option>
+            </select>
             <button onClick={() => doSmartIngest(selectedIds)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:bg-blue-700 shadow-sm">
               <Search className="w-3 h-3" /> Rechercher & Indexer
