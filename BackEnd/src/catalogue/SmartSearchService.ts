@@ -540,7 +540,10 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
       }
 
       // ── C. Extract raw URLs from text ───────────────────────────────────
-      const textUrls: string[] = [...new Set<string>((text.match(/https?:\/\/[^\s"'<>\])}]+/gi) || []))];
+      // Normalise les retours à la ligne dans les URLs (Gemini les coupe parfois)
+      const normalizedText = text.replace(/\n(\s{0,4})(https?:)/g, ' $2').replace(/\*\s+/g, '');
+      const urlRegex = /https?:\/\/[^\s"'<>\])}]+/gi;
+      const textUrls: string[] = [...new Set<string>((normalizedText.match(urlRegex) || []))];
       const textPdfs = textUrls.filter(u => u.toLowerCase().endsWith('.pdf'));
       for (const pdfUrl of textPdfs.slice(0, 5)) {
         if (await isValidPdf(pdfUrl)) {

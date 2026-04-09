@@ -421,23 +421,25 @@ function buildFallbackCoverage(formulaName: string, type: string, summary: strin
  *  - Backoff exponentiel sur 429 / 503.
  */
 // Modèles candidats pour embedding (ordre de préférence)
-const EMBEDDING_MODELS = [
-  'text-embedding-004',
-  'text-multilingual-embedding-002',
-  'embedding-001',
-  'gemini-embedding-exp-03-07',
+// text-embedding-004 et embedding-001 sont sur v1 (stable), les autres sur v1beta
+const EMBEDDING_MODELS: { name: string; version: string }[] = [
+  { name: 'text-embedding-004',             version: 'v1'     },
+  { name: 'text-multilingual-embedding-002', version: 'v1'     },
+  { name: 'embedding-001',                  version: 'v1'     },
+  { name: 'gemini-embedding-exp-03-07',      version: 'v1beta' },
 ];
 
 // Cache du modèle qui fonctionne (évite de re-tester à chaque page)
 // Réinitialisé après 5 min pour éviter que les erreurs transitoires bloquent définitivement.
 let _workingEmbedModel: string | null | undefined = undefined; // undefined = pas encore testé
 let _workingEmbedModelTs  = 0; // timestamp du dernier passage à null
+let _embeddingPermanentlyDisabled = false; // true si tous les modèles ont répondu 404 (non disponibles pour cette clé)
 
-async function callEmbedApi(modelName: string, text: string, retries: number): Promise<number[] | null> {
+async function callEmbedApi(modelName: string, text: string, retries: number, apiVersion = 'v1'): Promise<number[] | null> {
   // Utilise node-fetch pour compatibilité (évite les quirks du fetch natif Node)
   const nodeFetch = require('node-fetch');
   const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
+    `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:embedContent?key=${GEMINI_KEY}`;
 
   // Agent TLS : désactive la vérification de cert si NODE_TLS_REJECT_UNAUTHORIZED=0
   // (nécessaire sur les postes avec proxy Zscaler/corporate SSL inspection)
@@ -466,7 +468,7 @@ async function callEmbedApi(modelName: string, text: string, retries: number): P
       const wait = (5 - retries) * 4000;
       console.warn(`⚠️  Gemini rate limit (${response.status}) — attente ${wait / 1000}s...`);
       await new Promise(r => setTimeout(r, wait));
-      return callEmbedApi(modelName, text, retries - 1);
+      return callEmbedApi(modelName, text, retries - 1, apiVersion);
     }
     return null;
   }
@@ -501,7 +503,10 @@ export const generateEmbedding = async (text: string, retries = 4): Promise<numb
     return null;
   }
 
-  // Si on sait déjà qu'aucun modèle ne marche — réessayer toutes les 5 min (erreur transiente)
+  // Désactivation permanente : tous les modèles ont répondu 404 (indisponibles pour cette clé)
+  if (_embeddingPermanentlyDisabled) return null;
+
+  // Si on sait déjà qu'aucun modèle ne marche — réessayer toutes les 5 min (erreur transiente 429/503)
   if (_workingEmbedModel === null) {
     if (Date.now() - _workingEmbedModelTs < 5 * 60 * 1000) return null;
     _workingEmbedModel = undefined; // réinitialiser pour re-tenter
@@ -509,31 +514,43 @@ export const generateEmbedding = async (text: string, retries = 4): Promise<numb
 
   // Utiliser directement le modèle connu si déjà trouvé
   const modelsToTry = _workingEmbedModel
-    ? [_workingEmbedModel]
+    ? [EMBEDDING_MODELS.find(m => m.name === _workingEmbedModel) ?? EMBEDDING_MODELS[0]]
     : EMBEDDING_MODELS;
 
-  for (const name of modelsToTry) {
+  let allWere404 = true;
+  for (const { name, version } of modelsToTry) {
     try {
-      const values = await callEmbedApi(name, text, retries);
+      const values = await callEmbedApi(name, text, retries, version);
       if (values) {
         if (_workingEmbedModel === undefined) {
-          console.log(`✅ Modèle embedding actif: ${name} (${values.length} dims)`);
+          console.log(`✅ Modèle embedding actif: ${name} (${version}, ${values.length} dims)`);
           _workingEmbedModel = name;
         }
         return values;
       }
+      // callEmbedApi retourne null pour 404 ET pour 429 — on distingue via le log déjà émis
+      // On considère non-404 si le modèle était le modèle connu (cache hit qui échoue = transitoire)
+      if (_workingEmbedModel !== undefined) allWere404 = false;
       if (_workingEmbedModel === undefined) {
         console.warn(`   ⚠️  ${name} → indisponible`);
       }
     } catch (err) {
       console.error(`generateEmbedding [${name}]:`, err);
+      allWere404 = false;
     }
   }
 
   if (_workingEmbedModel === undefined) {
-    console.error('❌ Aucun modèle embedding disponible pour cette clé API — les pages seront indexées sans vecteur (recherche sémantique désactivée).');
-    _workingEmbedModel = null; // ne plus réessayer (jusqu'au prochain timeout de 5 min)
-    _workingEmbedModelTs = Date.now();
+    if (allWere404) {
+      // Tous ont répondu 404 : modèles embedding non disponibles pour cette clé (permanent)
+      console.error('❌ Embedding désactivé définitivement — modèles non accessibles avec cette clé API (plan AI Studio Free). Les pages sont indexées sans vecteur, la recherche sémantique est désactivée.');
+      _embeddingPermanentlyDisabled = true;
+    } else {
+      // Erreurs transitoires (429/503) — réessayer dans 5 min
+      console.error('❌ Aucun modèle embedding disponible (erreur transitoire) — réessai dans 5 min.');
+      _workingEmbedModel = null;
+      _workingEmbedModelTs = Date.now();
+    }
   }
   return null;
 };
