@@ -220,7 +220,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
         }
         return rawOpts || {};
       })(),
-      resume_court: cg.metadata?.resume_court || cg.metadata?.description || ''
+      resume_court: cg.metadata?.resume_court || cg.metadata?.description || '',
       insurer_name: cg.metadata?.insurer_name || '',
       insurance_type_name: cg.metadata?.insurance_type_name || ''
     };
@@ -341,7 +341,7 @@ router.get('/central/documents', async (req: Request, res: Response) => {
       url: row.url,
       target_filename: row.target_filename,
       formules: deduplicateFormulas(row.metadata?.indexedFormulas || row.metadata?.formula_hints || row.metadata?.formules || []),
-      resume_court: row.metadata?.resume_court || row.metadata?.description || ''
+      resume_court: row.metadata?.resume_court || row.metadata?.description || '',
       insurer_name: row.metadata?.insurer_name || '',
       insurance_type_name: row.metadata?.insurance_type_name || ''
     }));
