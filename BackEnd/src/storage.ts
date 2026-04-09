@@ -390,7 +390,7 @@ export const storage = {
       insurerLogo: row.insurer_logo,
       insuranceTypeLabel: row.type_label || row.insurance_type_code || '',
       productName: row.metadata?.productName || 'Document CG',
-      indexedFormulas: row.metadata?.indexedFormulas || [],
+      indexedFormulas: row.metadata?.indexedFormulas || row.metadata?.formula_hints || [],
       indexedOptions: row.metadata?.indexedOptions || [],
       documentUrl: row.url,
       vectorizedAt: row.vectorized_at || null,

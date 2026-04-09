@@ -205,18 +205,25 @@ async function runJob(
         if (searchRes.pdf_url || searchRes.page_url) {
           targetUrl      = searchRes.pdf_url || searchRes.page_url!;
           ejs.found_url  = targetUrl;
-          ejs.message    = `URL trouvée (${searchRes.strategy}, confiance ${Math.round(searchRes.confidence * 100)}%)`;
+          ejs.message    = `URL trouvée via "${searchRes.strategy}" (confiance ${Math.round(searchRes.confidence * 100)}%) — ${searchRes.notes}`;
 
           // Mettre à jour discovered_url dans la DB
           await pool.query(
-            `UPDATE document_catalogue SET discovered_url = $1, discovered_at = NOW(), matrix_status = 'discovered', updated_at = NOW() WHERE id = $2`,
-            [targetUrl, e.id]
+            `UPDATE document_catalogue SET discovered_url = $1, discovered_at = NOW(), matrix_status = 'discovered',
+             notes = $2, updated_at = NOW() WHERE id = $3`,
+            [targetUrl, `Stratégie: ${searchRes.strategy} | Confiance: ${Math.round(searchRes.confidence * 100)}% | ${searchRes.notes}`, e.id]
           );
         } else {
+          const noFoundReason = searchRes.notes || 'Aucune stratégie n\'a trouvé de PDF';
           ejs.step         = 'error';
-          ejs.message      = 'Aucune URL trouvée. Renseignez-la manuellement.';
+          ejs.message      = `Aucune URL trouvée. ${noFoundReason}. Renseignez-la manuellement.`;
           ejs.completed_at = new Date().toISOString();
           job.errors++;
+          // Persister la raison en DB
+          await pool.query(
+            `UPDATE document_catalogue SET matrix_status = 'not_found', notes = $1, updated_at = NOW() WHERE id = $2`,
+            [ejs.message.slice(0, 500), e.id]
+          ).catch(() => {});
           continue;
         }
       } catch (err: any) {
@@ -253,10 +260,23 @@ async function runJob(
         ejs.central_cg_id = result.central_cg_id;
         ejs.pages_count   = result.pages;
         job.done++;
+        // Persister le succès dans cg_ingestion_jobs
+        await pool.query(
+          `INSERT INTO cg_ingestion_jobs (run_id, insurer_code, insurance_type_code, source_url, status, pages_count, result_central_cg_id, completed_at)
+           VALUES ($1, $2, $3, $4, 'done', $5, $6, NOW())
+           ON CONFLICT DO NOTHING`,
+          [job.job_id, e.insurer_code, e.insurance_type_code, targetUrl, result.pages ?? 0, result.central_cg_id ?? null]
+        ).catch(() => {});
       } else {
         ejs.step    = 'error';
         ejs.message = result.error ?? 'Erreur inconnue';
         job.errors++;
+        await pool.query(
+          `INSERT INTO cg_ingestion_jobs (run_id, insurer_code, insurance_type_code, source_url, status, error_message, completed_at)
+           VALUES ($1, $2, $3, $4, 'error', $5, NOW())
+           ON CONFLICT DO NOTHING`,
+          [job.job_id, e.insurer_code, e.insurance_type_code, targetUrl, (result.error ?? '').slice(0, 500)]
+        ).catch(() => {});
       }
     } catch (err: any) {
       ejs.step    = 'error';

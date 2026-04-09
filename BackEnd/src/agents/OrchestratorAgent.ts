@@ -29,7 +29,8 @@ import { analysisAgent } from './AnalysisAgent';
 import { advisorAgent } from './AdvisorAgent';
 import { claimsAgent } from './ClaimsAgent';
 import { optimizerAgent, PipelineMetrics } from './OptimizerAgent';
-import { getAiClient } from '../services/geminiService';
+import { getAiClient, resolveCoverageFacts } from '../services/geminiService';
+import { storage } from '../storage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de formatage
@@ -219,9 +220,16 @@ export class OrchestratorAgent {
       // ── QUESTION DE GARANTIE ────────────────────────────────────────────
       case 'QUESTION_GARANTIE':
       case 'CONSEIL': {
-        // RAG + Analysis en séquence, puis Advisor
+        // RAG + coverage_facts en parallèle (indépendants)
         logAgent(ragAgent.name);
-        const ragResult = await ragAgent.search({ query: message, userId, policyIds, insurers });
+        const [ragResult, coverageFacts] = await Promise.all([
+          ragAgent.search({ query: message, userId, policyIds, insurers }),
+          resolveCoverageFacts(storage, policies, 'Orchestrator').catch(() => []),
+        ]);
+
+        if (coverageFacts.length > 0) {
+          console.log(`[Orchestrator] ${coverageFacts.length} faits structurés chargés depuis coverage_facts`);
+        }
 
         // Optimisation circuit
         const metrics: PipelineMetrics = {
@@ -234,7 +242,7 @@ export class OrchestratorAgent {
         circuitOptimizations.push(...optimizerAgent.analyzeCircuit(metrics));
 
         logAgent(analysisAgent.name);
-        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile });
+        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts });
 
         let advisor: AdvisorResult | undefined;
         if (intent.intent === 'CONSEIL' || analysis.lacunes.length > 0) {

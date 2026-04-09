@@ -212,7 +212,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
       version: cg.version,
       detail: cg.detail,
       url: cg.url,
-      formules: deduplicateFormulas(cg.metadata?.indexedFormulas || cg.metadata?.formules || []),
+      formules: deduplicateFormulas(cg.metadata?.indexedFormulas || cg.metadata?.formula_hints || cg.metadata?.formules || []),
       options: (() => {
         const rawOpts = cg.metadata?.options || cg.metadata?.indexedOptions || {};
         if (Array.isArray(rawOpts)) {
@@ -220,7 +220,7 @@ router.get('/central/by-type-and-insurer', async (req: Request, res: Response) =
         }
         return rawOpts || {};
       })(),
-      resume_court: cg.metadata?.resume_court || cg.metadata?.description || '',
+      resume_court: cg.metadata?.resume_court || cg.metadata?.description || ''
       insurer_name: cg.metadata?.insurer_name || '',
       insurance_type_name: cg.metadata?.insurance_type_name || ''
     };
@@ -340,8 +340,8 @@ router.get('/central/documents', async (req: Request, res: Response) => {
       detail: row.detail,
       url: row.url,
       target_filename: row.target_filename,
-      formules: deduplicateFormulas(row.metadata?.indexedFormulas || row.metadata?.formules || []),
-      resume_court: row.metadata?.resume_court || row.metadata?.description || '',
+      formules: deduplicateFormulas(row.metadata?.indexedFormulas || row.metadata?.formula_hints || row.metadata?.formules || []),
+      resume_court: row.metadata?.resume_court || row.metadata?.description || ''
       insurer_name: row.metadata?.insurer_name || '',
       insurance_type_name: row.metadata?.insurance_type_name || ''
     }));

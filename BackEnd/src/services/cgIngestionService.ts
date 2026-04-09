@@ -790,10 +790,11 @@ export async function runIngestion(scope: IngestionScope): Promise<{
                 fileName,
                 pdfBase64,
                 JSON.stringify({
-                  formula_hints: classif.formula_hints,
-                  detail: classif.detail,
-                  ingested_at: new Date().toISOString(),
-                  source_url: candidate.url,
+                  indexedFormulas:  classif.formula_hints ?? [],
+                  formula_hints:    classif.formula_hints ?? [],
+                  detail:           classif.detail,
+                  ingested_at:      new Date().toISOString(),
+                  source_url:       candidate.url,
                   ingestion_run_id: runId,
                 }),
               ]
@@ -1000,12 +1001,13 @@ export async function ingestDocumentForCatalogue(params: {
         fileName,
         pdfBase64,
         JSON.stringify({
-          formula_hints:  classif.formula_hints,
-          detail:         classif.detail,
-          confidence:     classif.confidence,
-          ingested_at:    new Date().toISOString(),
-          source_url:     pdfUrl,
-          catalogue_id:   catalogueId,
+          indexedFormulas: classif.formula_hints ?? [],
+          formula_hints:   classif.formula_hints ?? [],
+          detail:          classif.detail,
+          confidence:      classif.confidence,
+          ingested_at:     new Date().toISOString(),
+          source_url:      pdfUrl,
+          catalogue_id:    catalogueId,
         }),
       ]
     );

@@ -62,6 +62,23 @@ export interface AnalysisInput {
   ragResult: RAGResult;
   policies: Policy[];
   userProfile?: UserProfileData;
+  /** Faits structurés garantie×formule depuis coverage_facts (source primaire) */
+  coverageFacts?: CoverageFact[];
+}
+
+/** Fait structuré issu de coverage_facts ou user_coverage_facts */
+export interface CoverageFact {
+  guarantee_label:  string;
+  guarantee_key:    string;
+  formula_label:    string;
+  formula_key:      string;
+  coverage_status:  string;   // 'included' | 'excluded' | 'optional' | 'not_applicable'
+  coverage_amount:  string | null;
+  franchise:        string | null;
+  coverage_notes:   string | null;
+  source_page_number?: number;
+  insurer_label?:   string;
+  pdf_url?:         string;
 }
 
 export interface CoverageAnalysisResult {

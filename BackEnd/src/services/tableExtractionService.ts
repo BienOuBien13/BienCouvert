@@ -84,7 +84,15 @@ function normalizeFormulaKey(label: string): string {
 type ParsedStatus = {
   status: 'included' | 'optional' | 'excluded' | 'not_applicable';
   amount: string | null;
+  franchise: string | null;
 };
+
+/** Extrait un montant de franchise depuis le texte d'une cellule */
+function extractFranchise(text: string): string | null {
+  const m = text.match(/franchise[\s:]+([\d\s.,]+[€$]?)/i)
+    || text.match(/([\d\s.,]+[€$])\s+franchise/i);
+  return m ? m[1].trim() : null;
+}
 
 function parseStatus(
   symbol: string,
@@ -94,17 +102,17 @@ function parseStatus(
   const s = raw.toLowerCase();
 
   // Vide
-  if (!s) return { status: 'not_applicable', amount: null };
+  if (!s) return { status: 'not_applicable', amount: null, franchise: null };
 
   // ── Légende prioritaire : si le symbole brut correspond à une clé de la légende ──
   if (legend) {
     const legendVal = legend[raw] || legend[s] || legend[raw.toUpperCase()];
     if (legendVal) {
       const lv = legendVal.toLowerCase();
-      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) return { status: 'included', amount: null };
-      if (/exclu|non|no|néant|neant|excluded/.test(lv)) return { status: 'excluded', amount: null };
-      if (/option|en sus|optionnel|optional/.test(lv)) return { status: 'optional', amount: null };
-      if (/n\/a|sans objet|not.applicable/.test(lv)) return { status: 'not_applicable', amount: null };
+      if (/inclu|garanti|compris|couvert|oui|yes|included/.test(lv)) return { status: 'included', amount: null, franchise: null };
+      if (/exclu|non|no|néant|neant|excluded/.test(lv)) return { status: 'excluded', amount: null, franchise: null };
+      if (/option|en sus|optionnel|optional/.test(lv)) return { status: 'optional', amount: null, franchise: null };
+      if (/n\/a|sans objet|not.applicable/.test(lv)) return { status: 'not_applicable', amount: null, franchise: null };
     }
   }
 
@@ -415,16 +423,13 @@ export function tableToFacts(
       }
 
       facts.push({
-        // Clés tronquées à 90 car. : safe pour VARCHAR(100) avant migration 019
-        // (après migration les colonnes sont TEXT, la troncature devient un garde-fou)
         guarantee_key:   truncate(guaranteeKey,   90),
         guarantee_label: truncate(guaranteeLabel, 90),
         formula_key:     truncate(formulaKey,     90),
         formula_label:   truncate(formulaLabel,   90),
         coverage_status: coverageStatus,
-        // Tronqué à 200 : protection contre les cellules très longues (ex: descriptions CPAM)
-        // avant migration 019 qui widend la colonne en TEXT
         coverage_amount: parsed.amount ? truncate(parsed.amount, 200) : undefined,
+        franchise:       parsed.franchise ? truncate(parsed.franchise, 100) : undefined,
       });
     });
   });
@@ -455,10 +460,10 @@ export async function saveCoverageFacts(
           insurer_code, insurance_type_code, central_cg_id,
           guarantee_key, guarantee_label,
           formula_key, formula_label,
-          coverage_status, coverage_amount,
+          coverage_status, coverage_amount, franchise,
           source_page_id, source_page_number,
           extraction_confidence
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (insurer_code, insurance_type_code, central_cg_id, guarantee_key, formula_key)
         DO UPDATE SET
           guarantee_label = EXCLUDED.guarantee_label,
@@ -469,8 +474,8 @@ export async function saveCoverageFacts(
               THEN coverage_facts.coverage_status
             ELSE EXCLUDED.coverage_status
           END,
-          -- Conserver le montant existant si le nouveau est NULL
           coverage_amount = COALESCE(EXCLUDED.coverage_amount, coverage_facts.coverage_amount),
+          franchise = COALESCE(EXCLUDED.franchise, coverage_facts.franchise),
           source_page_id = EXCLUDED.source_page_id,
           source_page_number = EXCLUDED.source_page_number,
           extraction_confidence = EXCLUDED.extraction_confidence,
@@ -485,6 +490,7 @@ export async function saveCoverageFacts(
           fact.formula_label,
           fact.coverage_status,
           fact.coverage_amount ?? null,
+          fact.franchise ?? null,
           sourcePageId,
           sourcePageNumber,
           0.85
