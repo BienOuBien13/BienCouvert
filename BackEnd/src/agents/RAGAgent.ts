@@ -122,7 +122,10 @@ export class RAGAgent {
             }
           }
         } catch (e: any) {
-          console.warn('[RAGAgent] searchPolicyEmbeddings error:', e.message);
+          // relation "policy_embeddings" does not exist → table not yet created, skip silently
+          if (!e.message?.includes('does not exist')) {
+            console.warn('[RAGAgent] searchPolicyEmbeddings error:', e.message);
+          }
         }
       }
 
@@ -148,6 +151,18 @@ export class RAGAgent {
         }
       } catch (e: any) {
         console.warn('[RAGAgent] searchCentralCg error:', e.message);
+      }
+
+      // Si la recherche vectorielle ne retourne rien (embeddings en DB encore NULL ou pas encore re-vectorisés),
+      // on déclenche quand même le fallback full-text pour garantir un contexte à l'assistant.
+      if (cgChunks.length === 0) {
+        console.log('[RAGAgent] 0 chunks vectoriels CG → fallback full-text ILIKE');
+        const textChunks = await textSearchCentralCg(
+          userQuery,
+          insurers.length > 0 ? insurers : undefined,
+          limit,
+        );
+        cgChunks.push(...textChunks);
       }
     } else {
       // ── Fallback full-text (embedding indisponible) ────────────────────────

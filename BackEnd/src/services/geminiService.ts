@@ -641,7 +641,7 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
 
         if (conditions && params.length > 0) {
           const cgLookup = await dbQuery(
-            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            `SELECT cg.id FROM central_cg cg WHERE (${conditions}) AND cg.status = 'active' LIMIT 10`,
             params
           );
           const found = cgLookup.rows.map((r: any) => Number(r.id));
@@ -949,14 +949,13 @@ export const sendMessageToAssistant = async (message: string, policies: Policy[]
             return clause;
           }).join(' OR ');
           const cgLookup = await dbQuery(
-            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            `SELECT cg.id FROM central_cg cg WHERE (${conditions}) AND cg.status = 'active' LIMIT 10`,
             params
           );
           const foundIds = cgLookup.rows.map((r: any) => Number(r.id));
           centralCgIds = [...new Set([...centralCgIds, ...foundIds])];
           if (foundIds.length > 0) console.log(`🔍 Fallback CG résolu par insurer+type: [${foundIds.join(', ')}]`);
         } catch (lookupErr) {
-          console.warn('⚠️ Échec fallback CG lookup (insurer+type):', lookupErr);
         }
       }
 
@@ -1502,7 +1501,7 @@ export const sendMessageToAssistantStream = async (
             return clause;
           }).join(' OR ');
           const cgLookup = await dbQuery(
-            `SELECT id FROM central_cg WHERE (${conditions}) AND status = 'active' LIMIT 10`,
+            `SELECT cg.id FROM central_cg cg WHERE (${conditions}) AND cg.status = 'active' LIMIT 10`,
             params
           );
           const foundIds = cgLookup.rows.map((r: any) => Number(r.id));
