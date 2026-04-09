@@ -473,6 +473,8 @@ async function callEmbedApi(modelName: string, text: string, retries: number): P
 
   if (response.status === 404 || response.status === 400) {
     // Modèle indisponible pour cette clé/région
+    const body = await response.text().catch(() => '');
+    console.warn(`   ⚠️  ${modelName} → HTTP ${response.status}: ${body.slice(0, 150)}`);
     return null;
   }
 

@@ -193,7 +193,8 @@ const apiLimiter = rateLimit({
     /\/api\/auth\/me/.test(req.originalUrl) ||
     /\/api\/policies\/central-cg\/[^/]+\/vectorization-status/.test(req.originalUrl) ||
     /\/api\/policies\/central-cg\/[^/]+\/reprocess/.test(req.originalUrl) ||
-    /\/api\/masterdata\//.test(req.originalUrl)
+    /\/api\/masterdata\//.test(req.originalUrl) ||
+    (req.method === 'GET' && /\/api\/cg\/central\//.test(req.originalUrl))
 });
 
 // Limiter strict pour les routes IA (prévention des coûts API Gemini incontrôlés)

@@ -761,13 +761,6 @@ export async function smartSearchForDocument(params: {
   const t0 = Date.now();
   console.log(`[SmartSearch] 🔍 ${p.insurer_code}/${p.insurance_type_code}/${p.doc_type}`);
 
-  // 1. Google Custom Search API (direct Google results — most reliable)
-  if (GOOGLE_CSE_KEY && GOOGLE_CSE_CX) {
-    console.log('[SmartSearch]  → Strat 1: Google Custom Search API');
-    const cse = await tryGoogleCSE(p);
-    if (cse?.pdf_url || cse?.page_url) { console.log(`[SmartSearch]  ✅ CSE ${Date.now() - t0}ms`); return cse; }
-  }
-
   // 1b. DuckDuckGo web search (no API key needed — mimics "Googling it")
   console.log('[SmartSearch]  → Strat 1b: DuckDuckGo web search');
   const webSearch = await tryWebSearch(p);
