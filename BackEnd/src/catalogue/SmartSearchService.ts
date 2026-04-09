@@ -431,22 +431,28 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
   return null;
 }
 
-// ─── Stratégie 2 : Gemini + Google Search grounding (amélioré) ───────────────
+// ─── Stratégie 2 : Gemini + Google Search grounding ─────────────────────────
 
 async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | null> {
   const ai = getAiClient();
   if (!ai) return null;
 
-  const siteHint = p.website_url ? ` sur le site ${p.website_url}` : '';
+  const site = p.website_url ?? '';
 
-  // Two attempts with different prompts — natural language first, JSON second
+  // Prompts designed to force Gemini to actually search and return URLs.
+  // Key insight: ask for a LIST of URLs, not a description — longer output = more data.
   const prompts = [
-    `Cherche sur Google : ${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF\n\nDonne-moi TOUS les liens que tu trouves, surtout les liens vers des fichiers PDF (.pdf) et les pages de téléchargement${siteHint}. Liste chaque URL sur une ligne séparée.`,
-    `Je cherche le document PDF "${p.doc_type_label}" de l'assureur ${p.insurer_full_name} pour l'assurance ${p.insurance_type_label}. Recherche sur internet et donne-moi l'URL exacte du PDF à télécharger. Si tu ne trouves pas le PDF direct, donne l'URL de la page de téléchargement.`,
+    // Prompt A: short, direct, triggers Google Search grounding immediately
+    `Search: "${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf"\n\nList ALL URLs you find, especially .pdf links and download pages from ${site}. One URL per line. No explanation needed.`,
+    // Prompt B: if A fails, French phrasing with explicit site
+    `Trouve le PDF "${p.doc_type_label}" assurance ${p.insurance_type_label} de ${p.insurer_full_name}${site ? ` (${site})` : ''}. Liste toutes les URLs trouvées (PDF et pages de téléchargement), une par ligne.`,
+    // Prompt C: broader fallback
+    `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF télécharger. Liste les URLs trouvées.`,
   ];
 
-  for (const prompt of prompts) {
+  for (const [pi, prompt] of prompts.entries()) {
     try {
+      console.log(`[SmartSearch]    Grounding prompt ${pi + 1}/${prompts.length}`);
       const model  = ai.getGenerativeModel(
         { model: 'gemini-2.5-flash', tools: [{ googleSearch: {} }] as any },
         'catalogue_grounding_search',
@@ -454,15 +460,24 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
       const result = await model.generateContent([prompt]);
       const resp   = result.response;
       const text   = resp.text().trim();
+      console.log(`[SmartSearch]    Grounding text (${text.length} chars): ${text.slice(0, 200)}`);
 
       // ── A. Extract URLs from grounding metadata (most reliable) ─────────
       const groundingUrls: string[] = [];
       try {
         const cand = resp.candidates?.[0];
         const gm   = cand?.groundingMetadata as any;
+        // Log the full metadata keys to diagnose empty responses
+        if (gm) console.log(`[SmartSearch]    Grounding metadata keys: ${Object.keys(gm).join(', ')}`);
+        else     console.log('[SmartSearch]    Grounding metadata: NONE');
         if (gm?.groundingChunks) {
           for (const ch of gm.groundingChunks) {
             if (ch?.web?.uri) groundingUrls.push(ch.web.uri);
+          }
+        }
+        if (gm?.groundingSupports) {
+          for (const gs of gm.groundingSupports) {
+            if (gs?.web?.uri) groundingUrls.push(gs.web.uri);
           }
         }
         if (gm?.supportingSearchResults) {
@@ -470,6 +485,12 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
             if (sr?.uri) groundingUrls.push(sr.uri);
           }
         }
+        if (gm?.searchEntryPoint?.renderedContent) {
+          // sometimes PDFs are embedded in the rendered HTML
+          const rcPdfs = (gm.searchEntryPoint.renderedContent.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []);
+          groundingUrls.push(...rcPdfs);
+        }
+        console.log(`[SmartSearch]    Grounding URLs from metadata: ${groundingUrls.length} → ${groundingUrls.slice(0, 3).join(' | ')}`);
       } catch { /* metadata missing */ }
 
       // Check grounding URLs (PDF direct hits)
