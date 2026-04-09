@@ -423,6 +423,7 @@ function buildFallbackCoverage(formulaName: string, type: string, summary: strin
 // Modèles candidats pour embedding (ordre de préférence)
 // text-embedding-004 et embedding-001 sont sur v1 (stable), les autres sur v1beta
 const EMBEDDING_MODELS: { name: string; version: string }[] = [
+  { name: 'gemini-embedding-001',            version: 'v1beta' }, // ✅ confirmé fonctionnel avec la clé AI Studio Free
   { name: 'text-embedding-004',             version: 'v1'     },
   { name: 'text-multilingual-embedding-002', version: 'v1'     },
   { name: 'embedding-001',                  version: 'v1'     },
@@ -454,7 +455,8 @@ async function callEmbedApi(modelName: string, text: string, retries: number, ap
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content: { parts: [{ text: text.slice(0, 8192) }] }
+        content: { parts: [{ text: text.slice(0, 8192) }] },
+        outputDimensionality: 768,
       }),
       ...(_tlsAgent ? { agent: _tlsAgent } : {})
     });
