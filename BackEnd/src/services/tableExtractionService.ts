@@ -84,7 +84,7 @@ function normalizeFormulaKey(label: string): string {
 type ParsedStatus = {
   status: 'included' | 'optional' | 'excluded' | 'not_applicable';
   amount: string | null;
-  franchise: string | null;
+  franchise?: string | null;
 };
 
 /** Extrait un montant de franchise depuis le texte d'une cellule */
