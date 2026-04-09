@@ -15,8 +15,10 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const CACHE_TTL = parseInt(process.env.CACHE_TTL || '1800', 10); // 30 min
 
 let redis: Redis | null = null;
+let _redisDisabledUntil = 0; // timestamp : ne pas réessayer avant cette date
 
 function getRedis(): Redis | null {
+  if (Date.now() < _redisDisabledUntil) return null; // cooldown actif
   if (redis) return redis;
   try {
     redis = new Redis(REDIS_URL, {
@@ -26,8 +28,12 @@ function getRedis(): Redis | null {
     });
     redis.on('connect', () => console.log('✅ Redis connecté —', REDIS_URL));
     redis.on('error', (err) => {
-      console.warn(`⚠️  Redis erreur (cache désactivé): ${err.message}`);
-      redis = null; // Reset pour permettre une nouvelle tentative plus tard
+      if (Date.now() >= _redisDisabledUntil) {
+        // Premier échec : log + cooldown 5 min
+        console.warn(`⚠️  Redis indisponible (cache désactivé 5 min): ${err.message}`);
+        _redisDisabledUntil = Date.now() + 5 * 60 * 1000;
+      }
+      redis = null; // Reset connexion
     });
     return redis;
   } catch {
