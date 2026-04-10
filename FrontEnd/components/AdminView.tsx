@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import ControlCheckPage from './ControlCheckPage';
 import CataloguePanel from './CataloguePanel';
+import IngestionMonitorPanel from './IngestionMonitorPanel';
 import TokenStatsPanel from './TokenStatsPanel';
 import { fetchCsrfToken } from '../services/authService';
 
@@ -1382,7 +1383,17 @@ export const AdminView: React.FC = () => {
       )}
 
       {activeTab === 'catalogue' && (
-        <CataloguePanel />
+        <div className="space-y-6">
+          <CataloguePanel />
+          {/* ── Monitoring des jobs d'ingestion ── */}
+          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4">
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block"></span>
+              Monitoring des jobs d'ingestion
+            </h3>
+            <IngestionMonitorPanel />
+          </div>
+        </div>
       )}
 
       {activeTab === 'finops' && (

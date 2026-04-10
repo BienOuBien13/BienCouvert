@@ -322,6 +322,42 @@ async function runJob(
         ejs.central_cg_id = result.central_cg_id;
         ejs.pages_count   = result.pages;
         job.done++;
+
+        // ── Mettre à jour indexedFormulas depuis les vrais labels de coverage_facts ──
+        // Le CLASSIFIER voit parfois des en-têtes de prix (ex: "Montant T.T.C.") au lieu
+        // des noms de formules. Les vrais labels sont extraits par le VECTORIZER depuis
+        // les tableaux de garanties → on les lit et on met à jour metadata.indexedFormulas.
+        if (result.central_cg_id) {
+          try {
+            const formulasRes = await pool.query<{ formula_label: string }>(
+              `SELECT DISTINCT formula_label
+               FROM coverage_facts
+               WHERE central_cg_id = $1
+                 AND formula_label IS NOT NULL
+                 AND formula_label <> ''
+               ORDER BY formula_label`,
+              [result.central_cg_id]
+            );
+            const extractedFormulas = formulasRes.rows.map(r => r.formula_label);
+            if (extractedFormulas.length > 0) {
+              await pool.query(
+                `UPDATE central_cg
+                 SET metadata = jsonb_set(
+                       jsonb_set(metadata, '{indexedFormulas}', $1::jsonb, true),
+                       '{formula_hints}', $1::jsonb, true
+                     ),
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [JSON.stringify(extractedFormulas), result.central_cg_id]
+              );
+              ejs.message += ` — ${extractedFormulas.length} formule(s): ${extractedFormulas.join(', ')}`;
+              console.log(`[CatalogueJob] indexedFormulas mis à jour pour CG #${result.central_cg_id}: [${extractedFormulas.join(', ')}]`);
+            }
+          } catch (fErr: any) {
+            console.warn(`[CatalogueJob] Impossible de mettre à jour indexedFormulas:`, fErr.message);
+          }
+        }
+
         // Persister le succès dans cg_ingestion_jobs
         await pool.query(
           `INSERT INTO cg_ingestion_jobs (run_id, insurer_code, insurance_type_code, source_url, status, pages_count, result_central_cg_id, completed_at)

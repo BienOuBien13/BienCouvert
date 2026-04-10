@@ -205,8 +205,9 @@ export class OrchestratorAgent {
     const intent = await intentAgent.detect(message);
     console.log(`[Orchestrator] Intent=${intent.intent} (confidence=${intent.confidence.toFixed(2)}) subtype=${intent.subtype || '-'}`);
 
-    // ── Étape 2 : Extraire les insurers depuis les polices ───────────────────
-    const insurers = [...new Set(policies.map((p) => p.provider || p.insurer || '').filter(Boolean))];
+    // Extraire les codes assureurs (insurerCode = "MAAF01" etc.) — PAS le label texte
+    // car les requêtes SQL filtrent sur insurer_code et non sur le label affiché.
+    const insurers = [...new Set(policies.map((p: any) => p.insurerCode || '').filter(Boolean))];
     const policyIds = policies.map((p) => String(p.id));
 
     let response = '';
