@@ -26,6 +26,11 @@ export class ClaimsAgent {
       sante:         ['santé', 'mutuelle', 'prévoyance'],
       dece:          ['prévoyance', 'vie', 'décès'],
       litige:        ['protection juridique', 'juridique'],
+      perte:         ['habitation', 'mrh'],
+      cle:           ['habitation', 'mrh'],
+      serrure:       ['habitation', 'mrh'],
+      telephone:     ['habitation', 'mrh'],
+      mobile:        ['habitation', 'mrh'],
     };
 
     // Cherche le type de sinistre dans la map
@@ -87,11 +92,14 @@ export class ClaimsAgent {
     let urgencyLevel: 'low' | 'medium' | 'high' = 'medium';
 
     if (ai) {
-      const policyContext = coveringPolicies.length > 0
+      const hasCoverage = coveringPolicies.length > 0;
+      const policyContext = hasCoverage
         ? coveringPolicies.map((p) => `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || '?'})`).join('\n')
-        : 'Aucun contrat identifié pour ce type de sinistre.';
+        : '';
 
-      const prompt = `Tu es un expert sinistres. L'utilisateur a subi un sinistre de type : "${sinisterType}".
+      // Prompt court et pratique quand aucun contrat ne couvre le sinistre
+      const prompt = hasCoverage
+        ? `Tu es un expert sinistres. L'utilisateur a subi un sinistre de type : "${sinisterType}".
 
 CONTRATS COUVRANT CE SINISTRE :
 ${policyContext}
@@ -112,6 +120,28 @@ Réponds UNIQUEMENT en JSON :
       "contact": "Numéro ou email si connu ou null"
     }
   ]
+}`
+        : `Tu es un expert sinistres. Sinistre signalé : "${sinisterType}". Aucun contrat ne couvre ce sinistre.
+
+Génère EXACTEMENT 2 étapes courtes et pratiques :
+1. Actions immédiates concrètes à faire maintenant (ex: bloquer la SIM, changer les serrures, signaler la perte...)
+2. Vérifier les contrats potentiellement pertinents non encore identifiés (assurance habitation, carte bancaire, assurance voyage)
+
+Sois court et direct. Pas de généralités. Pas de références légales détaillées.
+Urgence = low.
+
+Réponds UNIQUEMENT en JSON :
+{
+  "urgencyLevel": "low",
+  "steps": [
+    {
+      "step": 1,
+      "title": "Titre court",
+      "description": "Description courte et pratique (2 phrases max)",
+      "deadline": null,
+      "contact": null
+    }
+  ]
 }`;
 
       try {
@@ -122,7 +152,12 @@ Réponds UNIQUEMENT en JSON :
         const result = await model.generateContent([prompt]);
         const parsed = JSON.parse(result.response.text());
         if (Array.isArray(parsed.steps) && parsed.steps.length > 0) {
-          steps = parsed.steps;
+          // Nettoyer les valeurs "null" (string) retournées par Gemini
+          steps = parsed.steps.map((s: any) => ({
+            ...s,
+            deadline: (s.deadline && s.deadline !== 'null') ? s.deadline : undefined,
+            contact:  (s.contact  && s.contact  !== 'null') ? s.contact  : undefined,
+          }));
         }
         urgencyLevel = parsed.urgencyLevel || 'medium';
       } catch (e: any) {

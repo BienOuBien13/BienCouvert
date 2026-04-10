@@ -28,7 +28,7 @@ const INTENT_EXAMPLES: Record<AgentIntent, string[]> = {
     'ajouter', 'charger', 'uploader', 'importer', 'nouveau contrat',
     'pdf', 'document',
   ],
-  GENERAL: [],
+  GENERAL: ['pourquoi', 'comment se fait', 'tu m\'as dit', 'c\'est quoi', 'explique'],
 };
 
 /** Détection rapide par mots-clés (sans LLM) — fallback ou pré-filtrage */
@@ -67,12 +67,17 @@ export class IntentAgent {
 MESSAGE : "${message}"
 
 INTENTIONS DISPONIBLES :
-- QUESTION_GARANTIE : question sur une couverture spécifique
-- SINISTRE : déclaration ou procédure de sinistre
+- QUESTION_GARANTIE : question sur une couverture spécifique ("suis-je couvert", "est-ce que mon assurance couvre...")
+- SINISTRE : déclaration ou procédure de sinistre concret ("j'ai eu un accident", "mon appartement a été cambriolé", "j'ai perdu mon téléphone / mes clés")
 - OPTIMISATION : analyse des doublons/économies
-- CONSEIL : demande de recommandation personnalisée
+- CONSEIL : demande explicite de recommandation personnalisée ("que me conseilles-tu", "devrais-je changer de formule")
 - UPLOAD : ajout d'un document/contrat
-- GENERAL : autre
+- GENERAL : question générale, clarification ou explication ("pourquoi tu as dit", "c'est quoi", "comment ça fonctionne", "tu m'as dit que")
+
+REGLES IMPORTANTES :
+- Les questions de CLARIFICATION ou d'EXPLICATION (commencent par "pourquoi", "comment se fait-il", "tu m'as dit", "explique") → GENERAL
+- CONSEIL uniquement si l'utilisateur demande EXPLICITEMENT une recommandation ou un avis
+- QUESTION_GARANTIE si l'utilisateur demande si quelque chose est couvert, même implicitement
 
 Réponds UNIQUEMENT en JSON :
 {
