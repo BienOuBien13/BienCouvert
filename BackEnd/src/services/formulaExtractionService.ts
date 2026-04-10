@@ -256,6 +256,29 @@ Réponds UNIQUEMENT en JSON (tableau dans le même ordre que les candidats) :
     for (const c of preFiltered) correctionMap.set(c.label, c.label);
   }
 
+  // ── Dedup by normalized key: if two raw labels map to the same canonical key,
+  // keep the variant with the highest page_count; redirect the others to the winner.
+  // This eliminates casing duplicates like "FORMULE CONFORT" / "Formule Confort".
+  const keyToWinner = new Map<string, { canonical: string; pageCount: number }>();
+  for (const c of rawCandidates) {
+    const canonical = correctionMap.get(c.label);
+    if (!canonical) continue; // rejected
+    const key = normalizeFormulaKey(canonical);
+    const existing = keyToWinner.get(key);
+    if (!existing || c.pageCount > existing.pageCount) {
+      keyToWinner.set(key, { canonical, pageCount: c.pageCount });
+    }
+  }
+  for (const c of rawCandidates) {
+    const canonical = correctionMap.get(c.label);
+    if (!canonical) continue;
+    const key = normalizeFormulaKey(canonical);
+    const winner = keyToWinner.get(key)!;
+    if (canonical !== winner.canonical) {
+      correctionMap.set(c.label, winner.canonical);
+    }
+  }
+
   return correctionMap;
 }
 
