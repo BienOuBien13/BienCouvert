@@ -256,6 +256,7 @@ export const storage = {
         userId: row.user_id.toString(),
         name: metadata.name || 'Contrat sans nom',
         insurer: row.insurer_label || 'Non spécifié',
+        provider: row.insurer_label || 'Non spécifié',   // alias requis par Policy et les agents
         insurerCode: row.insurer_code,
         insurerLogo: row.insurer_logo,
         type: typeEnum, // Utilise la valeur de l'enum PolicyType (ex: 'Automobile')
@@ -263,6 +264,7 @@ export const storage = {
         subTypeCode: row.insurance_sub_type_code || null,
         subTypeLabel: row.sub_type_label || null,
         formula: metadata.formula || null,
+        coverageDetail: metadata.formula || null,         // alias requis par Policy et les agents
         options: metadata.options || [],
         premium: metadata.premium ? parseFloat(metadata.premium) : null,
         coverage: metadata.coverage ? parseFloat(metadata.coverage) : null,

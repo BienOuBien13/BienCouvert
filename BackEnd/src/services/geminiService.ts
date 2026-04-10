@@ -37,7 +37,7 @@ const generateSystemInstruction = (policies: Policy[] = []) => {
   let context = "Tu es AssurClair, un assistant personnel expert en assurances. Ton but est d'aider l'utilisateur à comprendre ses couvertures. ";
   context += "Voici la liste des contrats de l'utilisateur (analyse-les pour répondre) :\n";
   policies.forEach(p => {
-    context += `- Contrat \"${p.name}\" chez \"${p.provider}\" (Type: ${p.type}, Formule: ${p.coverageDetail || 'Non spécifiée'}). `;
+    context += `- Contrat \"${p.name}\" chez \"${p.provider || (p as any).insurer}\" (Type: ${p.type}, Formule: ${p.coverageDetail || (p as any).formula || 'Non spécifiée'}). `;
     if (p.summary) context += `Résumé garanties: ${p.summary}. `;
     if (p.sourceUrl) context += `Source web: ${p.sourceUrl}. `;
     context += "\n";

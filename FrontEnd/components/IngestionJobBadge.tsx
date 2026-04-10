@@ -86,7 +86,7 @@ export default function IngestionJobBadge() {
     };
 
     poll();
-    pollRef.current = setInterval(poll, 2000);
+    pollRef.current = setInterval(poll, 5000);
     return stopPolling;
   }, [jobId, dismiss, stopPolling]);
 

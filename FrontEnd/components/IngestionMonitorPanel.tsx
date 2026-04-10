@@ -129,7 +129,7 @@ export default function IngestionMonitorPanel() {
     const hasActive = jobs.some(j => !j.completed);
     if (pollRef.current) clearInterval(pollRef.current);
     if (hasActive) {
-      pollRef.current = setInterval(() => loadJobs(true), 2000);
+      pollRef.current = setInterval(() => loadJobs(true), 5000);
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [jobs, loadJobs]);

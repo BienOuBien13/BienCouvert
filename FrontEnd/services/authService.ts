@@ -9,19 +9,27 @@ import { API_URL } from './apiUrl';
 const TOKEN_KEY = 'assurclair_token';
 const USER_KEY = 'assurclair_current_user';
 
-// CSRF token (in-memory, not persisted)
+// CSRF token (in-memory, not persisted) — cached with TTL to avoid hammering /api/csrf-token
 let csrfToken: string | null = null;
+let csrfTokenFetchedAt: number = 0;
+const CSRF_TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Fetch CSRF token from backend and store in memory
+// Fetch CSRF token from backend and store in memory (reuses cached token within TTL)
 export const fetchCsrfToken = async () => {
+  const now = Date.now();
+  if (csrfToken && (now - csrfTokenFetchedAt) < CSRF_TOKEN_TTL_MS) {
+    return csrfToken;
+  }
   try {
     const res = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
     const data = await res.json();
     csrfToken = data.csrfToken;
+    csrfTokenFetchedAt = Date.now();
     return csrfToken;
   } catch (e) {
     console.error('Erreur lors de la récupération du CSRF token:', e);
     csrfToken = null;
+    csrfTokenFetchedAt = 0;
     return null;
   }
 };
