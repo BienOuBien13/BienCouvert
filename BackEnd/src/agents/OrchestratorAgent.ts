@@ -246,7 +246,9 @@ export class OrchestratorAgent {
         const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts, history });
 
         let advisor: AdvisorResult | undefined;
-        if (intent.intent === 'CONSEIL' || analysis.lacunes.length > 0) {
+        // AdvisorAgent uniquement pour les demandes de CONSEIL explicites.
+        // Pour QUESTION_GARANTIE, on répond seulement à la question posée sans générer de recommandations.
+        if (intent.intent === 'CONSEIL') {
           logAgent(advisorAgent.name);
           advisor = await advisorAgent.advise({ analysis, policies, userProfile, question: message });
         }
