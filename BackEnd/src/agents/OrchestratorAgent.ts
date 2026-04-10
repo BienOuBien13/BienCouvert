@@ -62,6 +62,10 @@ function formatCoverageResponse(
     response += `\n[Source : ${analysis.sources.join(', ')}]`;
   }
 
+  if (analysis.cgUrl) {
+    response += `\n📄 [Consulter les conditions générales](${analysis.cgUrl})`;
+  }
+
   if (advisor && advisor.recommendations.length > 0) {
     response += `\n\nRecommandations :\n`;
     advisor.recommendations.forEach((r) => (response += `- ${r}\n`));

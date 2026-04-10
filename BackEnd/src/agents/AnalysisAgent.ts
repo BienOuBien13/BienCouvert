@@ -81,6 +81,8 @@ export class AnalysisAgent {
       buildDocContext(ragResult.policyChunks, 'Contrat utilisateur');
 
     const hasFacts = coverageFacts.length > 0;
+    // URL CG : premier pdf_url disponible dans les faits (source fiable, issue de central_cg.url)
+    const cgUrl: string | undefined = coverageFacts.find(f => f.pdf_url)?.pdf_url ?? undefined;
     const profileContext = userProfile
       ? `Profil: ${userProfile.adultsCount ?? 1} adulte(s), ${userProfile.childrenCount ?? 0} enfant(s), ` +
         `logement: ${userProfile.housingType ?? '?'}, statut: ${userProfile.housingStatus ?? '?'}`
@@ -144,6 +146,7 @@ Réponds UNIQUEMENT en JSON :
         franchise: parsed.franchise || undefined,
         lacunes: Array.isArray(parsed.lacunes) ? parsed.lacunes : [],
         sources: Array.isArray(parsed.sources) ? parsed.sources : [],
+        cgUrl,
         rawAnswer: text,
       };
     } catch (e: any) {

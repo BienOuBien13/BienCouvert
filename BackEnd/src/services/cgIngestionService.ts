@@ -561,7 +561,7 @@ ${insurerList}
 2. Le type d'assurance (utilise EXACTEMENT un des codes suivants) :
 ${typeList}
 
-3. Le type de document parmi : CG (conditions générales), notice, ipid, autre
+3. Le type de document — utilise EXACTEMENT un de ces codes : CG (conditions générales), NI (notice d'information), IPID (document info produit européen), DIP (devoir d'information et conseil), FIC (fiche info et conseil), TABLEAU (tableau de garanties), GLOSSAIRE, AUTRE
 
 4. Les noms de formules/offres présents (uniquement les noms commerciaux des formules)
 
@@ -599,6 +599,14 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
     const parsed: ClassifierResult = JSON.parse(clean);
     // Vérifications minimales
     if (!parsed.insurer_code || !parsed.insurance_type_code) return null;
+    // Normalise document_type vers les codes valides de la table document_types
+    const VALID_DOC_TYPES: Record<string, string> = {
+      cg: 'CG', 'conditions-générales': 'CG', 'conditions generales': 'CG',
+      ni: 'NI', notice: 'NI', 'notice-information': 'NI', 'notice d\'information': 'NI',
+      ipid: 'IPID', dip: 'DIP', fic: 'FIC', tableau: 'TABLEAU', glossaire: 'GLOSSAIRE', autre: 'AUTRE',
+    };
+    const rawType = (parsed.document_type || 'CG').toLowerCase().trim();
+    parsed.document_type = VALID_DOC_TYPES[rawType] ?? VALID_DOC_TYPES[rawType.toUpperCase() as string] ?? 'CG';
     return parsed;
   } catch (e: any) {
     console.error('[CLASSIFIER] Erreur Gemini:', e.message);

@@ -91,6 +91,7 @@ export interface CoverageAnalysisResult {
   franchise?: string;          // Franchise applicable
   lacunes: string[];           // Points non couverts identifiés
   sources: string[];           // Références CG citées
+  cgUrl?: string;              // URL du PDF des conditions générales source
   rawAnswer?: string;          // Réponse complète LLM
 }
 
