@@ -243,7 +243,7 @@ export class OrchestratorAgent {
         circuitOptimizations.push(...optimizerAgent.analyzeCircuit(metrics));
 
         logAgent(analysisAgent.name);
-        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts });
+        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts, history });
 
         let advisor: AdvisorResult | undefined;
         if (intent.intent === 'CONSEIL' || analysis.lacunes.length > 0) {

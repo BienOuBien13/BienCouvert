@@ -66,7 +66,7 @@ export class AnalysisAgent {
   readonly name = 'AnalysisAgent';
 
   async analyze(input: AnalysisInput): Promise<CoverageAnalysisResult> {
-    const { question, ragResult, policies, userProfile, coverageFacts = [] } = input;
+    const { question, ragResult, policies, userProfile, coverageFacts = [], history = [] } = input;
 
     const ai = getAiClient();
     if (!ai) {
@@ -86,9 +86,17 @@ export class AnalysisAgent {
         `logement: ${userProfile.housingType ?? '?'}, statut: ${userProfile.housingStatus ?? '?'}`
       : '';
 
+    // Contexte conversationnel (derniers échanges pour résoudre les questions de suivi)
+    const historyContext = history.length > 0
+      ? history
+          .slice(-6)  // 3 derniers échanges
+          .map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.text.slice(0, 400)}`)
+          .join('\n')
+      : '';
+
     const prompt = `Tu es un analyste expert en assurances. Réponds à cette question de manière RAPIDE et PRÉCISE.
 
-QUESTION : ${question}
+${historyContext ? `HISTORIQUE RÉCENT DE LA CONVERSATION :\n${historyContext}\n\n` : ''}QUESTION ACTUELLE : ${question}
 
 CONTRATS DE L'UTILISATEUR :
 ${buildPolicySummary(policies)}

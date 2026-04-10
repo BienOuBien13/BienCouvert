@@ -115,7 +115,7 @@ export const AdminView: React.FC = () => {
   const [factsIsUser, setFactsIsUser] = useState(false);
 
   // --- État de l'onglet User CG ---
-  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'controlCheck' | 'ingestion'>('central');
+  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'controlCheck' | 'catalogue'>('central');
   const [userCgList, setUserCgList] = useState<UserCgEntry[]>([]);
   const [userCgLoading, setUserCgLoading] = useState(false);
   const [userCgSearchTerm, setUserCgSearchTerm] = useState('');
@@ -530,16 +530,6 @@ export const AdminView: React.FC = () => {
           <FlaskConical className="w-3.5 h-3.5" /> Non-régression
         </button>
         <button
-          onClick={() => setActiveTab('ingestion')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-            activeTab === 'ingestion'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Wand2 className="w-3.5 h-3.5" /> Ingestion auto
-        </button>
-        <button
           onClick={() => setActiveTab('catalogue')}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
             activeTab === 'catalogue'
@@ -548,16 +538,6 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <ListChecks className="w-3.5 h-3.5" /> Catalogue
-        </button>
-        <button
-          onClick={() => setActiveTab('finops')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-            activeTab === 'finops'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <BarChart2 className="w-3.5 h-3.5" /> FinOps
         </button>
       </div>
 
@@ -1378,10 +1358,6 @@ export const AdminView: React.FC = () => {
         <ControlCheckPage />
       )}
 
-      {activeTab === 'ingestion' && (
-        <IngestionPanel />
-      )}
-
       {activeTab === 'catalogue' && (
         <div className="space-y-6">
           <CataloguePanel />
@@ -1394,10 +1370,6 @@ export const AdminView: React.FC = () => {
             <IngestionMonitorPanel />
           </div>
         </div>
-      )}
-
-      {activeTab === 'finops' && (
-        <TokenStatsPanel />
       )}
     </>
   );

@@ -6,7 +6,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Users, LogIn, LogOut, UserPlus, ShieldAlert, Activity,
-  RefreshCw, TrendingUp, Clock, Wifi, AlertTriangle, CheckCircle2,
+  RefreshCw, TrendingUp, Clock, Wifi, AlertTriangle, CheckCircle2, BarChart2,
 } from 'lucide-react';
 import {
   adminService,
@@ -14,6 +14,7 @@ import {
   AdminUser,
   ConnectionLog,
 } from '../services/adminService';
+import TokenStatsPanel from './TokenStatsPanel';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ function UserRow({ u }: { u: AdminUser; key?: React.Key }) {
 
 // ─── Composant principal ─────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'users' | 'logs';
+type Tab = 'overview' | 'users' | 'logs' | 'finops';
 
 const MonitoringDashboard: React.FC = () => {
   const [tab, setTab]         = useState<Tab>('overview');
@@ -146,10 +147,11 @@ const MonitoringDashboard: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'overview', label: 'Vue globale' },
-    { key: 'users',    label: `Utilisateurs${users.length ? ` (${users.length})` : ''}` },
-    { key: 'logs',     label: `Connexions${logs.length ? ` (${logs.length})` : ''}` },
+  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: 'overview', label: 'Vue globale',   icon: <Activity className="w-3.5 h-3.5" /> },
+    { key: 'users',    label: `Utilisateurs${users.length ? ` (${users.length})` : ''}`, icon: <Users className="w-3.5 h-3.5" /> },
+    { key: 'logs',     label: `Connexions${logs.length ? ` (${logs.length})` : ''}`,     icon: <LogIn className="w-3.5 h-3.5" /> },
+    { key: 'finops',   label: 'FinOps',        icon: <BarChart2 className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -186,18 +188,18 @@ const MonitoringDashboard: React.FC = () => {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit flex-wrap">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
               tab === t.key
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-500 hover:text-slate-700'
             }`}
           >
-            {t.label}
+            {t.icon}{t.label}
           </button>
         ))}
       </div>
@@ -255,6 +257,11 @@ const MonitoringDashboard: React.FC = () => {
             : logs.map(l => <LogRow key={l.id} log={l} />)
           }
         </div>
+      )}
+
+      {/* ── FinOps ── */}
+      {tab === 'finops' && (
+        <TokenStatsPanel />
       )}
     </div>
   );

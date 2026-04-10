@@ -64,6 +64,8 @@ export interface AnalysisInput {
   userProfile?: UserProfileData;
   /** Faits structurés garantie×formule depuis coverage_facts (source primaire) */
   coverageFacts?: CoverageFact[];
+  /** Historique récent de la conversation (pour résoudre les questions de suivi) */
+  history?: Message[];
 }
 
 /** Fait structuré issu de coverage_facts ou user_coverage_facts */

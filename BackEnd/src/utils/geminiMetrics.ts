@@ -288,3 +288,68 @@ export function resetTokenStats(): void {
   for (const k of Object.keys(memStats)) delete memStats[k];
   totalCalls = totalInputTokens = totalOutputTokens = 0;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ring buffer d'historique FinOps (snapshots toutes les 15 min, 96h de rétention)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000; // 15 min
+const MAX_SNAPSHOTS        = 96 * 4;          // 4 jours de granularité 15 min
+
+export interface TokenSnapshot {
+  ts:               string;  // ISO — horodatage du snapshot
+  deltaCalls:       number;  // appels sur cette période
+  deltaInputTokens: number;  // tokens input sur cette période
+  deltaOutputTokens:number;  // tokens output sur cette période
+  deltaCostEur:     number;  // coût estimé sur cette période
+  byCategory:       Record<string, number>; // coût par catégorie sur cette période
+}
+
+// État précédent pour calculer les deltas
+let prevTotalCalls        = 0;
+let prevTotalInputTokens  = 0;
+let prevTotalOutputTokens = 0;
+const prevCategoryInputs: Record<string, number>  = {};
+const prevCategoryOutputs: Record<string, number> = {};
+
+const snapshotHistory: TokenSnapshot[] = [];
+
+function takeSnapshot(): void {
+  const deltaCalls        = totalCalls        - prevTotalCalls;
+  const deltaInputTokens  = totalInputTokens  - prevTotalInputTokens;
+  const deltaOutputTokens = totalOutputTokens - prevTotalOutputTokens;
+  const deltaUsd =
+    (deltaInputTokens  / 1_000_000) * COST_PER_1M_INPUT  +
+    (deltaOutputTokens / 1_000_000) * COST_PER_1M_OUTPUT;
+  const deltaCostEur = Math.round(deltaUsd * USD_TO_EUR * 10_000) / 10_000;
+
+  // Coût delta par catégorie
+  const byCategory: Record<string, number> = {};
+  for (const [fn, stats] of Object.entries(memStats)) {
+    const cat = getCategoryForFunction(fn);
+    const prevIn  = prevCategoryInputs[fn]  || 0;
+    const prevOut = prevCategoryOutputs[fn] || 0;
+    const dIn  = stats.inputTokens  - prevIn;
+    const dOut = stats.outputTokens - prevOut;
+    const dCostEur = Math.round(((dIn / 1_000_000) * COST_PER_1M_INPUT + (dOut / 1_000_000) * COST_PER_1M_OUTPUT) * USD_TO_EUR * 10_000) / 10_000;
+    byCategory[cat] = Math.round(((byCategory[cat] || 0) + dCostEur) * 10_000) / 10_000;
+    prevCategoryInputs[fn]  = stats.inputTokens;
+    prevCategoryOutputs[fn] = stats.outputTokens;
+  }
+
+  // Mettre à jour l'état précédent
+  prevTotalCalls        = totalCalls;
+  prevTotalInputTokens  = totalInputTokens;
+  prevTotalOutputTokens = totalOutputTokens;
+
+  snapshotHistory.push({ ts: new Date().toISOString(), deltaCalls, deltaInputTokens, deltaOutputTokens, deltaCostEur, byCategory });
+  if (snapshotHistory.length > MAX_SNAPSHOTS) snapshotHistory.shift();
+}
+
+// Démarrer le timer de snapshot dès le chargement du module
+setInterval(takeSnapshot, SNAPSHOT_INTERVAL_MS);
+
+/** Retourne l'historique des snapshots (du plus ancien au plus récent) */
+export function getTokenHistory(): TokenSnapshot[] {
+  return [...snapshotHistory];
+}

@@ -94,7 +94,10 @@ export async function query(text: string, params?: any[], retries = 3): Promise<
       await new Promise(r => setTimeout(r, wait));
       return query(text, params, retries - 1);
     }
-    console.error('❌ Erreur SQL:', { text, error: error.message });
+    // 42P01 = undefined_table : table optionnelle non encore créée (ex: policy_embeddings) — pas une erreur critique
+    if (error?.code !== '42P01') {
+      console.error('❌ Erreur SQL:', { text, error: error.message });
+    }
     throw error;
   }
 }
