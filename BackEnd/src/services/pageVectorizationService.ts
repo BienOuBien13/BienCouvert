@@ -11,6 +11,7 @@ let createCanvas: (w: number, h: number) => any;
 try { createCanvas = require('canvas').createCanvas; } catch { /* canvas non disponible, les routes de rendu PDF échoueront gracieusement */ }
 import { generateEmbedding } from './geminiService';
 import { extractTableFromPageImage, tableToFacts, saveCoverageFacts, saveUserCoverageFacts } from './tableExtractionService';
+import { runFormulaPostProcessing, runFormulaPostProcessingForUserCg } from './formulaExtractionService';
 
 // Configuration pdf.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = require('pdfjs-dist/legacy/build/pdf.worker.entry');
@@ -277,7 +278,7 @@ export async function vectorizeCgByPages(
 
     // Récupérer les infos du CG
     const cgResult = await pool.query(
-      'SELECT insurer_code, insurance_type_code, pdf_base64 FROM central_cg WHERE id = $1',
+      'SELECT insurer_code, insurance_type_code, pdf_base64, metadata FROM central_cg WHERE id = $1',
       [centralCgId]
     );
     
@@ -317,6 +318,8 @@ export async function vectorizeCgByPages(
     // En-têtes de formules de la dernière page avec tableau détecté.
     // Transmis à Vision pour les pages de continuation (tableau sur plusieurs pages).
     let lastKnownFormulaHeaders: string[] = [];
+    // Image de la 1ère page pour FormulaExtractionAgent (contexte visuel)
+    let coverPageBase64: string | null = null;
     clearStopVectorization(centralCgId);
 
     // Traiter chaque page
@@ -485,71 +488,21 @@ export async function vectorizeCgByPages(
       }
       
       pagesProcessed++;
+      // Sauvegarder l'image de la 1ère page pour FormulaExtractionAgent
+      if (pageNum === 1 && pageData?.imageBase64) {
+        coverPageBase64 = pageData.imageBase64;
+      }
       console.log(`   ✅ Page ${pageNum} sauvegardée (${classification.chunkType})`);
     }
 
-    // ── Mettre à jour indexedFormulas avec les formules découvertes dans les tableaux Vision ──
-    // Les en-têtes de tableaux Vision sont la source la plus fiable pour les noms de formules
-    // (pdfjs peut rater les accents/styling, et l'extraction texte Gemini tronque à 12–25k chars)
-    if (discoveredFormulaLabels.size > 0) {
-      try {
-        // Récupérer les formules existantes en metadata
-        const metaResult = await pool.query(
-          'SELECT metadata FROM central_cg WHERE id = $1',
-          [centralCgId]
-        );
-        const currentMeta = metaResult.rows[0]?.metadata || {};
-        const existingFormulas: string[] = currentMeta.indexedFormulas || currentMeta.formules || [];
-
-        // Filtrer les en-têtes non-formule (zones géo, catégories, pronoms, descripteurs de valeur)
-        const isNotFormulaName = (f: string): boolean => {
-          const s = f.trim();
-          if (s.length < 2 || s.length > 55) return true;
-          if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
-          if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
-          if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
-          if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
-          // Pronoms seuls ou locutions non-commerciales
-          if (/^(nous|vous|il|elle|ils|elles|on|de plein droit|de droit|en option|en sus|par d[eé]faut)$/i.test(s)) return true;
-          // Descripteurs de valeur/montant (cellules de tableau prises pour des formules)
-          if (/\b(valeur|montant|inf[eé]rieure?|sup[eé]rieure?|[eé]gale?|comprise?)\b/i.test(s)) return true;
-          // Séparateur " — " long = description de sous-condition, pas un nom commercial
-          if (/ [—–-] /.test(s) && s.length > 30) return true;
-          // Commence par un chiffre ou symbole monétaire
-          if (/^[\d€$£]/.test(s)) return true;
-          return false;
-        };
-        const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
-
-        // Garder les labels Vision qui apparaissent sur ≥2 pages,
-        // OU qui apparaissent sur 1 page mais sont aussi trouvés par Gemini texte
-        const geminiCanonicals = new Set(existingFormulas.map(canonicalize));
-        const cleanVisionFormulas = [...discoveredFormulaLabels.entries()]
-          .filter(([label, count]) => !isNotFormulaName(label) && (count >= 2 || geminiCanonicals.has(canonicalize(label))))
-          .map(([label]) => label);
-        const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
-
-        // Fusionner : Vision prioritaire, existant en complément (dédoublonnage canonique)
-        const seen = new Map<string, boolean>();
-        const allFormulas: string[] = [];
-        for (const f of [...cleanVisionFormulas, ...cleanExisting]) {
-          const key = canonicalize(f);
-          if (key.length > 1 && !seen.has(key)) {
-            seen.set(key, true);
-            allFormulas.push(f.trim());
-          }
-        }
-
-        if (allFormulas.length > 0) {
-          await pool.query(
-            `UPDATE central_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
-            [JSON.stringify({ indexedFormulas: allFormulas }), centralCgId]
-          );
-          console.log(`   🔄 indexedFormulas mis à jour: [${allFormulas.join(', ')}] (${cleanVisionFormulas.length} Vision + ${existingFormulas.length} existant)`);
-        }
-      } catch (formulaErr) {
-        console.warn(`   ⚠️ Mise à jour indexedFormulas (non bloquant):`, formulaErr);
-      }
+    // ── FormulaExtractionAgent — validation et correction post-processing ────────
+    // Lit tous les formula_label bruts de coverage_facts, valide via LLM, corrige en DB,
+    // et écrit indexedFormulas propres dans central_cg.metadata.
+    try {
+      const classifierHints: string[] = (cg.metadata?.indexedFormulas ?? cg.metadata?.formula_hints ?? []) as string[];
+      await runFormulaPostProcessing(pool, centralCgId, classifierHints, coverPageBase64);
+    } catch (fErr: any) {
+      console.warn(`   ⚠️ FormulaExtractionAgent (non bloquant):`, fErr.message?.slice(0, 120));
     }
     
     // Marquer la vectorisation comme terminée
@@ -705,6 +658,7 @@ export async function vectorizeUserCgByPages(
     const discoveredFormulaLabels = new Map<string, number>(); // label → nb de pages où il apparaît comme en-tête
     // En-têtes de formules de la dernière page avec tableau détecté (carry-forward pour pages de continuation)
     let lastKnownFormulaHeaders: string[] = [];
+    let coverPageBase64UserCg: string | null = null;
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       console.log(`\n📄 [user_cg ${userCgId}] Page ${pageNum}/${numPages}...`);
@@ -713,6 +667,10 @@ export async function vectorizeUserCgByPages(
       if (!pageData) {
         console.warn(`⚠️ Échec extraction page ${pageNum}`);
         continue;
+      }
+
+      if (pageNum === 1) {
+        coverPageBase64UserCg = pageData.imageBase64;
       }
 
       if (pageNum > 1) {
@@ -842,65 +800,13 @@ export async function vectorizeUserCgByPages(
       console.log(`   ✅ Page ${pageNum} sauvegardée (user_cg, ${classification.chunkType})`);
     }
 
-    // ── Mettre à jour les formules découvertes dans les tableaux Vision ──
-    if (discoveredFormulaLabels.size > 0) {
-      try {
-        const metaResult = await pool.query(
-          'SELECT metadata FROM user_cg WHERE id = $1',
-          [userCgId]
-        );
-        const currentMeta = metaResult.rows[0]?.metadata || {};
-        const existingFormulas: string[] = currentMeta.formules || currentMeta.indexedFormulas || [];
-
-        // Filtrer les en-têtes non-formule (zones géo, catégories, pronoms, descripteurs de valeur)
-        const isNotFormulaName = (f: string): boolean => {
-          const s = f.trim();
-          if (s.length < 2 || s.length > 55) return true;
-          if (/^(garanties?|prestations?|coverage|guarantee|nature|objet|description|montant|plafond|franchise)$/i.test(s)) return true;
-          if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
-          if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
-          if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
-          // Pronoms seuls ou locutions non-commerciales
-          if (/^(nous|vous|il|elle|ils|elles|on|de plein droit|de droit|en option|en sus|par d[eé]faut)$/i.test(s)) return true;
-          // Descripteurs de valeur/montant (cellules de tableau prises pour des formules)
-          if (/\b(valeur|montant|inf[eé]rieure?|sup[eé]rieure?|[eé]gale?|comprise?)\b/i.test(s)) return true;
-          // Séparateur " — " long = description de sous-condition, pas un nom commercial
-          if (/ [—–-] /.test(s) && s.length > 30) return true;
-          // Commence par un chiffre ou symbole monétaire
-          if (/^[\d€$£]/.test(s)) return true;
-          return false;
-        };
-        const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
-
-        // Garder les labels Vision qui apparaissent sur ≥2 pages,
-        // OU qui apparaissent sur 1 page mais sont aussi trouvés par Gemini (existingFormulas)
-        const geminiCanonicals = new Set(existingFormulas.map(canonicalize));
-        const cleanVisionFormulas = [...discoveredFormulaLabels.entries()]
-          .filter(([label, count]) => !isNotFormulaName(label) && (count >= 2 || geminiCanonicals.has(canonicalize(label))))
-          .map(([label]) => label);
-        const cleanExisting = existingFormulas.filter(f => !isNotFormulaName(f));
-
-        // Fusionner : Vision prioritaire, existant en complément
-        const seen = new Map<string, boolean>();
-        const allFormulas: string[] = [];
-        for (const f of [...cleanVisionFormulas, ...cleanExisting]) {
-          const key = canonicalize(f);
-          if (key.length > 1 && !seen.has(key)) {
-            seen.set(key, true);
-            allFormulas.push(f.trim());
-          }
-        }
-
-        if (allFormulas.length > 0) {
-          await pool.query(
-            `UPDATE user_cg SET metadata = metadata || $1::jsonb WHERE id = $2`,
-            [JSON.stringify({ formules: allFormulas, indexedFormulas: allFormulas }), userCgId]
-          );
-          console.log(`   🔄 user_cg formules mis à jour: [${allFormulas.join(', ')}]`);
-        }
-      } catch (formulaErr) {
-        console.warn(`   ⚠️ Mise à jour formules user_cg (non bloquant):`, formulaErr);
-      }
+    // ── FormulaExtractionAgent — validation et correction post-processing ──
+    try {
+      const metaResult = await pool.query('SELECT metadata FROM user_cg WHERE id = $1', [userCgId]);
+      const classifierHints: string[] = (metaResult.rows[0]?.metadata?.formules ?? metaResult.rows[0]?.metadata?.indexedFormulas ?? []) as string[];
+      await runFormulaPostProcessingForUserCg(pool, userCgId, classifierHints, coverPageBase64UserCg);
+    } catch (fErr: any) {
+      console.warn(`   ⚠️ FormulaExtractionAgent user_cg (non bloquant):`, fErr.message?.slice(0, 120));
     }
 
     // Marquer la vectorisation comme terminée
