@@ -35,6 +35,17 @@ function normalizeFormulaKey(label: string): string {
 }
 
 /**
+ * Strips option-qualification suffixes from a formula label.
+ * e.g. "Différence — avec option" → "Différence"
+ *      "Confort - sans options" → "Confort"
+ */
+function stripOptionSuffix(label: string): string {
+  return label
+    .replace(/\s*[—–-]\s*(avec|sans)\s+options?\s*$/i, '')
+    .trim();
+}
+
+/**
  * Fast heuristic pre-filter — reject obvious non-formulas before calling Gemini.
  * This reduces token cost; the LLM does the definitive validation.
  */
@@ -158,6 +169,38 @@ export async function runFormulaPostProcessing(
     console.warn(`${tag} ⚠️ Aucune formule valide trouvée`);
   }
 
+  // ── Step 7: build and persist indexedOptions from optional coverage_facts ─────
+  // indexedOptions = { "FormulaName": ["Option label 1", "Option label 2"], ... }
+  const optRows = await pool.query<{ formula_label: string; guarantee_label: string }>(
+    `SELECT DISTINCT formula_label, guarantee_label
+     FROM coverage_facts
+     WHERE central_cg_id = $1 AND coverage_status = 'optional'
+     ORDER BY formula_label, guarantee_label`,
+    [centralCgId],
+  );
+
+  const indexedOptions: Record<string, string[]> = {};
+  for (const row of optRows.rows) {
+    const fKey = row.formula_label || 'default';
+    if (!indexedOptions[fKey]) indexedOptions[fKey] = [];
+    indexedOptions[fKey].push(row.guarantee_label);
+  }
+
+  if (Object.keys(indexedOptions).length > 0) {
+    await pool.query(
+      `UPDATE central_cg
+       SET metadata = jsonb_set(
+         COALESCE(metadata, '{}'::jsonb),
+         '{indexedOptions}',
+         $1::jsonb
+       )
+       WHERE id = $2`,
+      [JSON.stringify(indexedOptions), centralCgId],
+    );
+    const optSummary = Object.entries(indexedOptions).map(([f, opts]) => `${f}(${opts.length})`).join(', ');
+    console.log(`${tag} ✅ indexedOptions: {${optSummary}}`);
+  }
+
   return { validFormulas, correctionMap, factsUpdated };
 }
 
@@ -254,6 +297,16 @@ Réponds UNIQUEMENT en JSON (tableau dans le même ordre que les candidats) :
     }
   } else {
     for (const c of preFiltered) correctionMap.set(c.label, c.label);
+  }
+
+  // ── Strip option suffixes from canonical values before dedup.
+  // e.g. "Différence — avec option" → "Différence" so it merges with "Différence".
+  for (const [rawLabel, canonical] of correctionMap.entries()) {
+    if (canonical === null) continue;
+    const stripped = stripOptionSuffix(canonical);
+    if (stripped !== canonical) {
+      correctionMap.set(rawLabel, stripped || null);
+    }
   }
 
   // ── Dedup by normalized key: if two raw labels map to the same canonical key,

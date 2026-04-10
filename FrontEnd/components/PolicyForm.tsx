@@ -73,6 +73,7 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
     isSearchingPDF: boolean;
     suggestedFormulas?: string[]; 
     suggestedOptions?: string[];
+    allIndexedOptions?: Record<string, string[]>;
   } | null>(null);
 
   // Sous-types
@@ -188,11 +189,18 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
       const internal = await storageService.findCgInRepo(extracted.insurer!, extracted.name || 'Contrat', extracted.type as PolicyType);
       let data;
       if (internal) {
+        // Extract per-formula options map (Record<string, string[]>) from metadata
+        const rawOpts = internal.metadata?.indexedOptions;
+        const allIndexedOptions: Record<string, string[]> =
+          (rawOpts && typeof rawOpts === 'object' && !Array.isArray(rawOpts))
+            ? (rawOpts as Record<string, string[]>)
+            : {};
         data = { 
           sourceUrl: internal.pdfUrl, 
           isInternalSource: true, 
           suggestedFormulas: internal.indexedFormulas, 
-          suggestedOptions: internal.indexedOptions, 
+          suggestedOptions: [],
+          allIndexedOptions,
           summary: internal.semanticSummary 
         };
       } else {
@@ -464,7 +472,10 @@ export const PolicyForm: React.FC<Props> = ({ onAddPolicy, onUpdatePolicy, initi
                     {refiningPolicy?.suggestedFormulas?.map(f => (
                       <button 
                         key={f} 
-                        onClick={() => setRefiningPolicy({...refiningPolicy, coverageDetail: f})}
+                        onClick={() => {
+                          const opts = refiningPolicy.allIndexedOptions?.[f] || [];
+                          setRefiningPolicy({...refiningPolicy, coverageDetail: f, suggestedOptions: opts, options: []});
+                        }}
                         className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border-2 ${
                           refiningPolicy.coverageDetail === f 
                           ? 'bg-primary-600 text-white border-primary-600 shadow-xl scale-105' 

@@ -649,6 +649,33 @@ router.put('/catalogue/entry/:id/url', authMiddleware, adminMiddleware, async (r
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/admin/catalogue/entry/:id/url
+// Efface l'URL courante + discovered d'une entrée pour permettre une nouvelle recherche
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/catalogue/entry/:id/url', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID invalide' });
+  try {
+    const result = await pool.query(
+      `UPDATE document_catalogue
+       SET current_url     = NULL,
+           discovered_url  = NULL,
+           matrix_status   = 'unknown',
+           notes           = NULL,
+           last_checked_at = NULL,
+           updated_at      = NOW()
+       WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Entrée non trouvée' });
+    res.json({ ok: true, message: 'URL effacée — prête pour une nouvelle recherche' });
+  } catch (err: any) {
+    console.error('[admin/catalogue/entry/url DELETE]', err.message);
+    res.status(500).json({ message: 'Erreur effacement URL', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/catalogue/smart-ingest
 // Lance l'ingestion intelligente (SmartSearch + ingest) pour N entrées catalogue
 // Body: { catalogue_ids: number[] }

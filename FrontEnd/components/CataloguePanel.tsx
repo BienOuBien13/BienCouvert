@@ -84,7 +84,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   unknown:    { label: 'Inconnu',   color: 'text-slate-500',   bg: 'bg-slate-50 border-slate-200',      icon: <HelpCircle className="w-3 h-3" /> },
 };
 
-const STEP_CONFIG: Record<EntryStep, { label: string; color: string; spin?: boolean }> = {
+const STEP_CONFIG: Record<string, { label: string; color: string; spin?: boolean }> = {
   pending:     { label: 'En attente',  color: 'text-slate-500' },
   searching:   { label: 'Recherche…',  color: 'text-blue-600',   spin: true },
   fetching:    { label: 'Télécharg…',  color: 'text-sky-600',    spin: true },
@@ -92,6 +92,7 @@ const STEP_CONFIG: Record<EntryStep, { label: string; color: string; spin?: bool
   vectorizing: { label: 'Vectoris…',   color: 'text-indigo-600', spin: true },
   done:        { label: 'Terminé',     color: 'text-emerald-700' },
   error:       { label: 'Erreur',      color: 'text-red-600' },
+  cancelled:   { label: 'Annulé',      color: 'text-amber-600' },
 };
 
 // ─── Petits composants ────────────────────────────────────────────────────────
@@ -136,6 +137,8 @@ export default function CataloguePanel() {
   const [addForm,         setAddForm]         = useState({ insurer_code: '', insurance_type_code: '', doc_type: 'CG', url: '' });
   const [addLoading,      setAddLoading]      = useState(false);
   const [flash,           setFlash]           = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [stopping,        setStopping]        = useState(false);
+  const [cancellingEntry, setCancellingEntry] = useState<number | null>(null); // catalogue_id en cours d'annulation
 
   const hdrs = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` };
 
@@ -268,6 +271,35 @@ export default function CataloguePanel() {
   const doSync  = async () => { try { const d = await apiPost('sync'); showFlash('ok', `Synchro : ${d.inserted ?? 0} nouvelle(s)`); loadMatrix(); } catch (e: any) { showFlash('err', e.message); } };
   const doWatchdog = async (action: 'start' | 'stop') => { try { await apiPost(`watchdog/${action}`); loadWatchdog(); } catch (e: any) { showFlash('err', e.message); } };
 
+  const doStopJob = async () => {
+    if (!activeJobId) return;
+    setStopping(true);
+    try {
+      await apiPost(`job/${activeJobId}/stop`);
+      showFlash('ok', 'Arrêt demandé — les entrées en attente seront annulées');
+    } catch (e: any) { showFlash('err', e.message); }
+    setStopping(false);
+  };
+
+  const doCancelEntry = async (catalogueId: number) => {
+    if (!activeJobId) return;
+    setCancellingEntry(catalogueId);
+    try {
+      await apiPost(`job/${activeJobId}/cancel-entry/${catalogueId}`);
+    } catch (e: any) { showFlash('err', e.message); }
+    setCancellingEntry(null);
+  };
+
+  const doClearUrl = async (id: number) => {
+    const csrf = await fetchCsrfToken();
+    const res = await fetch(`${API}/api/admin/catalogue/entry/${id}/url`, {
+      method: 'DELETE', credentials: 'include',
+      headers: { ...hdrs, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+    });
+    if (res.ok) { showFlash('ok', 'URL effacée'); loadMatrix(); }
+    else { const d = await res.json(); showFlash('err', d.message ?? 'Erreur'); }
+  };
+
   const filteredCells = (data?.cells ?? []).filter(c => {
     if (filterInsurer && c.insurer_code        !== filterInsurer) return false;
     if (filterType    && c.insurance_type_code !== filterType)    return false;
@@ -337,6 +369,79 @@ export default function CataloguePanel() {
               {stats.coverage_percent.toFixed(0)}%
             </p>
             <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Couverture</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Panneau job en cours (remonté en haut) ── */}
+      {activeJobId && jobData && (
+        <div className="bg-white rounded-2xl border border-blue-200 shadow-md overflow-hidden">
+          <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {!jobData.completed
+                ? <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                : <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />}
+              <div className="min-w-0">
+                <p className="text-xs font-black text-slate-900">
+                  Ingestion — {jobData.done}/{jobData.total}
+                  {jobData.errors > 0 && <span className="text-red-600 ml-1">({jobData.errors} erreur{jobData.errors > 1 ? 's' : ''})</span>}
+                  {(jobData as any).cancelled > 0 && <span className="text-amber-600 ml-1">({(jobData as any).cancelled} annulé{(jobData as any).cancelled > 1 ? 's' : ''})</span>}
+                </p>
+                <p className="text-[10px] text-slate-400 font-mono truncate">{activeJobId.slice(0, 20)}…</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {!jobData.completed && (
+                <button
+                  onClick={doStopJob}
+                  disabled={stopping}
+                  title="Arrêter le job (les entrées en attente seront annulées)"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-50"
+                >
+                  {stopping ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                  Arrêter
+                </button>
+              )}
+              <button onClick={() => { setActiveJobId(null); setJobData(null); }} title="Fermer" className="text-slate-400 hover:text-slate-600 p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
+            {jobData.statuses.map(s => {
+              const sc = STEP_CONFIG[s.step] ?? STEP_CONFIG.pending;
+              const isPending = s.step === 'pending';
+              return (
+                <div key={s.catalogue_id} className="flex items-start gap-3 px-5 py-2.5">
+                  <div className="shrink-0 mt-0.5">
+                    {sc.spin ? <Loader2 className={`w-3.5 h-3.5 animate-spin ${sc.color}`} />
+                      : s.step === 'done'      ? <CheckCircle className={`w-3.5 h-3.5 ${sc.color}`} />
+                      : s.step === 'error'     ? <XCircle     className={`w-3.5 h-3.5 ${sc.color}`} />
+                      : s.step === 'cancelled' ? <XCircle     className="w-3.5 h-3.5 text-amber-500" />
+                      : <div className="w-2 h-2 rounded-full bg-slate-300 mt-0.5" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-800">{s.insurer_label} · {s.type_label} · {DOC_TYPE_LABELS[s.doc_type] ?? s.doc_type}</p>
+                    <p className={`text-[10px] font-medium truncate ${sc.color}`}>{s.message}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-200 ${sc.color}`}>{sc.label}</span>
+                    {isPending && !jobData.completed && (
+                      <button
+                        onClick={() => doCancelEntry(s.catalogue_id)}
+                        disabled={cancellingEntry === s.catalogue_id}
+                        title="Annuler cette entrée"
+                        className="p-1 text-slate-300 hover:text-red-500 rounded transition-colors disabled:opacity-40"
+                      >
+                        {cancellingEntry === s.catalogue_id
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <X className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -449,11 +554,17 @@ export default function CataloguePanel() {
                     ) : cell.current_url ? (
                       <div className="flex items-center gap-1 group/url">
                         <a href={cell.current_url} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-600 text-[10px] font-medium truncate max-w-[130px] hover:underline" title={cell.current_url}>
+                          className="text-blue-600 text-[10px] font-medium truncate max-w-[120px] hover:underline" title={cell.current_url}>
                           {cell.current_url.replace(/^https?:\/\//, '').split('/').slice(0, 2).join('/')}…
                         </a>
                         <button onClick={() => setEditUrl({ id: cell.id, value: cell.current_url ?? '' })}
-                          className="shrink-0 text-slate-300 hover:text-blue-500 opacity-0 group-hover/url:opacity-100 transition-all"><Pencil className="w-3 h-3" /></button>
+                          className="shrink-0 text-slate-300 hover:text-blue-500 opacity-0 group-hover/url:opacity-100 transition-all" title="Modifier l'URL">
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => doClearUrl(cell.id)}
+                          className="shrink-0 text-slate-300 hover:text-red-500 opacity-0 group-hover/url:opacity-100 transition-all" title="Effacer l'URL (relancera la recherche auto)">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     ) : (
                       <button onClick={() => setEditUrl({ id: cell.id, value: '' })}
@@ -496,47 +607,6 @@ export default function CataloguePanel() {
           {filteredCells.length} entrée(s) · {selectedIds.length} sélectionnée(s)
         </div>
       </div>
-
-      {/* Panneau job en cours */}
-      {activeJobId && jobData && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {!jobData.completed ? <Loader2 className="w-4 h-4 text-blue-600 animate-spin" /> : <CheckCircle className="w-4 h-4 text-emerald-600" />}
-              <div>
-                <p className="text-xs font-black text-slate-900">
-                  Ingestion — {jobData.done}/{jobData.total}
-                  {jobData.errors > 0 && <span className="text-red-600 ml-1">({jobData.errors} erreur{jobData.errors > 1 ? 's' : ''})</span>}
-                </p>
-                <p className="text-[10px] text-slate-400 font-mono">{activeJobId.slice(0, 16)}…</p>
-              </div>
-            </div>
-            <button onClick={() => { setActiveJobId(null); setJobData(null); }} className="text-slate-400 hover:text-slate-600">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
-            {jobData.statuses.map(s => {
-              const sc = STEP_CONFIG[s.step];
-              return (
-                <div key={s.catalogue_id} className="flex items-start gap-3 px-5 py-2.5">
-                  <div className="shrink-0 mt-0.5">
-                    {sc.spin ? <Loader2 className={`w-3.5 h-3.5 animate-spin ${sc.color}`} />
-                      : s.step === 'done'  ? <CheckCircle className={`w-3.5 h-3.5 ${sc.color}`} />
-                      : s.step === 'error' ? <XCircle     className={`w-3.5 h-3.5 ${sc.color}`} />
-                      : <div className="w-2 h-2 rounded-full bg-slate-300 mt-0.5" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-800">{s.insurer_label} · {s.type_label} · {DOC_TYPE_LABELS[s.doc_type] ?? s.doc_type}</p>
-                    <p className={`text-[10px] font-medium truncate ${sc.color}`}>{s.message}</p>
-                  </div>
-                  <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-200 ${sc.color}`}>{sc.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Modal ajout */}
       {showAddModal && (
