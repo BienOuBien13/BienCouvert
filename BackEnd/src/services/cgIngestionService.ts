@@ -563,7 +563,11 @@ ${typeList}
 
 3. Le type de document — utilise EXACTEMENT un de ces codes : CG (conditions générales), NI (notice d'information), IPID (document info produit européen), DIP (devoir d'information et conseil), FIC (fiche info et conseil), TABLEAU (tableau de garanties), GLOSSAIRE, AUTRE
 
-4. Les noms de formules/offres présents (uniquement les noms commerciaux des formules)
+4. Les noms COMMERCIAUX des formules/offres souscriptibles par le client.
+   Règles strictes :
+   - INCLURE : noms propres de formule (ex: "Formule Tous Risques", "Confort+", "ESSENTIEL", "NIVEAU 1")
+   - EXCLURE : pronoms ("Nous", "Vous"), prépositions ("De plein droit"), déscriptions de valeur ou de montant ("Valeur du véhicule..."), en-têtes de colonne, intitulés de ligne de tableau, notes de bas de page
+   - Si aucune formule commerciale identifiable : retourner tableau vide []
 
 5. Ton score de confiance de 0 à 1.
 
@@ -599,6 +603,19 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
     const parsed: ClassifierResult = JSON.parse(clean);
     // Vérifications minimales
     if (!parsed.insurer_code || !parsed.insurance_type_code) return null;
+    // Filtre post-traitement : supprimer les faux positifs formula_hints
+    if (Array.isArray(parsed.formula_hints)) {
+      const REJECT_PATTERN = /^(nous|vous|de plein droit|valeur|montant|inférieure|supérieure|égale|garantie|option|\d+[€%]?|à dire|au jour|par|en cas|sous|avec|sans|hors|autres|si)/i;
+      parsed.formula_hints = parsed.formula_hints.filter((f: string) => {
+        if (!f || typeof f !== 'string') return false;
+        const trimmed = f.trim();
+        if (trimmed.length < 4 || trimmed.length > 60) return false;       // trop court ou trop long
+        if (REJECT_PATTERN.test(trimmed)) return false;                     // mots-clés parasites
+        if (/^\d/.test(trimmed)) return false;                              // commence par un chiffre
+        if ((trimmed.match(/,/g) || []).length > 2) return false;           // liste de valeurs
+        return true;
+      });
+    }
     // Normalise document_type vers les codes valides de la table document_types
     const VALID_DOC_TYPES: Record<string, string> = {
       cg: 'CG', 'conditions-générales': 'CG', 'conditions generales': 'CG',

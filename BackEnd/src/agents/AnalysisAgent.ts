@@ -28,18 +28,18 @@ function buildDocContext(chunks: RAGChunk[], label: string): string {
 function buildFactsContext(facts: CoverageFact[]): string {
   if (facts.length === 0) return '';
 
-  // Grouper par formule
-  const byFormula = new Map<string, CoverageFact[]>();
+  // Grouper par assureur + formule pour associer chaque URL à sa source
+  const byGroup = new Map<string, { facts: CoverageFact[]; url?: string }>();
   for (const f of facts) {
-    const key = f.formula_label || f.formula_key || 'Formule inconnue';
-    if (!byFormula.has(key)) byFormula.set(key, []);
-    byFormula.get(key)!.push(f);
+    const key = `${f.insurer_label || ''} — ${f.formula_label || f.formula_key || 'Formule inconnue'}`;
+    if (!byGroup.has(key)) byGroup.set(key, { facts: [], url: f.pdf_url ?? undefined });
+    byGroup.get(key)!.facts.push(f);
   }
 
   let out = '\n=== GARANTIES STRUCTURÉES (source : conditions générales) ===\n';
-  for (const [formula, flist] of byFormula) {
-    out += `\nFormule "${formula}" :\n`;
-    for (const f of flist) {
+  for (const [label, group] of byGroup) {
+    out += `\nFormule "${label}"${group.url ? ` [URL:${group.url}]` : ''} :\n`;
+    for (const f of group.facts) {
       const statusIcon = f.coverage_status === 'included' ? '✓'
         : f.coverage_status === 'excluded' ? '✗'
         : f.coverage_status === 'optional' ? '○' : '—';
@@ -81,8 +81,14 @@ export class AnalysisAgent {
       buildDocContext(ragResult.policyChunks, 'Contrat utilisateur');
 
     const hasFacts = coverageFacts.length > 0;
-    // URL CG : premier pdf_url disponible dans les faits (source fiable, issue de central_cg.url)
-    const cgUrl: string | undefined = coverageFacts.find(f => f.pdf_url)?.pdf_url ?? undefined;
+    // Map URL par clé (assureur+formule) pour récupération post-LLM
+    const urlByGroup = new Map<string, string>();
+    for (const f of coverageFacts) {
+      if (f.pdf_url) {
+        const key = `${f.insurer_label || ''} — ${f.formula_label || f.formula_key || 'Formule inconnue'}`;
+        if (!urlByGroup.has(key)) urlByGroup.set(key, f.pdf_url);
+      }
+    }
     const profileContext = userProfile
       ? `Profil: ${userProfile.adultsCount ?? 1} adulte(s), ${userProfile.childrenCount ?? 0} enfant(s), ` +
         `logement: ${userProfile.housingType ?? '?'}, statut: ${userProfile.housingStatus ?? '?'}`
@@ -117,6 +123,7 @@ ${hasFacts
 - Si "excluded" (✗) → status = "non_couvert"
 - Si mélange inclus/exclus selon formule → status = "partiel"
 - Si aucune donnée → status = "inconnu"
+- Si la réponse s'appuie sur une formule précise contenant [URL:...], inclus son URL dans cgUrl (sinon null)
 
 Réponds UNIQUEMENT en JSON :
 {
@@ -126,7 +133,8 @@ Réponds UNIQUEMENT en JSON :
   "montantMax": "Plafond ou null",
   "franchise": "Franchise ou null",
   "lacunes": ["lacune 1"],
-  "sources": ["source 1"]
+  "sources": ["source 1"],
+  "cgUrl": "https://... ou null"
 }`;
 
     try {
@@ -137,6 +145,20 @@ Réponds UNIQUEMENT en JSON :
       const result = await model.generateContent([prompt]);
       const text = result.response.text();
       const parsed = JSON.parse(text);
+
+      // Résoudre cgUrl : priorité à la sélection LLM, sinon chercher dans la map par sources citées
+      let cgUrl: string | undefined = (parsed.cgUrl && parsed.cgUrl !== 'null') ? parsed.cgUrl : undefined;
+      if (!cgUrl && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
+        // Chercher une URL dans urlByGroup dont la clé contient une source citée
+        for (const src of parsed.sources) {
+          for (const [key, url] of urlByGroup) {
+            if (key.toLowerCase().includes(src.toLowerCase().slice(0, 20))) { cgUrl = url; break; }
+          }
+          if (cgUrl) break;
+        }
+      }
+      // Dernier recours : première URL disponible (si unique insurer)
+      if (!cgUrl && urlByGroup.size === 1) cgUrl = [...urlByGroup.values()][0];
 
       return {
         status: (parsed.status as CoverageStatus) || 'inconnu',

@@ -501,7 +501,7 @@ export async function vectorizeCgByPages(
         const currentMeta = metaResult.rows[0]?.metadata || {};
         const existingFormulas: string[] = currentMeta.indexedFormulas || currentMeta.formules || [];
 
-        // Filtrer les en-têtes non-formule (zones géo, catégories, trop long, combos slash)
+        // Filtrer les en-têtes non-formule (zones géo, catégories, pronoms, descripteurs de valeur)
         const isNotFormulaName = (f: string): boolean => {
           const s = f.trim();
           if (s.length < 2 || s.length > 55) return true;
@@ -509,6 +509,14 @@ export async function vectorizeCgByPages(
           if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
           if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
           if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+          // Pronoms seuls ou locutions non-commerciales
+          if (/^(nous|vous|il|elle|ils|elles|on|de plein droit|de droit|en option|en sus|par d[eé]faut)$/i.test(s)) return true;
+          // Descripteurs de valeur/montant (cellules de tableau prises pour des formules)
+          if (/\b(valeur|montant|inf[eé]rieure?|sup[eé]rieure?|[eé]gale?|comprise?)\b/i.test(s)) return true;
+          // Séparateur " — " long = description de sous-condition, pas un nom commercial
+          if (/ [—–-] /.test(s) && s.length > 30) return true;
+          // Commence par un chiffre ou symbole monétaire
+          if (/^[\d€$£]/.test(s)) return true;
           return false;
         };
         const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
@@ -844,7 +852,7 @@ export async function vectorizeUserCgByPages(
         const currentMeta = metaResult.rows[0]?.metadata || {};
         const existingFormulas: string[] = currentMeta.formules || currentMeta.indexedFormulas || [];
 
-        // Filtrer les en-têtes non-formule (zones géo, catégories, trop long, combos slash)
+        // Filtrer les en-têtes non-formule (zones géo, catégories, pronoms, descripteurs de valeur)
         const isNotFormulaName = (f: string): boolean => {
           const s = f.trim();
           if (s.length < 2 || s.length > 55) return true;
@@ -852,6 +860,14 @@ export async function vectorizeUserCgByPages(
           if (/\b(france\s+m[eé]trop|m[eé]tropol|corse|monaco|drom|com\s*\d|\bdom\b|antill|r[eé]union|martiniq|guadeloup|guyane|polyn[eé]sie|nouvelle[\s-]?cal|outre[\s-]?mer|m[eé]tropolitaine)\b/i.test(s)) return true;
           if (/\b(appareils?\s+(?:neufs?|reconditionn[eé]s?)|individu\b|famille\b)\b/i.test(s)) return true;
           if (/\w{2,}\s*\/\s*\w{2,}\s*\/\s*\w{2,}/.test(s)) return true;
+          // Pronoms seuls ou locutions non-commerciales
+          if (/^(nous|vous|il|elle|ils|elles|on|de plein droit|de droit|en option|en sus|par d[eé]faut)$/i.test(s)) return true;
+          // Descripteurs de valeur/montant (cellules de tableau prises pour des formules)
+          if (/\b(valeur|montant|inf[eé]rieure?|sup[eé]rieure?|[eé]gale?|comprise?)\b/i.test(s)) return true;
+          // Séparateur " — " long = description de sous-condition, pas un nom commercial
+          if (/ [—–-] /.test(s) && s.length > 30) return true;
+          // Commence par un chiffre ou symbole monétaire
+          if (/^[\d€$£]/.test(s)) return true;
           return false;
         };
         const canonicalize = (f: string) => f.trim().replace(/^formules?\s+/i, '').replace(/\s+/g, ' ').toLowerCase();
