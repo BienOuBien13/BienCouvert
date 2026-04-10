@@ -52,6 +52,7 @@ export interface ClassifierResult {
   insurer_code: string;
   insurer_name: string;
   insurance_type_code: string;
+  insurance_sub_type_code?: string | null;  // Sous-type spécifique (ex: 'raqvam2', 'pno')
   document_type: string;     // 'CG' | 'notice' | 'ipid' | 'autre'
   formula_hints: string[];
   confidence: number;        // 0-1
@@ -569,7 +570,11 @@ ${typeList}
    - EXCLURE : pronoms ("Nous", "Vous"), prépositions ("De plein droit"), déscriptions de valeur ou de montant ("Valeur du véhicule..."), en-têtes de colonne, intitulés de ligne de tableau, notes de bas de page
    - Si aucune formule commerciale identifiable : retourner tableau vide []
 
-5. Ton score de confiance de 0 à 1.
+5. Le sous-type spécifique du contrat, si la page de garde l'identifie explicitement (ex: "RAQVAM", "RAQVAM2", "PNO", "Résidence Principale", "Locataire", "Propriétaire Occupant").
+   - Retourne null si le document couvre le type en général (pas de sous-produit identifiable).
+   - Format : courte étiquette en minuscules snake_case telle qu'elle identifie le produit (ex: "raqvam2", "pno", "residence_principale").
+
+6. Ton score de confiance de 0 à 1.
 
 ${hintInsurer ? `Indice : l'assureur probable est "${hintInsurer}"` : ''}
 ${hintType ? `Indice : le type d'assurance probable est "${hintType}"` : ''}
@@ -579,6 +584,7 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
   "insurer_code": "CODE",
   "insurer_name": "Nom complet",
   "insurance_type_code": "CODE",
+  "insurance_sub_type_code": null,
   "document_type": "CG",
   "formula_hints": ["Formule1", "Formule2"],
   "confidence": 0.85,
@@ -624,6 +630,14 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
     };
     const rawType = (parsed.document_type || 'CG').toLowerCase().trim();
     parsed.document_type = VALID_DOC_TYPES[rawType] ?? VALID_DOC_TYPES[rawType.toUpperCase() as string] ?? 'CG';
+    // Normalize insurance_sub_type_code: lowercase snake_case, null if absent/generic
+    if (parsed.insurance_sub_type_code && typeof parsed.insurance_sub_type_code === 'string') {
+      const sub = parsed.insurance_sub_type_code.trim().toLowerCase()
+        .replace(/\s+/g, '_').replace(/[^a-z0-9_]+/g, '').replace(/^_+|_+$/g, '');
+      parsed.insurance_sub_type_code = sub.length >= 2 ? sub : null;
+    } else {
+      parsed.insurance_sub_type_code = null;
+    }
     return parsed;
   } catch (e: any) {
     console.error('[CLASSIFIER] Erreur Gemini:', e.message);
@@ -797,30 +811,44 @@ export async function runIngestion(scope: IngestionScope): Promise<{
               continue;
             }
 
+            // Mismatch guard : le document détecté ne correspond pas au type demandé
+            if (classif.insurance_type_code !== type.code) {
+              console.warn(`[CLASSIFIER] Mismatch ${classif.insurance_type_code} ≠ ${type.code} — document ignoré`);
+              await updateJob(jobId, {
+                status: 'skipped',
+                confidence: classif.confidence,
+                classifier_result: classif,
+                error_message: `Type détecté "${classif.insurance_type_code}" ≠ attendu "${type.code}" — document ignoré`,
+              });
+              continue;
+            }
+
             // ── Insérer dans central_cg ──────────────────────────────────
             const fileName = `${classif.insurer_code}_${classif.insurance_type_code}_${Date.now()}.pdf`;
             const pdfBase64 = fetched.buffer.toString('base64');
 
             const insertResult = await pool.query<{ id: number }>(
               `INSERT INTO central_cg
-                 (insurer_code, insurance_type_code, document_type_code,
+                 (insurer_code, insurance_type_code, insurance_sub_type_code, document_type_code,
                   url, target_filename, pdf_base64, status, metadata)
-               VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
                RETURNING id`,
               [
                 classif.insurer_code,
                 classif.insurance_type_code,
+                classif.insurance_sub_type_code ?? null,
                 classif.document_type.toUpperCase(),
                 candidate.url,
                 fileName,
                 pdfBase64,
                 JSON.stringify({
-                  indexedFormulas:  classif.formula_hints ?? [],
-                  formula_hints:    classif.formula_hints ?? [],
-                  detail:           classif.detail,
-                  ingested_at:      new Date().toISOString(),
-                  source_url:       candidate.url,
-                  ingestion_run_id: runId,
+                  indexedFormulas:    classif.formula_hints ?? [],
+                  formula_hints:      classif.formula_hints ?? [],
+                  insurance_sub_type: classif.insurance_sub_type_code ?? null,
+                  detail:             classif.detail,
+                  ingested_at:        new Date().toISOString(),
+                  source_url:         candidate.url,
+                  ingestion_run_id:   runId,
                 }),
               ]
             );
@@ -848,24 +876,26 @@ export async function runIngestion(scope: IngestionScope): Promise<{
             try {
               await pool.query(
                 `UPDATE document_catalogue
-                 SET matrix_status  = 'indexed',
-                     central_cg_id  = $1,
-                     current_url    = $2,
-                     current_sha256 = $3,
-                     indexed_at     = NOW(),
-                     classifier_result = $4,
-                     formula_hints  = $5,
-                     last_checked_at = NOW(),
-                     next_check_at  = NOW() + (check_frequency_days || ' days')::INTERVAL
-                 WHERE insurer_code = $6
-                   AND insurance_type_code = $7
-                   AND doc_type = $8`,
+                 SET matrix_status           = 'indexed',
+                     central_cg_id           = $1,
+                     current_url             = $2,
+                     current_sha256          = $3,
+                     indexed_at              = NOW(),
+                     classifier_result       = $4,
+                     formula_hints           = $5,
+                     insurance_sub_type_code = $6,
+                     last_checked_at         = NOW(),
+                     next_check_at           = NOW() + (check_frequency_days || ' days')::INTERVAL
+                 WHERE insurer_code        = $7
+                   AND insurance_type_code = $8
+                   AND doc_type            = $9`,
                 [
                   centralCgId,
                   candidate.url,
                   fetched.sha256,
                   JSON.stringify(classif),
                   classif.formula_hints ?? [],
+                  classif.insurance_sub_type_code ?? null,
                   classif.insurer_code,
                   classif.insurance_type_code,
                   (classif.document_type ?? 'CG').toUpperCase(),
@@ -1005,6 +1035,20 @@ export async function ingestDocumentForCatalogue(params: {
       };
     }
 
+    // Mismatch guard : si le classifier identifie un type différent avec suffisamment de confiance,
+    // le document ne correspond pas à ce contrat — ne pas charger
+    if (classif.confidence >= 0.50 && classif.insurance_type_code !== insuranceTypeCode) {
+      const msg = `Contrat non disponible pour ${insurerCode}/${insuranceTypeCode} : `
+        + `document identifié comme "${classif.insurance_type_code}" (conf=${classif.confidence.toFixed(2)}). `
+        + 'Aucun document trouvé pour ce type auprès de cet assureur.';
+      console.warn(`[CATALOGUE/CLASSIFIER] ⛔ ${msg}`);
+      await pool.query(
+        `UPDATE document_catalogue SET matrix_status = 'not_found', notes = $1, updated_at = NOW() WHERE id = $2`,
+        [msg.slice(0, 500), catalogueId]
+      );
+      return { success: false, error: msg };
+    }
+
     // Forcer les codes depuis le catalogue (l'utilisateur sait ce qu'il ingère)
     classif.insurer_code        = insurerCode;
     classif.insurance_type_code = insuranceTypeCode;
@@ -1014,25 +1058,27 @@ export async function ingestDocumentForCatalogue(params: {
     const pdfBase64  = fetched.buffer.toString('base64');
     const insertRes  = await pool.query<{ id: number }>(
       `INSERT INTO central_cg
-         (insurer_code, insurance_type_code, document_type_code,
+         (insurer_code, insurance_type_code, insurance_sub_type_code, document_type_code,
           url, target_filename, pdf_base64, status, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
        RETURNING id`,
       [
         classif.insurer_code,
         classif.insurance_type_code,
+        classif.insurance_sub_type_code ?? null,
         (classif.document_type ?? 'CG').toUpperCase(),
         pdfUrl,
         fileName,
         pdfBase64,
         JSON.stringify({
-          indexedFormulas: classif.formula_hints ?? [],
-          formula_hints:   classif.formula_hints ?? [],
-          detail:          classif.detail,
-          confidence:      classif.confidence,
-          ingested_at:     new Date().toISOString(),
-          source_url:      pdfUrl,
-          catalogue_id:    catalogueId,
+          indexedFormulas:    classif.formula_hints ?? [],
+          formula_hints:      classif.formula_hints ?? [],
+          insurance_sub_type: classif.insurance_sub_type_code ?? null,
+          detail:             classif.detail,
+          confidence:         classif.confidence,
+          ingested_at:        new Date().toISOString(),
+          source_url:         pdfUrl,
+          catalogue_id:       catalogueId,
         }),
       ]
     );
@@ -1045,23 +1091,25 @@ export async function ingestDocumentForCatalogue(params: {
     // ── Mettre à jour document_catalogue ─────────────────────────────────────
     await pool.query(
       `UPDATE document_catalogue
-       SET matrix_status   = 'indexed',
-           central_cg_id   = $1,
-           current_url     = $2,
-           current_sha256  = $3,
-           indexed_at      = NOW(),
-           classifier_result = $4,
-           formula_hints   = $5,
-           last_checked_at = NOW(),
-           next_check_at   = NOW() + (check_frequency_days || ' days')::INTERVAL,
-           updated_at      = NOW()
-       WHERE id = $6`,
+       SET matrix_status           = 'indexed',
+           central_cg_id           = $1,
+           current_url             = $2,
+           current_sha256          = $3,
+           indexed_at              = NOW(),
+           classifier_result       = $4,
+           formula_hints           = $5,
+           insurance_sub_type_code = $6,
+           last_checked_at         = NOW(),
+           next_check_at           = NOW() + (check_frequency_days || ' days')::INTERVAL,
+           updated_at              = NOW()
+       WHERE id = $7`,
       [
         centralCgId,
         pdfUrl,
         fetched.sha256,
         JSON.stringify(classif),
         classif.formula_hints ?? [],
+        classif.insurance_sub_type_code ?? null,
         catalogueId,
       ]
     );
