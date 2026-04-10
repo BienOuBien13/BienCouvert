@@ -504,8 +504,17 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
       }
 
       // Follow grounding page URLs → extract PDFs
-      for (const gu of groundingUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 4)) {
+      // Slice extended to 6 to cover all grounding URLs returned by Gemini
+      for (const gu of groundingUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 6)) {
         try {
+          // A. Check if this URL directly resolves to a PDF (handles redirect→direct-PDF case,
+          //    e.g. vertexaisearch.cloud.google.com/grounding-api-redirect/... → PDF)
+          if (await isValidPdf(gu, 10_000)) {
+            console.log(`[SmartSearch]    Grounding redirect → PDF direct: ${gu.slice(0, 80)}`);
+            return { pdf_url: gu, page_url: null, confidence: 0.86, strategy: 'gemini_grounding',
+              notes: `PDF direct via URL grounding résolue` };
+          }
+          // B. Crawl the final page for PDF links
           const html = await fetchRaw(gu, 8_000);
           const pdfs = extractPdfLinks(html, gu);
           const best = await pickBestPdf(pdfs, p, 15);
