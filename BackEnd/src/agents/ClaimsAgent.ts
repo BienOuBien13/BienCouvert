@@ -15,33 +15,43 @@ export class ClaimsAgent {
 
   /** Identifie les polices qui couvrent un type de sinistre donné */
   private identifyCoveringPolicies(sinisterType: string, policies: Policy[]): Policy[] {
-    const sinisterLower = sinisterType.toLowerCase();
+    // Normalise : minuscules, accents supprimés, underscores → espaces
+    const normalize = (s: string) =>
+      s.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/_/g, ' ');
 
-    const TYPE_MAP: Record<string, string[]> = {
-      inondation:    ['habitation', 'mrh'],
-      incendie:      ['habitation', 'mrh'],
-      vol:           ['habitation', 'automobile', 'mrh', 'auto'],
-      accident_auto: ['automobile', 'auto'],
-      bris_glace:    ['automobile', 'auto'],
-      sante:         ['santé', 'mutuelle', 'prévoyance'],
-      dece:          ['prévoyance', 'vie', 'décès'],
-      litige:        ['protection juridique', 'juridique'],
-      perte:         ['habitation', 'mrh'],
-      cle:           ['habitation', 'mrh'],
-      serrure:       ['habitation', 'mrh'],
-      telephone:     ['habitation', 'mrh'],
-      mobile:        ['habitation', 'mrh'],
-    };
+    const sinisterNorm = normalize(sinisterType);
 
-    // Cherche le type de sinistre dans la map
-    const relevantTypes = Object.entries(TYPE_MAP).find(([key]) =>
-      sinisterLower.includes(key),
-    )?.[1] || [];
+    // Chaque entrée = tableau de mots-clés déclencheurs → types de polices couvrants
+    const TYPE_MAP: Array<{ triggers: string[]; policyTypes: string[] }> = [
+      { triggers: ['bris de glace', 'bris glace', 'bris'],         policyTypes: ['automobile', 'auto'] },
+      { triggers: ['accident auto', 'accident voiture', 'collision', 'accrochage'], policyTypes: ['automobile', 'auto'] },
+      { triggers: ['inondation', 'dégât des eaux', 'degat des eaux', 'dégâts des eaux'], policyTypes: ['habitation', 'mrh'] },
+      { triggers: ['incendie', 'feu', 'brûlure'],                  policyTypes: ['habitation', 'mrh'] },
+      { triggers: ['vol voiture', 'vol auto', 'vol du véhicule'],  policyTypes: ['automobile', 'auto'] },
+      { triggers: ['vol', 'cambriolage', 'effraction'],            policyTypes: ['habitation', 'automobile', 'mrh', 'auto'] },
+      { triggers: ['sante', 'maladie', 'hospitalisation', 'chirurgie', 'médecin', 'medecin'], policyTypes: ['sante', 'mutuelle', 'prevoyance'] },
+      { triggers: ['deces', 'décès', 'invalide', 'invalidite'],    policyTypes: ['prevoyance', 'vie', 'deces'] },
+      { triggers: ['litige', 'juridique', 'judiciaire', 'avocat'], policyTypes: ['protection juridique', 'juridique'] },
+      { triggers: ['cle perdue', 'clé perdue', 'serrure', 'serrurier'], policyTypes: ['habitation', 'mrh'] },
+      { triggers: ['telephone', 'smartphone', 'portable', 'mobile', 'écran cassé', 'ecran casse'], policyTypes: ['habitation', 'mrh', 'appareils mobiles'] },
+      { triggers: ['perte', 'perdu'],                              policyTypes: ['habitation', 'mrh'] },
+    ];
+
+    const match = TYPE_MAP.find(entry =>
+      entry.triggers.some(trigger => sinisterNorm.includes(normalize(trigger))),
+    );
+    const relevantTypes = match?.policyTypes || [];
+
+    // Si aucun type reconnu, tenter un match large sur le nom/type de la police
+    if (relevantTypes.length === 0) return [];
 
     return policies.filter((p) =>
       relevantTypes.some((t) =>
-        (p.type || '').toLowerCase().includes(t) ||
-        (p.name || '').toLowerCase().includes(t),
+        normalize(p.type || '').includes(normalize(t)) ||
+        normalize(p.name || '').includes(normalize(t)) ||
+        normalize(p.insurer || '').includes(normalize(t)),
       ),
     );
   }
