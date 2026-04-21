@@ -135,7 +135,7 @@ export class ClaimsAgent {
       const cgId = (p as any).centralCgId;
       if (!cgId) continue;
 
-      const formulaRaw = (p.coverageDetail || p.coverage || '').trim();
+      const formulaRaw = (p.coverageDetail || '').trim();
       const formulaKey = formulaRaw
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
         .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '');
@@ -190,7 +190,7 @@ export class ClaimsAgent {
     if (ai) {
       const hasCoverage = coveringPolicies.length > 0;
       const policyContext = hasCoverage
-        ? coveringPolicies.map((p) => `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || p.coverage || '?'})`).join('\n')
+        ? coveringPolicies.map((p) => `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || '?'})`).join('\n')
         : '';
 
       // Prompt court et pratique quand aucun contrat ne couvre le sinistre
