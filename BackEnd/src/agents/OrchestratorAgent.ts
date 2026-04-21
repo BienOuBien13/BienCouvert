@@ -263,26 +263,10 @@ export class OrchestratorAgent {
 
       // ── SINISTRE ────────────────────────────────────────────────────────
       case 'SINISTRE': {
-        // RAG + ClaimsAgent en parallèle (optimisation circuit)
-        logAgent(ragAgent.name);
+        // ClaimsAgent seul — le RAGAgent n'est pas utilisé dans la réponse sinistre
         logAgent(claimsAgent.name);
-
         const sinisterType = intent.subtype || message;
-
-        const [ragResult, claimsResult] = await Promise.all([
-          ragAgent.search({ query: message, userId, policyIds, insurers }),
-          claimsAgent.guide({ sinisterType, policies, userId }),
-        ]);
-
-        const metrics: PipelineMetrics = {
-          ragCacheHit: ragResult.fromCache,
-          ragChunksFound: ragResult.totalChunks,
-          policyCount: policies.length,
-          hasUserProfile: !!userProfile,
-          intentConfidence: intent.confidence,
-        };
-        circuitOptimizations.push(...optimizerAgent.analyzeCircuit(metrics));
-
+        const claimsResult = await claimsAgent.guide({ sinisterType, policies, userId });
         response = formatClaimsResponse(claimsResult);
         break;
       }
@@ -294,26 +278,19 @@ export class OrchestratorAgent {
           break;
         }
 
-        // RAG + Optimizer en parallèle
+        // RAG d'abord (rapide ~200ms), puis optimizer une seule fois avec les chunks
         logAgent(ragAgent.name);
         logAgent(optimizerAgent.name);
 
-        const [ragResult, optimizerResult] = await Promise.all([
-          ragAgent.search({ query: message, userId, policyIds, insurers }),
-          optimizerAgent.optimize({ policies, userProfile }),
-        ]);
+        const ragResult = await ragAgent.search({ query: message, userId, policyIds, insurers });
+        const optimizerResult = await optimizerAgent.optimize({
+          policies,
+          userProfile,
+          ragResult: ragResult.cgChunks.length > 0 ? ragResult : undefined,
+        });
 
-        // Re-lancer l'optimizer avec les chunks RAG pour plus de précision
-        if (ragResult.cgChunks.length > 0) {
-          const enrichedResult = await optimizerAgent.optimize({ policies, userProfile, ragResult });
-          response = formatOptimizerResponse(enrichedResult);
-        } else {
-          response = formatOptimizerResponse(optimizerResult);
-        }
-
-        circuitOptimizations.push(
-          ...optimizerResult.circuitOptimizations,
-        );
+        response = formatOptimizerResponse(optimizerResult);
+        circuitOptimizations.push(...optimizerResult.circuitOptimizations);
         break;
       }
 

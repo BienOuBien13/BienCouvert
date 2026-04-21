@@ -53,6 +53,19 @@ export class IntentAgent {
     // Essai rapide par mots-clés d'abord
     const keywordIntent = detectByKeywords(message);
 
+    // ── Court-circuit : intents sans ambiguïté → pas besoin de LLM ─────────
+    // SINISTRE, OPTIMISATION et UPLOAD ont des vocabulaires très spécifiques.
+    // Évite 800–1500 ms d'appel Gemini sur les cas évidents.
+    const SKIP_LLM_INTENTS: AgentIntent[] = ['SINISTRE', 'OPTIMISATION', 'UPLOAD'];
+    if (keywordIntent && SKIP_LLM_INTENTS.includes(keywordIntent)) {
+      console.log(`[IntentAgent] Court-circuit mots-clés → ${keywordIntent} (LLM ignoré)`);
+      return {
+        intent: keywordIntent,
+        confidence: 0.85,
+        entities: [],
+      };
+    }
+
     const ai = getAiClient();
     if (!ai) {
       return {
