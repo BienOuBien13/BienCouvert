@@ -22,13 +22,14 @@ import Footer from './components/Footer';
 import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import IngestionJobBadge from './components/IngestionJobBadge';
-import { Policy, Message, User, AppView, UserProfileData } from './types';
+import { Policy, Message, User, AppView, UserProfileData, PolicyType } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { 
   Database, LogOut, Sparkles, ShieldAlert,
   ArrowRight, CheckCircle2, Search, Zap, MessageSquare, Shield,
-  Rocket, Target, Flag, Info, Settings, Briefcase, Activity
+  Rocket, Target, Flag, Info, Settings, Briefcase, Activity,
+  Car, Home, Heart, Scale, CreditCard, Banknote, Smartphone, HeartPulse
 } from 'lucide-react';
 
 function App() {
@@ -405,44 +406,99 @@ function App() {
         return <div className="h-[calc(100vh-140px)] animate-fadeIn"><ChatInterface policies={policies} messages={messages} setMessages={setMessages} /></div>;
       case 'analysis':
         return <div className="animate-fadeIn"><AnalysisView policies={policies} profile={userProfile} onUpdateProfile={handleUpdateProfile} user={user} onFinishSimulation={() => setIsClearModalOpen(true)} /></div>;
-      case 'coverage':
+      case 'coverage': {
+        const coverageTypeConfig: Record<string, { icon: React.ReactNode; gradient: string; badge: string }> = {
+          [PolicyType.AUTO]:   { icon: <Car className="w-5 h-5" />,        gradient: 'from-sky-500 to-blue-600',    badge: 'bg-sky-100 text-sky-700 border-sky-200' },
+          [PolicyType.HOME]:   { icon: <Home className="w-5 h-5" />,       gradient: 'from-violet-500 to-purple-700', badge: 'bg-violet-100 text-violet-700 border-violet-200' },
+          [PolicyType.HEALTH]: { icon: <HeartPulse className="w-5 h-5" />, gradient: 'from-rose-400 to-pink-600',   badge: 'bg-rose-100 text-rose-700 border-rose-200' },
+          [PolicyType.LIFE]:   { icon: <Heart className="w-5 h-5" />,      gradient: 'from-red-500 to-rose-700',    badge: 'bg-red-100 text-red-700 border-red-200' },
+          [PolicyType.LEGAL]:  { icon: <Scale className="w-5 h-5" />,      gradient: 'from-amber-400 to-yellow-600',badge: 'bg-amber-100 text-amber-700 border-amber-200' },
+          [PolicyType.BANK_CARD]: { icon: <CreditCard className="w-5 h-5" />, gradient: 'from-teal-400 to-emerald-600', badge: 'bg-teal-100 text-teal-700 border-teal-200' },
+          [PolicyType.LOAN]:   { icon: <Banknote className="w-5 h-5" />,   gradient: 'from-green-500 to-emerald-700', badge: 'bg-green-100 text-green-700 border-green-200' },
+          [PolicyType.MOBILE]: { icon: <Smartphone className="w-5 h-5" />, gradient: 'from-slate-400 to-slate-600', badge: 'bg-slate-100 text-slate-700 border-slate-200' },
+          [PolicyType.OTHER]:  { icon: <Shield className="w-5 h-5" />,     gradient: 'from-indigo-400 to-indigo-600', badge: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+        };
+        const grouped = policies.reduce<Record<string, Policy[]>>((acc, p) => {
+          const key = p.type || PolicyType.OTHER;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(p);
+          return acc;
+        }, {});
+        const typeOrder = [PolicyType.AUTO, PolicyType.HOME, PolicyType.HEALTH, PolicyType.LIFE, PolicyType.LEGAL, PolicyType.BANK_CARD, PolicyType.LOAN, PolicyType.MOBILE, PolicyType.OTHER];
+        const sortedGroups = typeOrder.filter(t => grouped[t]?.length);
         return (
-          <div className="space-y-6 animate-fadeIn">
-            <div>
-              <h2 className="text-3xl font-black text-slate-900 mb-2">Vos Garanties</h2>
-              <p className="text-slate-600 font-medium">Sélectionnez un contrat pour voir le détail de ses garanties</p>
-            </div>
-            <div className="grid grid-cols-1 gap-4">
-              {policies.length === 0 ? (
-                <div className="text-center py-16 text-slate-400">
-                  <Shield className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                  <p className="font-black uppercase tracking-widest text-sm">Aucun contrat</p>
-                  <p className="text-xs mt-1">Ajoutez des contrats pour visualiser leurs garanties</p>
-                  <button onClick={() => setActiveView('add')} className="mt-6 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 transition-all">
-                    Ajouter un contrat
-                  </button>
-                </div>
-              ) : (
-                policies.map(policy => (
-                  <button
-                    key={policy.id}
-                    onClick={() => setCoveragePolicy(policy)}
-                    className="w-full flex items-center gap-4 p-5 bg-white rounded-3xl border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.10)] hover:border-primary-200 transition-all group active:scale-[0.98] text-left"
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-cyan-500 text-white flex items-center justify-center shrink-0">
-                      <Shield className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-black text-slate-900 truncate">{policy.name}</p>
-                      <p className="text-xs text-slate-400 font-medium mt-0.5">{policy.insurer} · {policy.coverageDetail || policy.coverage || 'Formule souscrite'}</p>
-                    </div>
-                    <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0" />
-                  </button>
-                ))
+          <div className="space-y-6 animate-fadeIn pb-6">
+            {/* Header */}
+            <div className="flex items-end justify-between">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 leading-none">Garanties</h2>
+                <p className="text-slate-500 text-sm font-medium mt-1">{policies.length} contrat{policies.length > 1 ? 's' : ''}</p>
+              </div>
+              {policies.length > 0 && (
+                <span className="text-xs font-black uppercase tracking-widest text-primary-600 bg-primary-50 border border-primary-100 px-3 py-1.5 rounded-2xl">
+                  {sortedGroups.length} type{sortedGroups.length > 1 ? 's' : ''}
+                </span>
               )}
             </div>
+
+            {policies.length === 0 ? (
+              <div className="text-center py-20 text-slate-400">
+                <Shield className="w-14 h-14 mx-auto mb-5 opacity-20" />
+                <p className="font-black uppercase tracking-widest text-sm">Aucun contrat</p>
+                <p className="text-xs mt-2 max-w-[220px] mx-auto leading-relaxed">Ajoutez vos contrats pour visualiser vos garanties</p>
+                <button onClick={() => setActiveView('add')} className="mt-6 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 transition-all">
+                  Ajouter un contrat
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {sortedGroups.map(type => {
+                  const cfg = coverageTypeConfig[type] ?? coverageTypeConfig[PolicyType.OTHER];
+                  const group = grouped[type];
+                  return (
+                    <div key={type} className="space-y-2">
+                      {/* Group header */}
+                      <div className="flex items-center gap-3 px-1">
+                        <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${cfg.gradient} text-white flex items-center justify-center shadow-sm`}>
+                          {cfg.icon}
+                        </div>
+                        <span className="font-black text-sm text-slate-900">{type}</span>
+                        <span className={`ml-auto text-[10px] font-black uppercase tracking-widest border px-2 py-0.5 rounded-full ${cfg.badge}`}>
+                          {group.length} contrat{group.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      {/* Policy cards */}
+                      {group.map(policy => (
+                        <button
+                          key={policy.id}
+                          onClick={() => setCoveragePolicy(policy)}
+                          className="w-full flex items-center gap-4 px-5 py-4 bg-white rounded-3xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:shadow-[0_6px_24px_rgba(0,0,0,0.09)] hover:border-slate-200 transition-all group active:scale-[0.98] text-left"
+                        >
+                          <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${cfg.gradient} text-white flex items-center justify-center shrink-0 shadow-sm`}>
+                            {cfg.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-slate-900 text-sm truncate">{policy.name || policy.insurer}</p>
+                            <p className="text-xs text-slate-400 font-medium mt-0.5 truncate">
+                              {policy.insurer}{policy.coverageDetail || policy.coverage ? ` · ${policy.coverageDetail || policy.coverage}` : ''}
+                            </p>
+                          </div>
+                          {policy.premium && (
+                            <span className="text-xs font-black text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-1 rounded-xl shrink-0">
+                              {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(policy.premium)}/an
+                            </span>
+                          )}
+                          <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 ml-1" />
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
+      }
       case 'experts':
         return null; // Réseau d'experts en construction — masqué
       case 'profile':

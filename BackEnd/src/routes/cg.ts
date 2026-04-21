@@ -13,6 +13,7 @@ import { query } from '../db';
 import pool from '../db';
 import { generateEmbedding as generateEmbeddingCentral } from '../services/geminiService';
 import { vectorizeUserCgByPages, vectorizeCgByPages } from '../services/pageVectorizationService';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 // pdf-parse : extraction texte locale (0 token Gemini output)
 const pdfParse = require('pdf-parse');
 
@@ -908,7 +909,7 @@ router.delete('/coverage-fact/:id', async (req: Request, res: Response) => {
 
 // GET /api/cg/admin/user-cgs
 // Liste tous les CG utilisateurs avec infos user, assureur, type, compteurs
-router.get('/admin/user-cgs', async (req: Request, res: Response) => {
+router.get('/admin/user-cgs', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT uc.id,
@@ -945,7 +946,7 @@ router.get('/admin/user-cgs', async (req: Request, res: Response) => {
 
 // DELETE /api/cg/admin/user-cg/:id
 // Supprime un CG utilisateur (FK cascade sur pages et faits)
-router.delete('/admin/user-cg/:id', async (req: Request, res: Response) => {
+router.delete('/admin/user-cg/:id', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await query('DELETE FROM user_cg WHERE id = $1', [id]);

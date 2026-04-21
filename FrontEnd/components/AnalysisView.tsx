@@ -86,7 +86,7 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [findings, setFindings] = useState<OptimizationFinding[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [phase, setPhase] = useState<'questionnaire' | 'results'>('questionnaire');
+  const [phase, setPhase] = useState<'intro' | 'questionnaire' | 'results'>('intro');
   const [isExporting, setIsExporting] = useState(false);
 
   // Charger le profil saved depuis la table dédiée au montage du composant
@@ -174,6 +174,75 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
 
   return (
     <div className="space-y-6 pb-40 max-w-2xl mx-auto px-2">
+
+      {/* ── PHASE INTRO ─────────────────────────────────────────────── */}
+      {phase === 'intro' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Hero */}
+          <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-8 text-white overflow-hidden relative">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/10 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2" />
+            <div className="relative z-10 space-y-4">
+              <div className="w-14 h-14 bg-primary-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary-900/40">
+                <Zap className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black tracking-tighter">Audit de votre couverture</h2>
+              <p className="text-slate-300 text-sm leading-relaxed">
+                En 2 minutes, notre IA analyse vos contrats et détecte automatiquement les <span className="text-white font-bold">doublons</span>, les <span className="text-white font-bold">lacunes</span> et les <span className="text-white font-bold">économies potentielles</span>.
+              </p>
+            </div>
+          </div>
+
+          {/* Comment ça marche */}
+          <div className="space-y-3">
+            {[
+              {
+                num: '1', color: 'bg-primary-600', title: 'Votre profil',
+                desc: 'On vous pose quelques questions sur votre foyer, votre logement et vos besoins. Cela prend moins de 2 minutes.'
+              },
+              {
+                num: '2', color: 'bg-emerald-600', title: 'Analyse automatique',
+                desc: "L'IA compare votre profil avec vos contrats de manière agnostique — sans parti pris, sans jugement commercial."
+              },
+              {
+                num: '3', color: 'bg-amber-500', title: 'Résultats clairs',
+                desc: 'Vous obtenez un bilan avec les doublons, les zones non couvertes et des recommandations concrètes.'
+              },
+            ].map(step => (
+              <div key={step.num} className="flex items-start gap-4 p-5 bg-white rounded-3xl border border-slate-100 shadow-sm">
+                <div className={`w-9 h-9 ${step.color} rounded-2xl text-white flex items-center justify-center font-black text-sm shrink-0 mt-0.5`}>{step.num}</div>
+                <div>
+                  <p className="font-black text-slate-900 text-sm">{step.title}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Confidentialité */}
+          <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-5 flex items-start gap-3">
+            <Shield className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <p className="text-xs text-emerald-800 font-medium leading-relaxed">
+              <span className="font-black">Confidentialité garantie.</span> Vos réponses sont utilisées uniquement pour cette analyse. Vous pouvez <span className="font-bold">supprimer toutes vos données de profil</span> à la fin du questionnaire en un clic.
+            </p>
+          </div>
+
+          {/* CTA */}
+          <button
+            onClick={() => setPhase('questionnaire')}
+            className="w-full py-6 bg-primary-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-primary-900/20 hover:bg-primary-700 active:scale-95 transition-all flex items-center justify-center gap-3"
+          >
+            <Sparkles className="w-5 h-5" />
+            Démarrer l'audit
+          </button>
+
+          {policies.length < 1 && (
+            <p className="text-center text-xs text-amber-600 font-bold bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+              ⚠️ Ajoutez au moins un contrat pour obtenir une analyse personnalisée.
+            </p>
+          )}
+        </div>
+      )}
+
       {phase === 'questionnaire' && (<>
       {/* Dynamic Header with Progress */}
       <div className="bg-white rounded-[2rem] p-4 shadow-sm border border-slate-100 lg:sticky lg:top-20 z-20 transition-all">

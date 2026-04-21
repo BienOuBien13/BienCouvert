@@ -1,16 +1,16 @@
 
 import React from 'react';
-import { X, Trash2, Save, ShieldCheck, AlertTriangle, Headset, ArrowRight, Users } from 'lucide-react';
+import { X, Trash2, Save, ShieldCheck } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onConfirmClear: () => void;
   onConfirmSave: () => void;
-  onTransferToExpert: () => void;
+  onTransferToExpert: () => void; // kept for API compatibility
 }
 
-export const ClearDataModal: React.FC<Props> = ({ isOpen, onClose, onConfirmClear, onConfirmSave, onTransferToExpert }) => {
+export const ClearDataModal: React.FC<Props> = ({ isOpen, onClose, onConfirmClear, onConfirmSave }) => {
   if (!isOpen) return null;
 
   return (
@@ -24,24 +24,14 @@ export const ClearDataModal: React.FC<Props> = ({ isOpen, onClose, onConfirmClea
           <div className="space-y-2">
             <h2 className="text-2xl font-black text-slate-900 tracking-tighter">Audit Terminé</h2>
             <p className="text-sm text-slate-500 font-medium px-4">
-              Souhaitez-vous sauvegarder ce bilan ou approfondir l'analyse avec un expert humain ?
+              Souhaitez-vous sauvegarder ce bilan ou supprimer toutes vos données ?
             </p>
           </div>
 
           <div className="space-y-3 pt-4">
-            {/* Main CTA: Transfer to Expert */}
-            <button 
-              onClick={onTransferToExpert}
-              className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-900/20 active:scale-95 group"
-            >
-              <Users className="w-4 h-4" />
-              Transférer à un Expert
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-
             <button 
               onClick={onConfirmSave}
-              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-lg"
+              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-lg active:scale-95"
             >
               <Save className="w-4 h-4" />
               Sauvegarder dans mon profil
@@ -49,17 +39,12 @@ export const ClearDataModal: React.FC<Props> = ({ isOpen, onClose, onConfirmClea
             
             <button 
               onClick={onConfirmClear}
-              className="w-full py-4 bg-white border border-red-100 text-red-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-red-50 transition-all mt-4"
+              className="w-full py-4 bg-white border border-red-100 text-red-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-red-50 transition-all"
             >
               <Trash2 className="w-3 h-3" />
-              Tout supprimer (Anonyme)
+              Supprimer toutes mes données
             </button>
           </div>
-
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter flex items-center justify-center gap-2">
-            <AlertTriangle className="w-3 h-3 text-amber-500" />
-            L'expertise humaine est gratuite et sans engagement.
-          </p>
         </div>
 
         <button 

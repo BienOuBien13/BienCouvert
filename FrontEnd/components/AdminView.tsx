@@ -419,11 +419,16 @@ export const AdminView: React.FC = () => {
   const handleDeleteUserCg = async (id: number, filename: string) => {
     if (!confirm(`Supprimer le CG "${filename}" ? Cette action est irréversible.`)) return;
     try {
+      const csrf = await fetchCsrfToken();
       const res = await fetch(
         `${import.meta.env.VITE_API_URL || ''}/api/cg/admin/user-cg/${id}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
+          credentials: 'include',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+            'X-CSRF-Token': csrf || ''
+          }
         }
       );
       if (!res.ok) throw new Error((await res.json()).error || 'Erreur');
