@@ -36,13 +36,31 @@ function normalizeFormulaKey(label: string): string {
 
 /**
  * Strips option-qualification suffixes from a formula label.
- * e.g. "Différence — avec option" → "Différence"
- *      "Confort - sans options" → "Confort"
+ * Handles all common forms encountered in French CG tables.
+ * e.g. "Différence (avec option)" → "Différence"
+ *      "Essentiel (sans option Optima)" → "Essentiel"
+ *      "Confort — avec option" → "Confort"
+ *      "Initiale - sans options" → "Initiale"
  */
 function stripOptionSuffix(label: string): string {
   return label
-    .replace(/\s*[—–-]\s*(avec|sans)\s+options?\s*$/i, '')
+    // Parentheses: "Essentiel (avec option)" / "Plénitude (sans option Optima)"
+    .replace(/\s*\(\s*(avec|sans)\s+options?[^)]*\)\s*$/i, '')
+    // Square brackets: "Essentiel [avec option]"
+    .replace(/\s*\[\s*(avec|sans)\s+options?[^\]]*\]\s*$/i, '')
+    // Em-dash / en-dash / hyphen: "Confort — avec option"
+    .replace(/\s*[—–-]\s*(avec|sans)\s+options?.*$/i, '')
     .trim();
+}
+
+/** Returns true if the label is an option-qualified variant (avec or sans option). */
+function isOptionVariant(label: string): boolean {
+  return /\b(avec|sans)\s+options?\b/i.test(label);
+}
+
+/** Returns true specifically for "avec option" variants (guarantees are add-ons). */
+function isAvecOptionVariant(label: string): boolean {
+  return /\bAvec\s+options?\b/i.test(label);
 }
 
 /**
@@ -118,36 +136,8 @@ export async function runFormulaPostProcessing(
   // ── Steps 2-3: heuristic pre-filter + LLM validation ─────────────────────────
   const correctionMap = await validateCandidates(rawCandidates, classifierHints, coverPageBase64, tag);
 
-  // ── Step 4: apply corrections to coverage_facts ──────────────────────────────
-  let factsUpdated = 0;
-
-  for (const [rawLabel, canonicalLabel] of correctionMap.entries()) {
-    if (canonicalLabel === null) {
-      // Rejected: delete coverage_facts rows for this spurious formula
-      const del = await pool.query(
-        `DELETE FROM coverage_facts WHERE central_cg_id = $1 AND formula_label = $2`,
-        [centralCgId, rawLabel],
-      );
-      if ((del.rowCount ?? 0) > 0) {
-        console.log(`${tag} Supprimé ${del.rowCount} facts pour formule parasite "${rawLabel}"`);
-        factsUpdated += del.rowCount ?? 0;
-      }
-    } else if (canonicalLabel !== rawLabel) {
-      // Renamed: update label and key
-      const newKey = normalizeFormulaKey(canonicalLabel);
-      const upd = await pool.query(
-        `UPDATE coverage_facts
-         SET formula_label = $1, formula_key = $2
-         WHERE central_cg_id = $3 AND formula_label = $4`,
-        [canonicalLabel, newKey, centralCgId, rawLabel],
-      );
-      if ((upd.rowCount ?? 0) > 0) {
-        console.log(`${tag} Renommé ${upd.rowCount} facts: "${rawLabel}" → "${canonicalLabel}"`);
-        factsUpdated += upd.rowCount ?? 0;
-      }
-    }
-    // else: label correct, no DB write needed
-  }
+  // ── Step 4: apply corrections to coverage_facts (smart option-variant merge) ──
+  const factsUpdated = await applyCorrectionsWithMerge(pool, centralCgId, correctionMap, rawCandidates, tag);
 
   // ── Step 5: build final validFormulas list ────────────────────────────────────
   const validFormulas = buildValidFormulas(rawCandidates, correctionMap, classifierHints);
@@ -213,6 +203,180 @@ interface RawCandidate {
 }
 
 /**
+ * Applies the correctionMap to coverage_facts for a central_cg document.
+ * Handles option-variant merging correctly:
+ *  - "sans option" variant  → becomes the canonical base row (replace existing)
+ *  - "avec option" variant  → deleted (optional guarantees already marked on base)
+ *  - Other rename           → simple UPDATE; if target key already exists, merge by
+ *                             keeping the row with the most informative coverage_status.
+ */
+async function applyCorrectionsWithMerge(
+  pool: Pool,
+  centralCgId: number,
+  correctionMap: Map<string, string | null>,
+  rawCandidates: RawCandidate[],
+  tag: string,
+): Promise<number> {
+  let factsUpdated = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const [rawLabel, canonicalLabel] of correctionMap.entries()) {
+      if (canonicalLabel === null) {
+        const del = await client.query(
+          `DELETE FROM coverage_facts WHERE central_cg_id = $1 AND formula_label = $2`,
+          [centralCgId, rawLabel],
+        );
+        if ((del.rowCount ?? 0) > 0) {
+          console.log(`${tag} Supprimé ${del.rowCount} facts (parasite) "${rawLabel}"`);
+          factsUpdated += del.rowCount ?? 0;
+        }
+      } else if (canonicalLabel !== rawLabel) {
+        const newKey = normalizeFormulaKey(canonicalLabel);
+        const { rowCount: existing } = await client.query(
+          `SELECT 1 FROM coverage_facts WHERE central_cg_id = $1 AND formula_key = $2 LIMIT 1`,
+          [centralCgId, newKey],
+        );
+
+        if (!existing) {
+          // Simple rename — no conflict
+          const upd = await client.query(
+            `UPDATE coverage_facts SET formula_label = $1, formula_key = $2
+             WHERE central_cg_id = $3 AND formula_label = $4`,
+            [canonicalLabel, newKey, centralCgId, rawLabel],
+          );
+          if ((upd.rowCount ?? 0) > 0) {
+            console.log(`${tag} Renommé ${upd.rowCount} facts: "${rawLabel}" → "${canonicalLabel}"`);
+            factsUpdated += upd.rowCount ?? 0;
+          }
+        } else if (isAvecOptionVariant(rawLabel)) {
+          // "avec option" duplicate → delete (base formula already marks options as 'optional')
+          const del = await client.query(
+            `DELETE FROM coverage_facts WHERE central_cg_id = $1 AND formula_label = $2`,
+            [centralCgId, rawLabel],
+          );
+          console.log(`${tag} Supprimé ${del.rowCount ?? 0} facts (avec option → fusionné): "${rawLabel}"`);
+          factsUpdated += del.rowCount ?? 0;
+        } else {
+          // "sans option" or renamed variant that conflicts — merge into existing canonical:
+          // Update coverage_status on the canonical rows using the incoming rows (prefer non-not_applicable).
+          await client.query(
+            `UPDATE coverage_facts AS tgt
+             SET coverage_status = CASE
+               WHEN src.coverage_status <> 'not_applicable' THEN src.coverage_status
+               ELSE tgt.coverage_status
+             END,
+             coverage_amount = COALESCE(src.coverage_amount, tgt.coverage_amount),
+             franchise       = COALESCE(src.franchise, tgt.franchise),
+             updated_at      = CURRENT_TIMESTAMP
+             FROM coverage_facts AS src
+             WHERE src.central_cg_id  = $1
+               AND src.formula_label  = $2
+               AND tgt.central_cg_id  = $1
+               AND tgt.formula_key    = $3
+               AND tgt.guarantee_key  = src.guarantee_key`,
+            [centralCgId, rawLabel, newKey],
+          );
+          const del = await client.query(
+            `DELETE FROM coverage_facts WHERE central_cg_id = $1 AND formula_label = $2`,
+            [centralCgId, rawLabel],
+          );
+          console.log(`${tag} Fusionné (sans option → canonical) ${del.rowCount ?? 0} facts: "${rawLabel}" → "${canonicalLabel}"`);
+          factsUpdated += del.rowCount ?? 0;
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  return factsUpdated;
+}
+
+/**
+ * Same merge logic for user_coverage_facts (user_cg path).
+ */
+async function applyCorrectionsWithMergeUser(
+  pool: Pool,
+  userCgId: number,
+  correctionMap: Map<string, string | null>,
+  rawCandidates: RawCandidate[],
+  tag: string,
+): Promise<number> {
+  let factsUpdated = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const [rawLabel, canonicalLabel] of correctionMap.entries()) {
+      if (canonicalLabel === null) {
+        const del = await client.query(
+          `DELETE FROM user_coverage_facts WHERE user_cg_id = $1 AND formula_label = $2`,
+          [userCgId, rawLabel],
+        );
+        factsUpdated += del.rowCount ?? 0;
+      } else if (canonicalLabel !== rawLabel) {
+        const newKey = normalizeFormulaKey(canonicalLabel);
+        const { rowCount: existing } = await client.query(
+          `SELECT 1 FROM user_coverage_facts WHERE user_cg_id = $1 AND formula_key = $2 LIMIT 1`,
+          [userCgId, newKey],
+        );
+
+        if (!existing) {
+          const upd = await client.query(
+            `UPDATE user_coverage_facts SET formula_label = $1, formula_key = $2
+             WHERE user_cg_id = $3 AND formula_label = $4`,
+            [canonicalLabel, newKey, userCgId, rawLabel],
+          );
+          factsUpdated += upd.rowCount ?? 0;
+        } else if (isAvecOptionVariant(rawLabel)) {
+          const del = await client.query(
+            `DELETE FROM user_coverage_facts WHERE user_cg_id = $1 AND formula_label = $2`,
+            [userCgId, rawLabel],
+          );
+          factsUpdated += del.rowCount ?? 0;
+        } else {
+          await client.query(
+            `UPDATE user_coverage_facts AS tgt
+             SET coverage_status = CASE
+               WHEN src.coverage_status <> 'not_applicable' THEN src.coverage_status
+               ELSE tgt.coverage_status
+             END,
+             coverage_amount = COALESCE(src.coverage_amount, tgt.coverage_amount),
+             updated_at      = CURRENT_TIMESTAMP
+             FROM user_coverage_facts AS src
+             WHERE src.user_cg_id    = $1
+               AND src.formula_label = $2
+               AND tgt.user_cg_id   = $1
+               AND tgt.formula_key  = $3
+               AND tgt.guarantee_key = src.guarantee_key`,
+            [userCgId, rawLabel, newKey],
+          );
+          const del = await client.query(
+            `DELETE FROM user_coverage_facts WHERE user_cg_id = $1 AND formula_label = $2`,
+            [userCgId, rawLabel],
+          );
+          factsUpdated += del.rowCount ?? 0;
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  return factsUpdated;
+}
+
+/**
  * Runs heuristic pre-filter then LLM validation on a list of raw formula candidates.
  * Returns a correctionMap: rawLabel → canonicalLabel (null = reject).
  */
@@ -260,10 +424,13 @@ RÈGLES :
 - FORMULE VALIDE : nom propre d'une offre souscriptible (ex: "Formule Tiers", "TIERS ESSENTIEL", "Confort+", "NIVEAU 2")
 - FAUSSE DÉTECTION : pronoms ("Nous", "Vous"), locutions ("De plein droit"), en-têtes de section, descripteurs de valeur, zones géographiques, montants, sous-conditions
 - CORRECTION : si le candidat est une formule valide mais mal orthographié ou tronqué, donne le nom corrigé
+- VARIANTS AVEC/SANS OPTION : si un candidat est une variante d'option d'une formule (ex: "Essentiel (avec option)", "Différence sans option", "Initiale (avec option Optima)") → retourne le NOM DE BASE SANS le suffixe option (ex: canonical = "Essentiel", "Différence", "Initiale"). Les options sont des garanties activables séparément, ce ne sont PAS des formules distinctes.
 
 Réponds UNIQUEMENT en JSON (tableau dans le même ordre que les candidats) :
 [
   { "input": "Formule Tiers", "is_formula": true, "canonical": "Formule Tiers" },
+  { "input": "Essentiel (avec option)", "is_formula": true, "canonical": "Essentiel" },
+  { "input": "Différence sans option", "is_formula": true, "canonical": "Différence" },
   { "input": "Nous", "is_formula": false, "canonical": null }
 ]`;
 
@@ -399,25 +566,8 @@ export async function runFormulaPostProcessingForUserCg(
 
   const correctionMap = await validateCandidates(rawCandidates, classifierHints, coverPageBase64, tag);
 
-  // Apply corrections to user_coverage_facts
-  let factsUpdated = 0;
-  for (const [rawLabel, canonicalLabel] of correctionMap.entries()) {
-    if (canonicalLabel === null) {
-      const del = await pool.query(
-        `DELETE FROM user_coverage_facts WHERE user_cg_id = $1 AND formula_label = $2`,
-        [userCgId, rawLabel],
-      );
-      factsUpdated += del.rowCount ?? 0;
-    } else if (canonicalLabel !== rawLabel) {
-      const newKey = normalizeFormulaKey(canonicalLabel);
-      const upd = await pool.query(
-        `UPDATE user_coverage_facts SET formula_label = $1, formula_key = $2
-         WHERE user_cg_id = $3 AND formula_label = $4`,
-        [canonicalLabel, newKey, userCgId, rawLabel],
-      );
-      factsUpdated += upd.rowCount ?? 0;
-    }
-  }
+  // Apply corrections to user_coverage_facts (smart option-variant merge)
+  const factsUpdated = await applyCorrectionsWithMergeUser(pool, userCgId, correctionMap, rawCandidates, tag);
 
   const validFormulas = buildValidFormulas(rawCandidates, correctionMap, classifierHints);
 

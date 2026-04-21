@@ -105,20 +105,20 @@ export const masterDataService = {
   },
 
   /**
-   * Récupère les assureurs disponibles pour un type d'assurance donné
+   * Récupère tous les assureurs actifs (mode custom : l'utilisateur peut uploader
+   * une CG pour n'importe quel assureur, pas seulement ceux pré-associés).
+   * Le paramètre insuranceTypeCode est conservé pour compatibilité d'API mais ignoré.
    */
-  getInsurersByType: async (insuranceTypeCode: string): Promise<any[]> => {
+  getInsurersByType: async (_insuranceTypeCode: string): Promise<any[]> => {
     const result = await query(
-      `SELECT i.code, i.label, i.full_name as "fullName", i.description, 
-              i.logo_url as "logoUrl", i.website_url as "websiteUrl", 
-              i.phone, i.email, i.color, i.display_order as "displayOrder", 
-              i.is_active as "isActive"
-       FROM insurers i
-       INNER JOIN insurers_insurance_types iit ON i.code = iit.insurer_code
-       WHERE iit.insurance_type_code = $1 
-         AND i.is_active = true
-       ORDER BY i.display_order`,
-      [insuranceTypeCode]
+      `SELECT code, label, full_name as "fullName", description,
+              logo_url as "logoUrl", website_url as "websiteUrl",
+              phone, email, color, display_order as "displayOrder",
+              is_active as "isActive"
+       FROM insurers
+       WHERE is_active = true
+       ORDER BY display_order, label`,
+      []
     );
     return result.rows;
   },

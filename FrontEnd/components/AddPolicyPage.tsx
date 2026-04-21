@@ -125,12 +125,25 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     }
   };
 
-  const loadInsurersByType = async (typeCode: string) => {
+  const loadInsurersByType = async (typeCode: string, currentMode: 'standard' | 'custom' = mode) => {
     try {
-      const response = await fetch(`${API_URL}/api/masterdata/insurers-by-type/${typeCode}`, { credentials: 'include' });
+      // Mode standard : uniquement les assureurs qui ont une CG active dans central_cg
+      // Mode custom : tous les assureurs du référentiel + option "Autre"
+      const url = currentMode === 'standard'
+        ? `${API_URL}/api/cg/central/available-insurers?insurance_type_code=${encodeURIComponent(typeCode)}`
+        : `${API_URL}/api/masterdata/insurers-by-type/${typeCode}`;
+      const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      setAvailableInsurers(Array.isArray(data) ? data : []);
+      const insurers = Array.isArray(data) ? data : [];
+      if (currentMode === 'custom') {
+        // Ajouter l'option "Autre" en fin de liste
+        const autreAlreadyPresent = insurers.some((i: Insurer) => i.code === 'AUTRE');
+        if (!autreAlreadyPresent) {
+          insurers.push({ code: 'AUTRE', label: 'Autre', fullName: 'Autre assureur', color: '#6B7280', logoUrl: undefined });
+        }
+      }
+      setAvailableInsurers(insurers);
     } catch (err) {
       console.error('Erreur chargement assureurs:', err);
       setError('Impossible de charger les assureurs');
@@ -140,7 +153,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
   const handleSelectType = async (type: InsuranceType) => {
     setSelectedType(type);
     setError('');
-    await loadInsurersByType(type.code);
+    await loadInsurersByType(type.code, mode);
     setStep('selectInsurer');
   };
 
@@ -479,28 +492,57 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         )}
       </div>
 
-      {/* Sélecteur de mode */}
-      <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-xl">
+      {/* Sélecteur de mode — onglets bien visibles */}
+      <div className="flex mb-6 border-b-2 border-gray-200">
         <button
-          onClick={() => setMode('standard')}
-          className={`flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition ${
+          onClick={async () => {
+            if (mode !== 'standard') {
+              setMode('standard');
+              setStep('selectType');
+              setSelectedType(null);
+              setSelectedInsurer(null);
+              setAvailableInsurers([]);
+              setError('');
+            }
+          }}
+          className={`flex-1 py-3 px-4 font-semibold text-sm transition-all border-b-4 -mb-0.5 ${
             mode === 'standard'
-              ? 'bg-white text-blue-600 shadow-sm'
-              : 'text-gray-600'
+              ? 'border-blue-600 text-blue-700 bg-blue-50'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
           }`}
         >
-          📋 Contrats disponibles centraux
+          📋 Contrats centraux disponibles
         </button>
         <button
-          onClick={() => setMode('custom')}
-          className={`flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition ${
+          onClick={async () => {
+            if (mode !== 'custom') {
+              setMode('custom');
+              setStep('selectType');
+              setSelectedType(null);
+              setSelectedInsurer(null);
+              setAvailableInsurers([]);
+              setError('');
+            }
+          }}
+          className={`flex-1 py-3 px-4 font-semibold text-sm transition-all border-b-4 -mb-0.5 ${
             mode === 'custom'
-              ? 'bg-white text-blue-600 shadow-sm'
-              : 'text-gray-600'
+              ? 'border-blue-600 text-blue-700 bg-blue-50'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
           }`}
         >
           📄 Ajout de conditions
         </button>
+      </div>
+
+      {/* Description de l'onglet actif */}
+      <div className={`mb-5 px-4 py-2 rounded-lg text-sm ${
+        mode === 'standard'
+          ? 'bg-blue-50 text-blue-800 border border-blue-100'
+          : 'bg-amber-50 text-amber-800 border border-amber-100'
+      }`}>
+        {mode === 'standard'
+          ? '🔎 Les CG listées proviennent de notre référentiel central. Choisissez votre assureur et votre formule.'
+          : '📤 Chargez vos propres Conditions Générales (PDF) pour les analyser et les ajouter à votre portefeuille.'}
       </div>
 
       {error && (
@@ -552,6 +594,24 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
             ← Changer le type d'assurance
           </button>
 
+          {/* CTA si aucun assureur trouvé en mode standard */}
+          {mode === 'standard' && !isLoadingSubTypesStandard && availableInsurers.length === 0 && (
+            <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-xl p-5 text-center space-y-3">
+              <p className="text-amber-800 text-sm font-medium">😕 Aucun contrat central disponible pour <strong>{selectedType?.labelFr}</strong> pour le moment.</p>
+              <p className="text-amber-700 text-xs">Vous pouvez ajouter votre contrat manuellement en chargeant votre PDF.</p>
+              <button
+                onClick={() => {
+                  setMode('custom');
+                  setStep('selectInsurer');
+                  if (selectedType) loadInsurersByType(selectedType.code, 'custom');
+                }}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 transition"
+              >
+                Basculer vers « Ajout de conditions » →
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {isLoadingSubTypesStandard && (
               <div className="col-span-2 text-center py-4 text-sm text-gray-500">
@@ -563,15 +623,19 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 key={insurer.code}
                 onClick={() => !isLoadingSubTypesStandard && handleSelectInsurer(insurer)}
                 disabled={isLoadingSubTypesStandard}
-                className="p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white disabled:opacity-60 disabled:cursor-wait"
+                className={`p-4 rounded-xl border-2 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white disabled:opacity-60 disabled:cursor-wait ${
+                  insurer.code === 'AUTRE' ? 'border-dashed border-gray-300' : 'border-gray-200'
+                }`}
                 style={{ borderColor: selectedInsurer?.code === insurer.code ? insurer.color : undefined }}
               >
                 <div className="flex items-center gap-3">
                   <div 
                     className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden bg-white border border-gray-100 shadow-sm"
-                    style={{ backgroundColor: insurer.logoUrl ? 'white' : insurer.color }}
+                    style={{ backgroundColor: insurer.logoUrl ? 'white' : (insurer.code === 'AUTRE' ? '#F3F4F6' : insurer.color) }}
                   >
-                    {insurer.logoUrl ? (
+                    {insurer.code === 'AUTRE' ? (
+                      <span className="text-3xl">🏢</span>
+                    ) : insurer.logoUrl ? (
                       <img src={insurer.logoUrl} alt={insurer.label} className="w-14 h-14 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
                     ) : (
                       <span className="text-white font-bold text-xl">{insurer.label.substring(0, 2)}</span>
@@ -584,6 +648,22 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               </button>
             ))}
           </div>
+
+          {/* CTA si l'assureur n'est pas dans la liste (mode standard) */}
+          {mode === 'standard' && availableInsurers.length > 0 && (
+            <div className="text-center pt-2">
+              <button
+                onClick={() => {
+                  setMode('custom');
+                  setStep('selectInsurer');
+                  if (selectedType) loadInsurersByType(selectedType.code, 'custom');
+                }}
+                className="text-xs text-gray-500 hover:text-blue-600 underline"
+              >
+                Votre assureur n'est pas dans la liste ? Ajouter vos propres conditions →
+              </button>
+            </div>
+          )}
         </div>
       )}
 

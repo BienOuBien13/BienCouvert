@@ -86,9 +86,18 @@ function isNotAFormulaName(f: string): boolean {
   return false;
 }
 
+/** Strips "(avec option)" / "(sans option)" qualifiers and similar suffixes. */
+function stripOptionQualifier(f: string): string {
+  return f
+    .replace(/\s*\(\s*(avec|sans)\s+options?[^)]*\)\s*$/i, '')
+    .replace(/\s*\[\s*(avec|sans)\s+options?[^\]]*\]\s*$/i, '')
+    .replace(/\s*[—–-]\s*(avec|sans)\s+options?.*$/i, '')
+    .trim();
+}
+
 /** Forme canonique pour détecter les doublons avec/sans préfixe "Formule". */
 function canonicalizeFormula(f: string): string {
-  return f.trim()
+  return stripOptionQualifier(f.trim())
     .replace(/^formules?\s+/i, '')   // Strip "Formule " / "Formules " prefix
     .replace(/\s+/g, ' ')
     .toLowerCase();
@@ -108,7 +117,10 @@ function deduplicateFormulas(rawFormulas: string[]): string[] {
   if (!rawFormulas || rawFormulas.length === 0) return [];
 
   // 1. Nettoyer les entrées invalides (géographie, trop long, catégories…)
-  const cleaned = rawFormulas.map(f => f.trim()).filter(f => !isNotAFormulaName(f));
+  //    et supprimer les suffixes "(avec option)" / "(sans option)"
+  const cleaned = rawFormulas
+    .map(f => stripOptionQualifier(f.trim()))
+    .filter(f => f.length >= 2 && !isNotAFormulaName(f));
 
   // 2. Regrouper par forme canonique — préférer la version SANS préfixe "Formule "
   const byCanon = new Map<string, string[]>();
@@ -137,6 +149,36 @@ function deduplicateFormulas(rawFormulas: string[]): string[] {
 
   return deduped;
 }
+
+// -----------------------------------------------------------------------------
+// GET /api/cg/central/available-insurers?insurance_type_code=XX
+// Retourne uniquement les assureurs qui ont au moins une CG active dans
+// central_cg pour le type donné. Utilisé par l'onglet "Contrats centraux".
+// -----------------------------------------------------------------------------
+router.get('/central/available-insurers', async (req: Request, res: Response) => {
+  const { insurance_type_code } = req.query;
+  if (!insurance_type_code) {
+    return res.status(400).json({ error: 'insurance_type_code est requis' });
+  }
+  try {
+    const result = await query(
+      `SELECT DISTINCT
+         i.code, i.label, i.full_name AS "fullName",
+         i.color, i.logo_url AS "logoUrl"
+       FROM central_cg cg
+       INNER JOIN insurers i ON i.code = cg.insurer_code
+       WHERE cg.insurance_type_code = $1
+         AND cg.status NOT IN ('archived', 'deleted')
+         AND i.is_active = true
+       ORDER BY i.label`,
+      [insurance_type_code]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CG] GET /central/available-insurers error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // -----------------------------------------------------------------------------
 // GET /api/cg/central/by-type-and-insurer

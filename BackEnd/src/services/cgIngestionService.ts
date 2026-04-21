@@ -612,15 +612,28 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
     // Filtre post-traitement : supprimer les faux positifs formula_hints
     if (Array.isArray(parsed.formula_hints)) {
       const REJECT_PATTERN = /^(nous|vous|de plein droit|valeur|montant|inférieure|supérieure|égale|garantie|option|\d+[€%]?|à dire|au jour|par|en cas|sous|avec|sans|hors|autres|si)/i;
-      parsed.formula_hints = parsed.formula_hints.filter((f: string) => {
-        if (!f || typeof f !== 'string') return false;
+      const seen = new Map<string, string>(); // normalizedKey → best label
+      for (const f of parsed.formula_hints) {
+        if (!f || typeof f !== 'string') continue;
         const trimmed = f.trim();
-        if (trimmed.length < 4 || trimmed.length > 60) return false;       // trop court ou trop long
-        if (REJECT_PATTERN.test(trimmed)) return false;                     // mots-clés parasites
-        if (/^\d/.test(trimmed)) return false;                              // commence par un chiffre
-        if ((trimmed.match(/,/g) || []).length > 2) return false;           // liste de valeurs
-        return true;
-      });
+        if (trimmed.length < 4 || trimmed.length > 60) continue;
+        if (REJECT_PATTERN.test(trimmed)) continue;
+        if (/^\d/.test(trimmed)) continue;
+        if ((trimmed.match(/,/g) || []).length > 2) continue;
+        // Strip option-qualified suffixes before deduplication
+        const stripped = trimmed
+          .replace(/\s*\(\s*(avec|sans)\s+options?[^)]*\)\s*$/i, '')
+          .replace(/\s*\[\s*(avec|sans)\s+options?[^\]]*\]\s*$/i, '')
+          .replace(/\s*[—–-]\s*(avec|sans)\s+options?.*$/i, '')
+          .trim();
+        if (stripped.length < 3) continue;
+        const key = stripped.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        // Prefer the shorter/cleaner label (base name without suffix)
+        if (!seen.has(key) || seen.get(key)!.length > stripped.length) {
+          seen.set(key, stripped);
+        }
+      }
+      parsed.formula_hints = [...seen.values()];
     }
     // Normalise document_type vers les codes valides de la table document_types
     const VALID_DOC_TYPES: Record<string, string> = {
