@@ -76,6 +76,11 @@ function formatCoverageResponse(
 }
 
 function formatClaimsResponse(claims: ClaimsResult): string {
+  // ── Demande de clarification (quel contrat ?) ──────────────────────────────
+  if (claims.needsClarification) {
+    return `❓ **Précisez votre contrat**\n\n${claims.needsClarification}`;
+  }
+
   const urgencyLabel: Record<string, string> = {
     high: '🚨 URGENT',
     medium: '⚠️ Important',
@@ -92,16 +97,28 @@ function formatClaimsResponse(claims: ClaimsResult): string {
     response += '⚠️ Aucun contrat identifié pour ce type de sinistre. Vérifiez votre portefeuille.\n\n';
   }
 
-  response += `Procédure à suivre :\n\n`;
-  claims.steps.forEach((s) => {
-    response += `**Étape ${s.step} — ${s.title}**\n${s.description}\n`;
-    if (s.deadline) response += `⏱ Délai : ${s.deadline}\n`;
-    if (s.contact) response += `📞 Contact : ${s.contact}\n`;
+  if (claims.steps.length > 0) {
+    response += `Procédure à suivre :\n\n`;
+    claims.steps.forEach((s) => {
+      response += `**Étape ${s.step} — ${s.title}**\n${s.description}\n`;
+      if (s.deadline) response += `⏱ Délai : ${s.deadline}\n`;
+      if (s.contact) response += `📞 Contact : ${s.contact}\n`;
+      response += '\n';
+    });
+  }
+
+  // ── Liens vers les conditions générales ───────────────────────────────────
+  if (claims.cgUrls && claims.cgUrls.length > 0) {
+    response += `📄 Conditions générales :\n`;
+    claims.cgUrls.forEach(({ policyName, url }) => {
+      response += `- [${policyName}](${url})\n`;
+    });
     response += '\n';
-  });
+  }
 
   return response.trim();
 }
+
 
 function formatOptimizerResponse(result: OptimizerResult): string {
   if (result.findings.length === 0) {

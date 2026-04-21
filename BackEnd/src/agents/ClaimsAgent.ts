@@ -97,15 +97,90 @@ export class ClaimsAgent {
    * donné et les policies couvrantes (via centralCgId).
    * Retourne un bloc texte prêt à être injecté dans le prompt Gemini.
    */
-  private async fetchGuaranteeFacts(
+  /**
+   * Construit des étapes sinistre directement depuis les coverage_facts (zéro LLM).
+   * Retourne null si les faits sont insuffisants pour une réponse exploitable.
+   */
+  private buildStepsFromFacts(
     sinisterType: string,
     coveringPolicies: Policy[],
-  ): Promise<string> {
+    factsRows: Array<{ policyName: string; provider: string; guarantee_label: string; coverage_status: string; coverage_amount: string | null; franchise: string | null; coverage_notes: string | null }>,
+  ): ClaimsStep[] | null {
+    if (factsRows.length === 0) return null;
+
+    // Résoudre le délai légal selon le type
+    const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/_/g, ' ');
+    const sin = normalize(sinisterType);
+    const legalDelay =
+      sin.includes('vol')      ? '2 jours ouvrés (vol)' :
+      sin.includes('bris')     ? '5 jours ouvrés' :
+      sin.includes('accident') ? '5 jours ouvrés' :
+      sin.includes('inondation') || sin.includes('catnat') ? '10 jours après arrêté de catastrophe naturelle' :
+      '5 jours ouvrés';
+
+    const isLow = sin.includes('bris') || sin.includes('vitrage');
+
+    // Ligne de synthèse des garanties par contrat
+    const guaranteed = factsRows.filter(r => r.coverage_status === 'included' || r.coverage_status === 'optional');
+    const excluded   = factsRows.filter(r => r.coverage_status === 'excluded');
+
+    const factsSummary = guaranteed.map(r => {
+      let line = `${r.policyName} (${r.provider}) → ${r.guarantee_label}`;
+      if (r.coverage_amount) line += ` — plafond : ${r.coverage_amount}`;
+      if (r.franchise)        line += ` — franchise : ${r.franchise}`;
+      if (r.coverage_notes)   line += ` (${r.coverage_notes})`;
+      return line;
+    }).join('\n');
+
+    const exclusionsSummary = excluded.length > 0
+      ? excluded.map(r => `${r.policyName} : ${r.guarantee_label} non couvert`).join(', ')
+      : '';
+
+    const insurerNames = [...new Set(coveringPolicies.map(p => p.provider))].join(', ');
+    const policyNames  = coveringPolicies.map(p => `${p.name} (${p.coverageDetail || 'formule souscrite'})`).join(', ');
+    const contactLine  = `Votre espace client ${insurerNames}, par téléphone ou via l'application mobile`;
+
+    const steps: ClaimsStep[] = [
+      {
+        step: 1,
+        title: 'Documenter le sinistre',
+        description: `Prenez des photos claires des dommages sous plusieurs angles. Notez la date, l'heure et les circonstances exactes. ${isLow ? 'Si le vitrage est cassé, protégez temporairement l\'ouverture (adhésif résistant, bâche).' : 'Assurez-vous que personne n\'est en danger et appelez les secours si nécessaire.'}`,
+        deadline: 'Immédiat',
+      },
+      {
+        step: 2,
+        title: `Déclarer à ${insurerNames}`,
+        description: `Déclarez le sinistre "${sinisterType}" auprès de ${insurerNames} dans les délais légaux. Vos contrats concernés : ${policyNames}.\n\n✅ Garanties applicables :\n${factsSummary}${exclusionsSummary ? `\n\n❌ Exclusions : ${exclusionsSummary}` : ''}`,
+        deadline: legalDelay,
+        contact: contactLine,
+      },
+      {
+        step: 3,
+        title: 'Réparation et indemnisation',
+        description: `Après déclaration, ${insurerNames} vous orientera vers un réparateur agréé. ${guaranteed.some(r => r.franchise === '0' || r.franchise?.includes('0 €') || r.franchise?.toLowerCase().includes('sans franchise')) ? 'Aucune franchise ne sera appliquée si le sinistre le permet.' : guaranteed.some(r => r.franchise) ? `Franchise applicable : ${guaranteed.find(r => r.franchise)?.franchise}` : ''} ${guaranteed.some(r => r.coverage_amount) ? `Plafond d'indemnisation : ${guaranteed.find(r => r.coverage_amount)?.coverage_amount}` : ''}`.trim(),
+        deadline: 'Selon délais assureur',
+        contact: contactLine,
+      },
+    ];
+
+    return steps;
+  }
+
+  /**
+   * Récupère les facts structurées ET les URLs des CG pour les contrats couvrants.
+   */
+  private async fetchGuaranteeFactsStructured(
+    sinisterType: string,
+    coveringPolicies: Policy[],
+  ): Promise<{
+    textBlock: string;
+    rows: Array<{ policyName: string; provider: string; guarantee_label: string; coverage_status: string; coverage_amount: string | null; franchise: string | null; coverage_notes: string | null }>;
+    cgUrls: Array<{ policyName: string; url: string }>;
+  }> {
     const normalize = (s: string) =>
       s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/_/g, ' ');
     const sin = normalize(sinisterType);
 
-    // Mots-clés SQL à chercher dans guarantee_key / guarantee_label
     const KEYWORD_MAP: Array<{ triggers: string[]; keywords: string[] }> = [
       { triggers: ['bris de glace', 'bris glace', 'bris', 'vitrage', 'pare-brise'],
         keywords: ['bris', 'glace', 'vitrage', 'pare_brise', 'vitre'] },
@@ -114,33 +189,43 @@ export class ClaimsAgent {
       { triggers: ['vol voiture', 'vol auto', 'vehicule vole'],
         keywords: ['vol', 'vehicule', 'accessoires'] },
       { triggers: ['inondation', 'degat des eaux', 'dégât des eaux'],
-        keywords: ['inondation', 'dégâts des eaux', 'eau', 'catastrophe'] },
+        keywords: ['inondation', 'degats des eaux', 'eau', 'catastrophe'] },
       { triggers: ['incendie', 'feu'],
         keywords: ['incendie', 'feu', 'explosion', 'catastrophe'] },
       { triggers: ['vol', 'cambriolage', 'effraction'],
         keywords: ['vol', 'effraction', 'cambriolage', 'vandalisme'] },
-      { triggers: ['telephone', 'smartphone', 'mobile', 'portable', 'écran'],
+      { triggers: ['telephone', 'smartphone', 'mobile', 'portable', 'ecran'],
         keywords: ['mobile', 'telephone', 'appareil', 'ecran', 'casse'] },
     ];
 
-    const match = KEYWORD_MAP.find(e =>
-      e.triggers.some(t => sin.includes(normalize(t))),
-    );
+    const match = KEYWORD_MAP.find(e => e.triggers.some(t => sin.includes(normalize(t))));
     const kws = match?.keywords ?? [];
-    if (kws.length === 0) return '';
 
-    // Pour chaque policy couvrant avec centralCgId, chercher les faits
-    const lines: string[] = [];
+    const allRows: Array<{ policyName: string; provider: string; guarantee_label: string; coverage_status: string; coverage_amount: string | null; franchise: string | null; coverage_notes: string | null }> = [];
+    const cgUrls: Array<{ policyName: string; url: string }> = [];
+    const textLines: string[] = [];
+
     for (const p of coveringPolicies) {
       const cgId = (p as any).centralCgId;
-      if (!cgId) continue;
+
+      // Récupérer l'URL source de la CG
+      if (cgId) {
+        const urlRes = await dbQuery(
+          `SELECT url, pdf_file_path FROM central_cg WHERE id = $1`,
+          [cgId],
+        ).catch(() => ({ rows: [] as any[] }));
+        if (urlRes.rows[0]?.url) {
+          cgUrls.push({ policyName: p.name, url: urlRes.rows[0].url });
+        }
+      }
+
+      if (!cgId || kws.length === 0) continue;
 
       const formulaRaw = (p.coverageDetail || '').trim();
       const formulaKey = formulaRaw
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
         .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '');
 
-      // Filtre sur les keywords + la formule (si connue)
       const kwConditions = kws.map((_, i) => `(guarantee_key ILIKE $${i + 3} OR guarantee_label ILIKE $${i + 3})`).join(' OR ');
       const params: any[] = [cgId, formulaKey || '%', ...kws.map(k => `%${k}%`)];
 
@@ -157,7 +242,7 @@ export class ClaimsAgent {
 
       if (res.rows.length === 0) continue;
 
-      lines.push(`\n  Contrat : ${p.name} (${p.provider}) — Formule : ${formulaRaw || 'N/A'}`);
+      textLines.push(`\n  Contrat : ${p.name} (${p.provider}) — Formule : ${formulaRaw || 'N/A'}`);
       for (const r of res.rows) {
         const status = r.coverage_status === 'included' ? '✅' :
                        r.coverage_status === 'optional'  ? '⚡' :
@@ -166,23 +251,63 @@ export class ClaimsAgent {
         if (r.coverage_amount) detail += ` — Plafond : ${r.coverage_amount}`;
         if (r.franchise)        detail += ` — Franchise : ${r.franchise}`;
         if (r.coverage_notes)   detail += ` (${r.coverage_notes})`;
-        lines.push(`    ${detail}`);
+        textLines.push(`    ${detail}`);
+        allRows.push({ policyName: p.name, provider: p.provider, ...r });
       }
     }
 
-    return lines.length > 0
-      ? `\nDÉTAILS DE GARANTIES EXTRAITS DES CONTRATS :\n${lines.join('\n')}\n`
-      : '';
+    return {
+      textBlock: textLines.length > 0 ? `\nDÉTAILS DE GARANTIES EXTRAITS DES CONTRATS :\n${textLines.join('\n')}\n` : '',
+      rows: allRows,
+      cgUrls,
+    };
   }
 
   async guide(input: ClaimsInput): Promise<ClaimsResult> {
-    const { sinisterType, policies, userId, sessionId } = input;
+    const { sinisterType, policies, userId, sessionId, targetPolicyId } = input;
 
-    const coveringPolicies = this.identifyCoveringPolicies(sinisterType, policies);
+    let coveringPolicies = this.identifyCoveringPolicies(sinisterType, policies);
 
-    // ── Résolution des faits de garanties (franchise, plafond) ──────────────
-    const guaranteeFacts = await this.fetchGuaranteeFacts(sinisterType, coveringPolicies);
+    // ── Filtrer sur le contrat ciblé si l'utilisateur a précisé ─────────────
+    if (targetPolicyId) {
+      const targeted = coveringPolicies.find(p => String(p.id) === String(targetPolicyId));
+      if (targeted) coveringPolicies = [targeted];
+    }
 
+    // ── Désambiguïsation : plusieurs contrats du même type → demander lequel ─
+    // On ne désambiguïse que si aucun targetPolicyId n'a été fourni
+    if (!targetPolicyId && coveringPolicies.length > 1) {
+      const policyList = coveringPolicies
+        .map(p => `• ${p.name} (${p.provider}${p.coverageDetail ? ` — ${p.coverageDetail}` : ''})`)
+        .join('\n');
+      return {
+        sinisterType,
+        coveringPolicies: coveringPolicies.map(p => p.name),
+        steps: [],
+        urgencyLevel: 'low',
+        needsClarification: `Plusieurs contrats peuvent couvrir ce sinistre :\n${policyList}\n\nPour quel contrat souhaitez-vous la procédure ?`,
+      };
+    }
+
+    // ── Récupération des faits de garanties + URLs CG ───────────────────────
+    const { textBlock: guaranteeFacts, rows: factRows, cgUrls } =
+      await this.fetchGuaranteeFactsStructured(sinisterType, coveringPolicies);
+
+    // ── Chemin rapide : steps générés depuis coverage_facts (sans LLM) ───────
+    const fastSteps = this.buildStepsFromFacts(sinisterType, coveringPolicies, factRows);
+    if (fastSteps) {
+      console.log(`[ClaimsAgent] Réponse depuis coverage_facts (zéro LLM)`);
+      return {
+        sinisterType,
+        coveringPolicies: coveringPolicies.map(p => p.name),
+        steps: fastSteps,
+        urgencyLevel: 'low',
+        cgUrls,
+        sessionId,
+      };
+    }
+
+    // ── Fallback LLM (pas de coverage_facts disponibles) ────────────────────
     const ai = getAiClient();
     let steps: ClaimsStep[] = this.genericSteps(sinisterType);
     let urgencyLevel: 'low' | 'medium' | 'high' = 'medium';
@@ -193,7 +318,6 @@ export class ClaimsAgent {
         ? coveringPolicies.map((p) => `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || '?'})`).join('\n')
         : '';
 
-      // Prompt court et pratique quand aucun contrat ne couvre le sinistre
       const prompt = hasCoverage
         ? `Tu es un expert sinistres. L'utilisateur a subi un sinistre de type : "${sinisterType}".
 
@@ -201,7 +325,7 @@ CONTRATS COUVRANT CE SINISTRE :
 ${policyContext}
 ${guaranteeFacts}
 Génère une procédure de déclaration étape par étape, précise et TRÈS personnalisée.
-Si des détails de garanties sont fournis ci-dessus (franchise, plafond, statut), mentionne-les EXPLICITEMENT dans les étapes concernées — notamment dans l'étape de déclaration et l'étape de réparation/indemnisation.
+Si des détails de garanties sont fournis ci-dessus (franchise, plafond, statut), mentionne-les EXPLICITEMENT.
 Inclus les délais légaux français (code des assurances).
 Urgence = high si risque pour personnes, medium si dommages matériels importants, low sinon.
 
@@ -209,35 +333,19 @@ Réponds UNIQUEMENT en JSON :
 {
   "urgencyLevel": "low" | "medium" | "high",
   "steps": [
-    {
-      "step": 1,
-      "title": "Titre",
-      "description": "Description détaillée",
-      "deadline": "Délai ou null",
-      "contact": "Numéro ou email si connu ou null"
-    }
+    { "step": 1, "title": "Titre", "description": "Description détaillée", "deadline": "Délai ou null", "contact": "Numéro ou null" }
   ]
 }`
         : `Tu es un expert sinistres. Sinistre signalé : "${sinisterType}". Aucun contrat ne couvre ce sinistre.
 
-Génère EXACTEMENT 2 étapes courtes et pratiques :
-1. Actions immédiates concrètes à faire maintenant (ex: bloquer la SIM, changer les serrures, signaler la perte...)
-2. Vérifier les contrats potentiellement pertinents non encore identifiés (assurance habitation, carte bancaire, assurance voyage)
-
-Sois court et direct. Pas de généralités. Pas de références légales détaillées.
+Génère EXACTEMENT 2 étapes courtes et pratiques.
 Urgence = low.
 
 Réponds UNIQUEMENT en JSON :
 {
   "urgencyLevel": "low",
   "steps": [
-    {
-      "step": 1,
-      "title": "Titre court",
-      "description": "Description courte et pratique (2 phrases max)",
-      "deadline": null,
-      "contact": null
-    }
+    { "step": 1, "title": "Titre court", "description": "2 phrases max", "deadline": null, "contact": null }
   ]
 }`;
 
@@ -249,7 +357,6 @@ Réponds UNIQUEMENT en JSON :
         const result = await model.generateContent([prompt]);
         const parsed = JSON.parse(result.response.text());
         if (Array.isArray(parsed.steps) && parsed.steps.length > 0) {
-          // Nettoyer les valeurs "null" (string) retournées par Gemini
           steps = parsed.steps.map((s: any) => ({
             ...s,
             deadline: (s.deadline && s.deadline !== 'null') ? s.deadline : undefined,
@@ -262,7 +369,7 @@ Réponds UNIQUEMENT en JSON :
       }
     }
 
-    // ── Persister la session sinistre (claim_sessions) ───────────────────────
+    // ── Persister la session sinistre ────────────────────────────────────────
     let resolvedSessionId = sessionId;
     try {
       if (!resolvedSessionId) {
@@ -273,7 +380,6 @@ Réponds UNIQUEMENT en JSON :
         );
         resolvedSessionId = String(res.rows[0]?.id);
       }
-
       await dbQuery(
         `INSERT INTO claim_sessions_messages (session_id, role, content, created_at)
          VALUES ($1, 'assistant', $2, NOW())`,
@@ -288,6 +394,7 @@ Réponds UNIQUEMENT en JSON :
       coveringPolicies: coveringPolicies.map((p) => p.name),
       steps,
       urgencyLevel,
+      cgUrls,
       sessionId: resolvedSessionId,
     };
   }

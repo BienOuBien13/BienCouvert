@@ -152,15 +152,33 @@ const DOC_KW: Record<string, string[]> = {
   tableau_garanties: ['tableau-garanties', 'tableau_garanties', 'garanties-', '-garanties'],
 };
 
+// Mots-clés positifs par type d'assurance (URL)
 const TYPE_KW: Record<string, string[]> = {
-  auto:       ['auto', 'automobile', 'vehicule', 'voiture'],
-  hab:        ['habitation', 'habitat', 'maison', 'mrh', 'multirisque'],
-  sante:      ['sante', 'mutuelle', 'complementaire'],
+  auto:       ['auto', 'automobile', 'vehicule', 'voiture', 'moto'],
+  hab:        ['habitation', 'habitat', 'maison', 'mrh', 'multirisque', 'logement'],
+  sante:      ['sante', 'mutuelle', 'complementaire', 'medicale', 'hospitalisation'],
   vie:        ['vie', 'deces', 'epargne', 'prevoyance'],
-  animaux:    ['animaux', 'animal', 'chien', 'chat'],
+  animaux:    ['animaux', 'animal', 'chien', 'chat', 'nac'],
   scolaire:   ['scolaire', 'extrascolaire'],
-  protection: ['protection-juridique', 'pj'],
+  protection: ['protection-juridique', 'pj', 'juridique'],
+  mobile:     ['mobile', 'telephone', 'smartphone', 'electronique', 'appareil', 'high-tech'],
+  voyage:     ['voyage', 'rapatriement', 'annulation'],
+  emprunteur: ['emprunteur', 'credit', 'pret', 'immobilier'],
+  carte:      ['carte', 'bancaire', 'visa', 'mastercard'],
 };
+
+// ─── Mapping type d'assurance → catégorie de mots-clés ────────────────────────
+
+/** Retourne la catégorie TYPE_KW qui correspond au `insurance_type_label` ou `insurance_type_code` */
+function getTypeCategory(label: string, code: string): string | null {
+  const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const l = norm(label);
+  const c = norm(code);
+  for (const [cat, kws] of Object.entries(TYPE_KW)) {
+    if (kws.some(k => l.includes(k) || c.includes(k))) return cat;
+  }
+  return null;
+}
 
 /** Score a PDF URL by keyword relevance — higher = more likely the right doc. */
 function scorePdf(url: string, p: SearchParams): number {
@@ -172,15 +190,25 @@ function scorePdf(url: string, p: SearchParams): number {
   if (docKws.some(k => u.includes(k))) s += 30;
 
   // Insurance-type keywords (+25)
-  const typeL = p.insurance_type_label.toLowerCase();
-  let typeKws: string[] = [];
-  for (const [, kws] of Object.entries(TYPE_KW)) {
-    if (kws.some(k => typeL.includes(k))) typeKws.push(...kws);
-  }
+  const typeL    = p.insurance_type_label.toLowerCase();
+  const typeCode = p.insurance_type_code.toLowerCase();
+  const typeCategory = getTypeCategory(typeL, typeCode);
+
+  let typeKws: string[] = typeCategory ? (TYPE_KW[typeCategory] ?? []) : [];
   if (typeKws.length === 0) typeKws = [typeL.split(' ')[0]];
   if (typeKws.some(k => k.length > 2 && u.includes(k))) s += 25;
 
-  // Insurer name (+15)
+  // ── Pénalité forte : mots-clés d'un AUTRE type d'assurance dans l'URL ──────
+  // Ex : CG auto dans une URL "/habitation/conditions..." → pénalité -40
+  for (const [cat, kws] of Object.entries(TYPE_KW)) {
+    if (cat === typeCategory) continue;   // même catégorie → pas de pénalité
+    if (kws.some(k => k.length > 3 && u.includes(k))) {
+      s -= 40;
+      break;   // une seule pénalité suffit (l'URL est déjà disqualifiée)
+    }
+  }
+
+  // Insurer name in URL (+15)
   if (u.includes(p.insurer_code.toLowerCase())) s += 15;
 
   // Recent year in URL (+10)
@@ -750,6 +778,65 @@ JSON: {"candidates":[{"url":"https://...","confidence":0.7,"is_page":false},...]
   } catch { return null; }
 }
 
+// ─── Validation de pertinence (assureur + type) ───────────────────────────────
+
+/**
+ * Vérifie via Gemini que le PDF trouvé correspond bien à l'assureur ET au type
+ * d'assurance attendu.  En cas d'indisponibilité de l'IA ou d'inaccessibilité
+ * de l'URL, la validation est ignorée (fail-open) pour ne pas bloquer l'ingestion.
+ */
+async function validateCgRelevance(
+  url: string,
+  p: SearchParams,
+): Promise<{ valid: boolean; reason: string }> {
+  const ai = getAiClient();
+  if (!ai) return { valid: true, reason: 'IA indisponible — validation ignorée' };
+
+  // Récupère les premiers octets de la page/PDF pour analyse
+  let snippet = '';
+  try {
+    const content = await fetchRaw(url, 8_000);
+    snippet = content.slice(0, 2000);
+  } catch {
+    return { valid: true, reason: 'Page inaccessible — validation ignorée' };
+  }
+  if (!snippet.trim()) return { valid: true, reason: 'Contenu vide — validation ignorée' };
+
+  const prompt = `Tu analyses le début d'un document ou d'une page web pour vérifier qu'il correspond bien à ce qui est attendu.
+
+Assureur attendu : "${p.insurer_full_name}" (code : "${p.insurer_code}")
+Type d'assurance attendu : "${p.insurance_type_label}" (code : "${p.insurance_type_code}")
+URL : "${url}"
+
+Début du contenu (brut, peut contenir du HTML ou du texte PDF) :
+${snippet.slice(0, 1500)}
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{
+  "insurer_match": true,
+  "type_match": true,
+  "reason": "explication courte"
+}
+
+Règles :
+- insurer_match = true si le nom de l'assureur, un de ses synonymes ou d'une filiale connue est clairement mentionné dans le contenu ou l'URL
+- type_match = true si le document traite spécifiquement du type d'assurance attendu (et pas d'un autre type sans rapport)
+- En cas de doute, préférer true (on ne veut pas bloquer des documents légitimes)`;
+
+  try {
+    const model = ai.getGenerativeModel(
+      { model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json' } },
+    );
+    const result = await model.generateContent([prompt]);
+    const text   = result.response.text().trim();
+    const parsed = JSON.parse(text);
+    const valid  = parsed.insurer_match !== false && parsed.type_match !== false;
+    return { valid, reason: parsed.reason ?? '' };
+  } catch (e) {
+    return { valid: true, reason: `Erreur validation (${(e as Error).message?.slice(0, 60)}) — accepté par défaut` };
+  }
+}
+
 // ─── Fonction publique ────────────────────────────────────────────────────────
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -773,26 +860,38 @@ export async function smartSearchForDocument(params: {
   const t0 = Date.now();
   console.log(`[SmartSearch] 🔍 ${p.insurer_code}/${p.insurance_type_code}/${p.doc_type}`);
 
+  /** Valide un résultat et retourne null s'il est rejeté */
+  async function validate(result: SmartSearchResult | null, label: string): Promise<SmartSearchResult | null> {
+    if (!result?.pdf_url) return result;   // pas de PDF → pas de validation (page_url accepté tel quel)
+    const check = await validateCgRelevance(result.pdf_url, p);
+    if (!check.valid) {
+      console.warn(`[SmartSearch] ⛔ PDF rejeté (${label}): ${check.reason} — ${result.pdf_url.slice(0, 80)}`);
+      return null;
+    }
+    if (check.reason) console.log(`[SmartSearch]    ✔ Validation OK (${label}): ${check.reason}`);
+    return result;
+  }
+
   // 1b. DuckDuckGo web search (no API key needed — mimics "Googling it")
   console.log('[SmartSearch]  → Strat 1b: DuckDuckGo web search');
-  const webSearch = await tryWebSearch(p);
+  const webSearch = await validate(await tryWebSearch(p), 'web_search');
   if (webSearch?.pdf_url) { console.log(`[SmartSearch]  ✅ WebSearch ${Date.now() - t0}ms`); return webSearch; }
 
   // 2. Gemini + Google Search grounding
   console.log('[SmartSearch]  → Strat 2: Gemini + grounding');
-  const grounding = await tryGeminiGrounding(p);
+  const grounding = await validate(await tryGeminiGrounding(p), 'grounding');
   if (grounding?.pdf_url || grounding?.page_url) { console.log(`[SmartSearch]  ✅ Grounding ${Date.now() - t0}ms`); return grounding; }
 
   // 3. Smart site crawl (sitemap + 30 paths + homepage links)
   if (p.website_url) {
     console.log('[SmartSearch]  → Strat 3: Site crawl');
-    const crawl = await trySiteCrawl(p);
+    const crawl = await validate(await trySiteCrawl(p), 'site_crawl');
     if (crawl) { console.log(`[SmartSearch]  ✅ Crawl ${Date.now() - t0}ms`); return crawl; }
   }
 
   // 4. Gemini knowledge (URL pattern guessing)
   console.log('[SmartSearch]  → Strat 4: Gemini knowledge');
-  const knowledge = await tryGeminiKnowledge(p);
+  const knowledge = await validate(await tryGeminiKnowledge(p), 'knowledge');
   if (knowledge) { console.log(`[SmartSearch]  ✅ Knowledge ${Date.now() - t0}ms`); return knowledge; }
 
   console.log(`[SmartSearch]  ❌ Not found ${Date.now() - t0}ms`);

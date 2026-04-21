@@ -122,6 +122,7 @@ export interface ClaimsInput {
   policies: Policy[];
   userId: number;
   sessionId?: string;
+  targetPolicyId?: string;     // Précisé lors d'une clarification (quel véhicule/contrat ?)
 }
 
 export interface ClaimsStep {
@@ -138,6 +139,8 @@ export interface ClaimsResult {
   steps: ClaimsStep[];
   urgencyLevel: 'low' | 'medium' | 'high';
   sessionId?: string;
+  cgUrls?: Array<{ policyName: string; url: string }>;  // Liens vers les CG
+  needsClarification?: string;  // Question posée à l'utilisateur si ambiguïté
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
