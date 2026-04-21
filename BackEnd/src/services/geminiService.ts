@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { WebSearchResult, DuplicateFinding, OptimizationFinding, Policy, Message, SmartExtractionResult, PolicyType } from '../types';
 import { query as dbQuery } from '../db';
 import { trackGeminiClient } from '../utils/geminiMetrics';
+import { cacheGet, cacheSet } from './cacheService';
 
 // -----------------------------------------------------------------------------
 // Service AI (Gemini) - wrapper minimal
@@ -302,32 +303,37 @@ export const getCoverageAnalysis = async (policy: any): Promise<any> => {
   const type = policy.type || 'Assurance';
   const summary = policy.summary || '';
 
-  // Fallback sans IA
+  // 1. Check Redis cache (avoids Gemini call on repeat requests)
+  const cacheKey = `coverage_v2_${policy.id}_${formulaName}`;
+  const cached = await cacheGet<any>(cacheKey);
+  if (cached) {
+    console.log(`[CoverageAnalysis] Servi depuis cache Redis pour policy ${policy.id}`);
+    return cached;
+  }
+
+  // 2. DB-first: build from coverage_facts if we have a centralCgId
+  const centralCgId = policy.centralCgId ?? policy.central_cg_id ?? null;
+  if (centralCgId) {
+    try {
+      const dbResult = await buildFromCoverageFacts(Number(centralCgId), formulaName, type, summary);
+      if (dbResult) {
+        console.log(`[CoverageAnalysis] Servi depuis coverage_facts DB (central_cg_id=${centralCgId})`);
+        // Cache 12h — les facts ne changent pas souvent
+        cacheSet(cacheKey, dbResult, 43200).catch(() => {});
+        return dbResult;
+      }
+    } catch (e: any) {
+      console.warn('[CoverageAnalysis] DB fallback échoué, passage à Gemini:', e.message);
+    }
+  }
+
+  // 3. Fallback sans IA
   if (!ai) {
     return buildFallbackCoverage(formulaName, type, summary);
   }
 
-  // Tenter de récupérer du contexte RAG
-  let ragContext = '';
-  try {
-    const storage = require('../storage').storage;
-    const questionEmbedding = await generateEmbedding(
-      `Garanties incluses formule ${formulaName} assurance ${type} ${insurer}`
-    );
-    if (questionEmbedding) {
-      const chunks = await storage.searchCentralCg(questionEmbedding, [insurer], 4);
-      if (chunks.length > 0) {
-        ragContext = chunks.map((c: any) => c.content_text?.substring(0, 800)).join('\n\n---\n\n');
-        console.log(`✅ RAG: ${chunks.length} chunks pour analyse couverture`);
-      }
-    }
-  } catch (e: any) {
-    console.warn('⚠️ RAG coverage indisponible:', e.message);
-  }
-
-  const contextSection = ragContext
-    ? `\nEXTRAITS DES CONDITIONS GÉNÉRALES :\n${ragContext.substring(0, 4000)}`
-    : (summary ? `\nRÉSUMÉ CONTRAT : ${summary}` : '');
+  // 4. Gemini call (no RAG embedding — embeddings désactivés avec cette clé)
+  const contextSection = summary ? `\nRÉSUMÉ CONTRAT : ${summary}` : '';
 
   const prompt = `Tu es un expert en assurances. Analyse ce contrat d'assurance et génère une fiche détaillée des garanties.
 
@@ -352,35 +358,25 @@ Génère une analyse structurée et realiste. Réponds UNIQUEMENT en JSON valide
       "importance": "key" | "standard" | "optional"
     }
   ],
-  "exclusions": [
-    "Exclusion 1 importante",
-    "Exclusion 2 importante"
-  ],
-  "keyStrengths": [
-    "Point fort 1",
-    "Point fort 2"
-  ],
-  "keyWeaknesses": [
-    "Point faible 1",
-    "Point faible 2"
-  ],
-  "recommendation": "Conseil personnalisé sur cette formule (max 2 phrases)",
+  "exclusions": ["Exclusion 1", "Exclusion 2"],
+  "keyStrengths": ["Point fort 1", "Point fort 2"],
+  "keyWeaknesses": ["Point faible 1", "Point faible 2"],
+  "recommendation": "Conseil personnalisé (max 2 phrases)",
   "alternativeFormulas": [
     {
       "name": "Nom formule alternative",
       "priceVariation": "+X€/mois ou -X€/mois",
-      "mainDifference": "Ce que cette formule apporte en plus/moins",
+      "mainDifference": "Ce que cette formule apporte",
       "recommended": true|false
     }
   ]
 }
 
 CONSIGNES :
-- Inclure 6 à 14 garanties couvrant les risques principaux du type d'assurance
-- Marquer "included: false" les garanties importantes NON incluses dans cette formule
-- Les exclusions doivent être les plus importantes (4-8 maximum)
-- Les priceVariation des alternatives doivent être réalistes au marché français
-- La recommendation doit être personnalisée et actionnable`;
+- 6 à 14 garanties couvrant les risques principaux
+- Marquer "included: false" les garanties importantes NON incluses
+- 4-8 exclusions importantes maximum
+- Recommandation personnalisée et actionnable`;
 
   try {
     const model = ai.getGenerativeModel({
@@ -390,12 +386,143 @@ CONSIGNES :
     const result = await model.generateContent([{ text: prompt }]);
     const text = result.response.text();
     const parsed = JSON.parse(text);
+    // Cache Gemini result 6h
+    cacheSet(cacheKey, parsed, 21600).catch(() => {});
     return parsed;
   } catch (err) {
     console.error('getCoverageAnalysis error:', err);
     return buildFallbackCoverage(formulaName, type, summary);
   }
 };
+
+// ─── Helper: dérive une catégorie lisible depuis la clé de garantie ──────────
+function inferCategory(key: string, label: string): string {
+  const k = key.toLowerCase();
+  if (k.includes('responsabilite') || k.startsWith('rc_') || k.includes('_rc')) return 'Responsabilité Civile';
+  if (k.includes('vol') || k.includes('vandalisme'))                              return 'Vol & Vandalisme';
+  if (k.includes('incendie') || k.includes('explosion'))                          return 'Incendie';
+  if (k.includes('bris_glace') || k.includes('vitrage') || k.includes('glace'))  return 'Bris de Glace';
+  if (k.includes('assistance') || k.includes('remorquage') || k.includes('depannage')) return 'Assistance';
+  if (k.includes('conducteur') || k.includes('corporel') || k.includes('corporelle')) return 'Protection Conducteur';
+  if (k.includes('catastrophe') || k.includes('naturelle'))                       return 'Catastrophes Naturelles';
+  if (k.includes('degat_eau') || k.includes('dommage_eau') || k.includes('eau')) return 'Dégâts des Eaux';
+  if (k.includes('contenu') || k.includes('mobilier') || k.includes('effets'))   return 'Contenu & Mobilier';
+  if (k.includes('sante') || k.includes('optique') || k.includes('dentaire') || k.includes('hospit')) return 'Santé';
+  if (k.includes('juridique') || k.includes('protection_ju'))                    return 'Protection Juridique';
+  if (k.includes('deces') || k.includes('invalide') || k.includes('invalidite')) return 'Prévoyance';
+  if (k.includes('voyage') || k.includes('annulation'))                           return 'Voyage & Annulation';
+  // Default: first 2-3 words of label
+  const words = label.split(' ');
+  return words.slice(0, Math.min(3, words.length)).join(' ');
+}
+
+// ─── Helper: construire CoverageData depuis coverage_facts (sans Gemini) ────
+async function buildFromCoverageFacts(
+  centralCgId: number,
+  formulaName: string,
+  type: string,
+  summary: string
+): Promise<any | null> {
+  // Normaliser le nom de formule en clé snake_case
+  const formulaKey = formulaName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
+
+  // Requête 1 : correspondance exacte sur formula_key
+  let result = await dbQuery(
+    `SELECT guarantee_label, guarantee_key, formula_label,
+            coverage_status, coverage_amount, franchise, coverage_notes
+     FROM coverage_facts
+     WHERE central_cg_id = $1 AND formula_key = $2
+     ORDER BY guarantee_label LIMIT 40`,
+    [centralCgId, formulaKey]
+  );
+
+  // Requête 2 : correspondance préfixe si vide
+  if (result.rows.length < 3) {
+    result = await dbQuery(
+      `SELECT guarantee_label, guarantee_key, formula_label,
+              coverage_status, coverage_amount, franchise, coverage_notes
+       FROM coverage_facts
+       WHERE central_cg_id = $1 AND formula_key ILIKE $2
+       ORDER BY guarantee_label LIMIT 40`,
+      [centralCgId, `${formulaKey}%`]
+    );
+  }
+
+  // Requête 3 : toutes les formules de cette CG (au moins une exist)
+  if (result.rows.length < 3) {
+    result = await dbQuery(
+      `SELECT guarantee_label, guarantee_key, formula_label,
+              coverage_status, coverage_amount, franchise, coverage_notes
+       FROM coverage_facts
+       WHERE central_cg_id = $1
+       ORDER BY formula_key, guarantee_label LIMIT 40`,
+      [centralCgId]
+    );
+  }
+
+  if (result.rows.length < 3) return null;
+
+  const rows = result.rows;
+  const resolvedFormulaLabel: string = rows[0].formula_label || formulaName;
+
+  // Inférer le niveau depuis le nom
+  const nameLower = resolvedFormulaLabel.toLowerCase();
+  const formulaLevel =
+    nameLower.match(/premium|platine|integral|integrale|or\b|gold|zen|all.?risk|tous.?risques?/) ? 'premium' :
+    nameLower.match(/confort|standard|classic|argent|silver|protection|plus/)                   ? 'intermediate' :
+    'basic';
+
+  // Mapper chaque fact en CoverageItem
+  const coverages = rows.map((row: any) => {
+    const noteParts: string[] = [];
+    if (row.franchise) noteParts.push(`Franchise : ${row.franchise}`);
+    if (row.coverage_notes) noteParts.push(row.coverage_notes);
+
+    return {
+      category:   inferCategory(row.guarantee_key ?? '', row.guarantee_label),
+      guarantee:  row.guarantee_label,
+      included:   row.coverage_status === 'included' || row.coverage_status === 'optional',
+      limit:      row.coverage_amount || undefined,
+      note:       noteParts.join(' — ') || undefined,
+      importance: (row.coverage_status === 'included' ? 'standard' : 'optional') as 'key' | 'standard' | 'optional',
+    };
+  });
+
+  // Highlights
+  const includedRows = rows.filter((r: any) => r.coverage_status === 'included');
+  const excludedRows = rows.filter((r: any) => r.coverage_status === 'excluded');
+
+  const keyStrengths = includedRows
+    .slice(0, 4)
+    .map((r: any) => r.guarantee_label + (r.coverage_amount ? ` — ${r.coverage_amount}` : ''));
+
+  const keyWeaknesses = excludedRows
+    .slice(0, 3)
+    .map((r: any) => `${r.guarantee_label} non inclus`);
+
+  const exclusions = excludedRows
+    .slice(0, 8)
+    .map((r: any) => r.guarantee_label + (r.coverage_notes ? ` (${r.coverage_notes})` : ''));
+
+  return {
+    formulaName: resolvedFormulaLabel,
+    formulaLevel,
+    formulaDescription: summary || `Formule ${resolvedFormulaLabel} — ${includedRows.length} garanties incluses`,
+    coverages,
+    exclusions: exclusions.length
+      ? exclusions
+      : ['Consultez les conditions générales pour les exclusions détaillées'],
+    keyStrengths: keyStrengths.length ? keyStrengths : ['Données extraites des conditions générales'],
+    keyWeaknesses,
+    recommendation: 'Données extraites directement depuis les conditions générales indexées.',
+    alternativeFormulas: [],
+  };
+}
 
 function buildFallbackCoverage(formulaName: string, type: string, summary: string): any {
   return {

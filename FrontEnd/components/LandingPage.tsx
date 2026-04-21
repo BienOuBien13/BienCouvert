@@ -1,17 +1,16 @@
 
 import React from 'react';
-import { 
-  ShieldCheck, 
-  Zap, 
-  MessageSquare, 
-  Users, 
-  CheckCircle, 
-  ArrowRight, 
-  Search, 
-  Lock,
-  PieChart,
-  Target,
-  Sparkles
+import {
+  ShieldCheck,
+  Zap,
+  MessageSquare,
+  Users,
+  ArrowRight,
+  Search,
+  Sparkles,
+  BookOpen,
+  TrendingDown,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface Props {
@@ -19,131 +18,222 @@ interface Props {
 }
 
 export const LandingPage: React.FC<Props> = ({ onStart }) => {
-  const scrollToConcept = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const element = document.getElementById('concept');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-primary-100 selection:text-primary-900">
-      <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md z-50 border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-12 w-auto" />
-            {/* <span className="text-2xl font-bold tracking-tight text-slate-900">BienCouver</span> */}
-          </div>
-          <button 
+    <div className="min-h-screen bg-white text-slate-900 font-sans">
+
+      {/* ── Navbar ── same padding conventions as app Header */}
+      <header className="fixed top-0 inset-x-0 bg-white/90 backdrop-blur-md z-50 border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-10 w-auto" />
+          <button
             onClick={onStart}
-            className="px-6 py-2.5 bg-slate-900 text-white rounded-full font-semibold hover:bg-slate-800 transition-all active:scale-95"
+            className="px-5 py-2 bg-blue-600 text-white rounded-full text-sm font-semibold hover:bg-blue-700 transition-all active:scale-95"
           >
             Se connecter
           </button>
         </div>
       </header>
 
-      <section className="pt-20 pb-24 px-6">
-        <div className="max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-fadeIn">
+      {/* ── Hero ── */}
+      <section className="pt-24 pb-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold uppercase tracking-widest mb-6">
             <Sparkles className="w-3 h-3" />
-            TOTALEMENT GRATUIT
+            100 % Gratuit
           </div>
-          <h1 className="text-4xl lg:text-6xl font-black tracking-tighter text-slate-900 mb-8 max-w-5xl mx-auto leading-[0.95]">
-            Le premier assitant qui vous aide à  <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-indigo-600"> comprendre TOUTES vos garanties d'assurances.</span>
+
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-slate-900 mb-5 leading-tight">
+            Comprenez enfin{' '}
+            <span className="text-blue-600">toutes vos garanties</span>{' '}
+            d'assurance
           </h1>
-          <p className="text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed font-bold">
-            <span className="text-slate-900 font-black"> Votre assitant personnalisé qui répond à vos questions et optimise votre protection en un clic.  </span> <br className="hidden md:block" /> 
-            {/* Ne payez plus <span className="text-slate-900 font-black"> les couvertures en doublon ou inutiles</span> et identifiez enfin les garanties qui vous manquent. */}
+
+          <p className="text-base sm:text-lg text-slate-500 max-w-xl mx-auto mb-8 leading-relaxed">
+            Votre assistant personnel répond à vos questions, détecte les doublons
+            et identifie les protections manquantes — en 2 minutes.
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button 
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
+            <button
               onClick={onStart}
-              className="w-full sm:w-auto px-12 py-6 bg-primary-600 text-white rounded-[2rem] font-black text-lg hover:bg-primary-700 transition-all shadow-2xl shadow-primary-900/30 flex items-center justify-center gap-4 group active:scale-95"
+              className="flex items-center justify-center gap-2 px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-base hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/25 active:scale-95 group"
             >
-              C'est parti !
-              <ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />
+              Commencer gratuitement
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
-            <button 
-              onClick={scrollToConcept}
-              className="w-full sm:w-auto px-12 py-6 bg-white text-slate-700 border border-slate-200 rounded-[2rem] font-black text-lg hover:bg-slate-50 transition-all flex items-center justify-center active:scale-95"
+            <a
+              href="#comment"
+              onClick={e => { e.preventDefault(); document.getElementById('comment')?.scrollIntoView({ behavior: 'smooth' }); }}
+              className="flex items-center justify-center gap-2 px-8 py-4 bg-white text-slate-700 border border-slate-200 rounded-2xl font-bold text-base hover:bg-slate-50 transition-all active:scale-95"
             >
-              Le concept
-            </button>
+              Comment ça marche ?
+            </a>
           </div>
         </div>
       </section>
 
-      <section className="py-12 border-y border-slate-100 bg-slate-50/50">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
-          <div className="text-center">
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">100%</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Gratuit</p>
-          </div>
-          <div className="text-center">
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">~240€</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Économie / an</p>
-          </div>
-          <div className="text-center">
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">2 min</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Analyse Express</p>
-          </div>
-          <div className="text-center">
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">24/7</p>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Assistant IA</p>
+      {/* ── Key numbers ── */}
+      <section className="py-8 border-y border-slate-100 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
+            {[
+              { value: '100%', label: 'Gratuit' },
+              { value: '~240 €', label: 'Économie / an' },
+              { value: '2 min', label: 'Analyse express' },
+              { value: '24/7', label: 'Assistant IA' },
+            ].map(stat => (
+              <div key={stat.label}>
+                <p className="text-2xl sm:text-3xl font-black text-slate-900">{stat.value}</p>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-widest mt-1">{stat.label}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section id="concept" className="py-2 px-6 scroll-mt-4">
+      {/* ── How it works ── */}
+      <section id="comment" className="py-16 px-4 sm:px-6 lg:px-8 scroll-mt-16">
         <div className="max-w-7xl mx-auto">
-       
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1">
-            <FeatureCard 
-              icon={<Search className="w-8 h-8" />}
-              title="Personnalisation complète"
-              description="Composez en quelques clics votre portefeuille d'assurances sur la base de plus de 500 conditions générales déjà disponibles et avec vos conditions particulières."
+          <div className="text-center mb-10">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Comment ça marche ?</h2>
+            <p className="text-slate-500 mt-2 text-sm sm:text-base">3 étapes pour maîtriser votre couverture</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {[
+              {
+                step: '1',
+                icon: <BookOpen className="w-6 h-6" />,
+                title: 'Ajoutez vos contrats',
+                desc: 'Sélectionnez vos assurances depuis notre catalogue de + 500 CG, ou importez vos conditions particulières en PDF.',
+                color: 'bg-blue-50 text-blue-600',
+              },
+              {
+                step: '2',
+                icon: <MessageSquare className="w-6 h-6" />,
+                title: 'Posez vos questions',
+                desc: "Demandez en langage naturel : « Suis-je couvert si je renverse mon téléphone ? » et obtenez une réponse immédiate.",
+                color: 'bg-violet-50 text-violet-600',
+              },
+              {
+                step: '3',
+                icon: <TrendingDown className="w-6 h-6" />,
+                title: 'Optimisez votre budget',
+                desc: "Identifiez les garanties en double, les lacunes et économisez sur vos primes grâce à des recommandations personnalisées.",
+                color: 'bg-emerald-50 text-emerald-600',
+              },
+            ].map((item, i) => (
+              <div key={i} className="relative bg-white rounded-2xl border border-slate-100 p-6 hover:shadow-md hover:border-slate-200 transition-all">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${item.color}`}>
+                  {item.icon}
+                </div>
+                <span className="absolute top-5 right-5 text-xs font-black text-slate-200">0{item.step}</span>
+                <h3 className="font-bold text-slate-900 mb-2">{item.title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Features ── */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-slate-50">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-10">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Ce que vous pouvez faire</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <FeatureCard
+              icon={<Search className="w-6 h-6" />}
+              color="text-blue-600 bg-blue-50"
+              title="Catalogue complet"
+              description="Accédez à + 500 conditions générales déjà indexées et enrichissez-les avec vos propres documents."
             />
-            <FeatureCard 
-              icon={<MessageSquare className="w-8 h-8" />}
-              title="Assitant Assurance"
-              description="Posez des questions en direct à votre assistant : 'Suis-je couvert pour la perte des clés de ma voiture ?'."
+            <FeatureCard
+              icon={<MessageSquare className="w-6 h-6" />}
+              color="text-violet-600 bg-violet-50"
+              title="Assistant IA"
+              description="Posez n'importe quelle question sur vos garanties et obtenez une réponse précise, issue de vos contrats."
             />
-            <FeatureCard 
-              icon={<Zap className="w-8 h-8" />}
-              title="Optimisation"
-              description="Détectez facilement les garanties en double et les couvertures manquantes grâce à une analyse de votre profil."
+            <FeatureCard
+              icon={<Zap className="w-6 h-6" />}
+              color="text-amber-600 bg-amber-50"
+              title="Détection des doublons"
+              description="Voyez en un coup d'œil les garanties superflues et celles qui manquent à votre protection."
             />
-            <FeatureCard 
-              icon={<Users className="w-8 h-8" />}
-              title="Relais Expert"
-              description="Sollicitez un expert indépendant pour finaliser vos économies."
+            <FeatureCard
+              icon={<BookOpen className="w-6 h-6" />}
+              color="text-indigo-600 bg-indigo-50"
+              title="Garanties en détail"
+              description="Consultez le détail complet de chaque garantie de vos contrats directement depuis l'app."
             />
           </div>
         </div>
       </section>
 
-      <footer className="py-0 px-6 text-center border-t border-slate-100 bg-slate-50/30">
-        <h2 className="text-4xl font-black text-slate-900 mb-10 tracking-tighter">Prêt à y voir plus clair ?</h2>
-        <button 
-          onClick={onStart}
-          className="px-16 py-7 bg-primary-600 text-white rounded-[2.5rem] font-black text-xl hover:bg-primary-700 transition-all shadow-3xl shadow-primary-900/30 active:scale-95"
-        >
-          C'est parti !
-        </button>
-        <p className="mt-12 text-slate-300 text-xs font-black uppercase tracking-[0.4em]">© 2026 BienCouvert - Protection Intelligente</p>
+      {/* ── Trust signals ── */}
+      <section className="py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-2xl mx-auto">
+          <ul className="space-y-3">
+            {[
+              'Aucune donnée personnelle vendue ni partagée',
+              'Vos contrats restent strictement privés',
+              'Accès 100 % gratuit, sans abonnement caché',
+              "Outil d'aide à la décision – complété par des experts agréés",
+            ].map(item => (
+              <li key={item} className="flex items-start gap-3 text-sm text-slate-600">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ── Final CTA ── */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-blue-600">
+        <div className="max-w-xl mx-auto text-center">
+          <h2 className="text-2xl sm:text-3xl font-black text-white mb-4">Prêt à y voir plus clair ?</h2>
+          <p className="text-blue-100 mb-8 text-sm sm:text-base">Gratuit, sans inscription longue, résultats en 2 minutes.</p>
+          <button
+            onClick={onStart}
+            className="inline-flex items-center gap-2 px-8 py-4 bg-white text-blue-600 rounded-2xl font-bold text-base hover:bg-blue-50 transition-all shadow-xl active:scale-95 group"
+          >
+            C'est parti !
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+          </button>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="py-6 px-4 sm:px-6 lg:px-8 border-t border-slate-100 bg-white">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-slate-300" />
+            <span>© {new Date().getFullYear()} BienCouvert</span>
+          </div>
+          <p className="text-center">
+            ⚠️ Outil d'aide à la décision. Consultez un courtier agréé pour toute décision importante.
+          </p>
+        </div>
       </footer>
     </div>
   );
 };
 
-const FeatureCard = ({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) => (
-  <div className="p-10 bg-white rounded-[3rem] border border-slate-100 hover:border-primary-200 hover:shadow-2xl hover:shadow-primary-900/5 transition-all group">
-    <div className="w-20 h-20 bg-slate-50 text-slate-600 rounded-[2rem] flex items-center justify-center mb-8 group-hover:bg-primary-50 group-hover:text-primary-600 transition-all group-hover:rotate-6">
+const FeatureCard = ({
+  icon, color, title, description,
+}: {
+  icon: React.ReactNode;
+  color: string;
+  title: string;
+  description: string;
+}) => (
+  <div className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md hover:border-slate-200 transition-all">
+    <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${color}`}>
       {icon}
     </div>
-    <h3 className="text-2xl font-black text-slate-900 mb-4 tracking-tight">{title}</h3>
-    <p className="text-slate-500 text-sm leading-relaxed font-medium">{description}</p>
+    <h3 className="font-bold text-slate-900 mb-1.5 text-sm">{title}</h3>
+    <p className="text-xs text-slate-500 leading-relaxed">{description}</p>
   </div>
 );

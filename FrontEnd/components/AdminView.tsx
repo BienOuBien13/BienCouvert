@@ -1360,7 +1360,6 @@ export const AdminView: React.FC = () => {
 
       {activeTab === 'catalogue' && (
         <div className="space-y-6">
-          <CataloguePanel />
           {/* ── Monitoring des jobs d'ingestion ── */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -1369,6 +1368,7 @@ export const AdminView: React.FC = () => {
             </h3>
             <IngestionMonitorPanel />
           </div>
+          <CataloguePanel />
         </div>
       )}
     </>

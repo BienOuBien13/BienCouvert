@@ -27,7 +27,7 @@ import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { 
   Database, LogOut, Sparkles, ShieldAlert,
-  ArrowRight, CheckCircle2, Search, Zap, MessageSquare,
+  ArrowRight, CheckCircle2, Search, Zap, MessageSquare, Shield,
   Rocket, Target, Flag, Info, Settings, Briefcase, Activity
 } from 'lucide-react';
 
@@ -324,18 +324,18 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Bénéfice 3 : Courtier */}
+                  {/* Bénéfice 3 : Garanties */}
                   <div 
-                    onClick={() => setActiveView('experts')}
-                    className="p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(245,158,11,0.15)] hover:border-amber-100 cursor-pointer active:scale-[0.98] transition-all duration-200 group"
+                    onClick={() => setActiveView('coverage')}
+                    className="p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(99,102,241,0.15)] hover:border-indigo-100 cursor-pointer active:scale-[0.98] transition-all duration-200 group"
                   >
                     <div className="flex items-center gap-5">
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-lg">
-                        <Target className="w-7 h-7" />
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center shadow-lg">
+                        <Shield className="w-7 h-7" />
                       </div>
                       <div className="flex-1">
-                        <h5 className="font-bold text-lg text-slate-900 mb-1">Contactez un courtier spécialisé</h5>
-                        <p className="text-sm text-slate-600">Faites-vous accompagner par un expert pour concrétiser</p>
+                        <h5 className="font-bold text-lg text-slate-900 mb-1">Vos garanties en détail</h5>
+                        <p className="text-sm text-slate-600">Visualisez toutes les garanties de chaque contrat</p>
                       </div>
                       <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
                     </div>
@@ -405,8 +405,46 @@ function App() {
         return <div className="h-[calc(100vh-140px)] animate-fadeIn"><ChatInterface policies={policies} messages={messages} setMessages={setMessages} /></div>;
       case 'analysis':
         return <div className="animate-fadeIn"><AnalysisView policies={policies} profile={userProfile} onUpdateProfile={handleUpdateProfile} user={user} onFinishSimulation={() => setIsClearModalOpen(true)} /></div>;
+      case 'coverage':
+        return (
+          <div className="space-y-6 animate-fadeIn">
+            <div>
+              <h2 className="text-3xl font-black text-slate-900 mb-2">Vos Garanties</h2>
+              <p className="text-slate-600 font-medium">Sélectionnez un contrat pour voir le détail de ses garanties</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4">
+              {policies.length === 0 ? (
+                <div className="text-center py-16 text-slate-400">
+                  <Shield className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                  <p className="font-black uppercase tracking-widest text-sm">Aucun contrat</p>
+                  <p className="text-xs mt-1">Ajoutez des contrats pour visualiser leurs garanties</p>
+                  <button onClick={() => setActiveView('add')} className="mt-6 px-6 py-3 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 transition-all">
+                    Ajouter un contrat
+                  </button>
+                </div>
+              ) : (
+                policies.map(policy => (
+                  <button
+                    key={policy.id}
+                    onClick={() => setCoveragePolicy(policy)}
+                    className="w-full flex items-center gap-4 p-5 bg-white rounded-3xl border border-slate-100 shadow-[0_2px_16px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.10)] hover:border-primary-200 transition-all group active:scale-[0.98] text-left"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-cyan-500 text-white flex items-center justify-center shrink-0">
+                      <Shield className="w-6 h-6" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-slate-900 truncate">{policy.name}</p>
+                      <p className="text-xs text-slate-400 font-medium mt-0.5">{policy.insurer} · {policy.coverageDetail || policy.coverage || 'Formule souscrite'}</p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        );
       case 'experts':
-        return <div className="animate-fadeIn"><ExpertContact policies={policies} user={user} /></div>;
+        return null; // Réseau d'experts en construction — masqué
       case 'profile':
         return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} /></div>;
       case 'admin':
@@ -530,7 +568,7 @@ function App() {
         onClose={() => setIsClearModalOpen(false)} 
         onConfirmClear={handleClearAllData} 
         onConfirmSave={() => { setIsClearModalOpen(false); setActiveView('home'); }} 
-        onTransferToExpert={() => { setIsClearModalOpen(false); setActiveView('experts'); }}
+        onTransferToExpert={() => { setIsClearModalOpen(false); setActiveView('analysis'); }}
       />
 
       {/* Modal Conditions d'utilisation */}

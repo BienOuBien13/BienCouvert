@@ -665,21 +665,6 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
         </div>
       </div>
 
-      {/* Finishing Call to Action (Expert) */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-8 text-white shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 animate-fadeIn relative overflow-hidden group">
-        <div className="flex items-center gap-6 relative z-10">
-          <div className="w-16 h-16 bg-white/10 rounded-[1.5rem] flex items-center justify-center backdrop-blur-xl border border-white/10 group-hover:bg-primary-600 transition-colors">
-            <Headset className="w-8 h-8" />
-          </div>
-          <div className="text-center sm:text-left">
-            <h4 className="text-xl font-black tracking-tighter">Besoin d'un regard humain ?</h4>
-            <p className="text-xs text-slate-400 font-medium opacity-80 mt-1">Validez vos résultats avec un expert certifié gratuitement.</p>
-          </div>
-        </div>
-        <button onClick={onFinishSimulation} className="px-8 py-4 bg-white text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-primary-50 transition-all shadow-xl whitespace-nowrap active:scale-95 relative z-10">Prendre RDV</button>
-        <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/10 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/2" />
-      </div>
-
       </>)}
 
       {/* Results Display */}
@@ -816,13 +801,13 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
           <div className="bg-slate-900 rounded-[3rem] p-12 text-white text-center space-y-10 shadow-3xl mt-12 relative overflow-hidden group">
              <div className="space-y-4 relative z-10">
                 <h3 className="text-4xl font-black tracking-tighter">Optimisation prête</h3>
-                <p className="text-sm text-slate-400 font-medium max-w-sm mx-auto leading-relaxed">Voulez-vous que nos experts négocient ces changements pour vous ? C'est gratuit et nous gérons toute la résiliation.</p>
+                <p className="text-sm text-slate-400 font-medium max-w-sm mx-auto leading-relaxed">Votre bilan est prêt. Consultez les résultats et passez à l&apos;action.</p>
              </div>
              <button 
                onClick={onFinishSimulation}
                className="w-full py-6 bg-primary-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-primary-700 transition-all shadow-xl shadow-primary-900/40 relative z-10 active:scale-95"
              >
-               Transférer mon dossier
+               Sauvegarder et terminer
              </button>
              <div className="absolute -left-20 -bottom-20 w-96 h-96 bg-primary-600/10 rounded-full blur-[120px] group-hover:bg-primary-600/20 transition-all" />
           </div>

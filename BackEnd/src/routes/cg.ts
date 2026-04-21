@@ -912,7 +912,7 @@ router.get('/admin/user-cgs', async (req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT uc.id,
-              uc.user_id,
+              uc.owner,
               u.email        AS user_email,
               u.first_name,
               u.last_name,
@@ -927,12 +927,12 @@ router.get('/admin/user-cgs', async (req: Request, res: Response) => {
               COUNT(DISTINCT ucp.id)::int  AS pages_count,
               COUNT(DISTINCT ucf.id)::int  AS facts_count
        FROM user_cg uc
-       LEFT JOIN users             u   ON u.id   = uc.user_id
+       LEFT JOIN users             u   ON u.email = uc.owner
        LEFT JOIN insurers          i   ON i.code  = uc.insurer_code
        LEFT JOIN insurance_types   it  ON it.code = uc.insurance_type_code
        LEFT JOIN user_cg_pages     ucp ON ucp.user_cg_id = uc.id
        LEFT JOIN user_coverage_facts ucf ON ucf.user_cg_id = uc.id
-       GROUP BY uc.id, u.email, u.first_name, u.last_name, i.label, it.label_fr
+       GROUP BY uc.id, uc.owner, u.email, u.first_name, u.last_name, i.label, it.label_fr
        ORDER BY uc.created_at DESC`,
       []
     );

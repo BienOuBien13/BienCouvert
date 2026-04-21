@@ -113,12 +113,28 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
     loadCoverageDetails();
   }, [policy.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const CACHE_KEY = `coverage_v2_${policy.id}_${policy.coverageDetail || policy.coverage || ''}`;
+
   const loadCoverageDetails = async () => {
+    // Check sessionStorage cache first — instant display
+    try {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) {
+        setCoverageData(JSON.parse(cached));
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      // sessionStorage unavailable, continue normally
+    }
+
     setIsLoading(true);
     setError(null);
     try {
       const data = await getCoverageDetails(policy);
       setCoverageData(data);
+      // Store in sessionStorage for instant repeat views
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* quota exceeded or private mode */ }
     } catch (e) {
       setError('Impossible de charger les détails de garanties. Vérifiez votre connexion.');
       console.error(e);
