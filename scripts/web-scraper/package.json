@@ -1,0 +1,18 @@
+{
+  "name": "assurclair-web-scraper",
+  "version": "1.0.0",
+  "description": "Scrape des pages web pour en extraire le contenu contractuel (CG assurances) et génère un PDF structuré.",
+  "type": "module",
+  "main": "scrape-to-pdf.mjs",
+  "scripts": {
+    "test": "node scrape-to-pdf.mjs --insurer-code ABA01 --insurance-type AUT01 --output-name abeille-auto-garanties --urls https://www.abeille-assurances.fr/particulier/assurance/vehicules/assurance-auto.html#garanties",
+    "test:multi": "node scrape-to-pdf.mjs --insurer-code ABA01 --insurance-type AUT01 --output-name abeille-auto-multi --urls https://www.abeille-assurances.fr/particulier/assurance/vehicules/assurance-auto.html#garanties https://www.abeille-assurances.fr/particulier/assurance/vehicules/assurance-auto.html"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "puppeteer": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

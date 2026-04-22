@@ -211,13 +211,15 @@ function scorePdf(url: string, p: SearchParams): number {
   // Insurer name or code in URL (+15)
   if (u.includes(p.insurer_code.toLowerCase())) s += 15;
 
-  // URL on insurer's official domain (+20) or penalty on wrong domain (-30)
+  // URL on insurer's official domain (+20), trusted aggregator (+15), or penalty on wrong domain (-30)
   if (p.website_url) {
     try {
-      const insurerDomain = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, '');
-      const pdfDomain     = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      const insurerDomain   = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, '');
+      const pdfDomain       = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
       if (pdfDomain === insurerDomain || pdfDomain.endsWith('.' + insurerDomain)) {
         s += 20;  // same official domain
+      } else if (['index-assurance.fr','ffa-assurance.fr','planete-assurance.net','assurland.com','reassurez-moi.fr','meilleurtaux.com','lelynx.fr'].some(a => pdfDomain === a || pdfDomain.endsWith('.' + a))) {
+        s += 15;  // trusted PDF aggregator
       } else if (!u.includes(p.insurer_code.toLowerCase()) && !u.includes(insurerDomain.split('.')[0])) {
         s -= 30;  // not on insurer domain and insurer not mentioned in URL
       }
@@ -427,12 +429,26 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
   let siteHost: string | null = null;
   try { if (p.website_url) siteHost = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, ''); } catch { /* */ }
 
-  // Build search queries — domain-constrained first when possible
+  // Agrégateurs PDF d'assurance de confiance — autorisés même quand le domaine est connu
+  const TRUSTED_AGGREGATORS = [
+    'index-assurance.fr',
+    'ffa-assurance.fr',
+    'planete-assurance.net',
+    'assurland.com',
+    'reassurez-moi.fr',
+    'meilleurtaux.com',
+    'lelynx.fr',
+  ];
+
+  // Build search queries — domain-constrained first when possible, then open fallback
   const queries: string[] = siteHost
     ? [
         // Priorité 1 : contraint au domaine officiel
         `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}`,
         `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF site:${siteHost}`,
+        // Fallback ouvert : sans restriction de domaine (trouve les agrégateurs PDF)
+        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
+        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
       ]
     : [
         `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
@@ -460,13 +476,14 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
     if (allUrls.length === 0) continue;
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Filtre domaine : si on connaît le site officiel, rejeter les URLs d'autres domaines
-    // sauf si le score URL seul est très bon (fallback pour redirecteurs, CDNs assureurs)
+    // Filtre domaine : si on connaît le site officiel, favoriser ce domaine + agrégateurs PDF
+    // de confiance. Les autres domaines sont filtrés, sauf si aucun URL officiel trouvé.
     const filteredUrls = siteHost
       ? allUrls.filter(u => {
           try {
             const host = new URL(u).hostname.toLowerCase().replace(/^www\./, '');
-            return host === siteHost || host.endsWith('.' + siteHost);
+            return host === siteHost || host.endsWith('.' + siteHost)
+              || TRUSTED_AGGREGATORS.some(a => host === a || host.endsWith('.' + a));
           } catch { return false; }
         })
       : allUrls;
