@@ -205,45 +205,67 @@ export class ClaimsAgent {
     const cgUrls: Array<{ policyName: string; url: string }> = [];
     const textLines: string[] = [];
 
-    for (const p of coveringPolicies) {
-      const cgId = (p as any).centralCgId;
+    // Paralléliser toutes les requêtes DB (une par contrat)
+    type PolicyResult = {
+      cgUrl: string | null;
+      factRows: Array<{ guarantee_label: string; formula_label: string; coverage_status: string; coverage_amount: string | null; franchise: string | null; coverage_notes: string | null }>;
+      policyName: string;
+      provider: string;
+      formulaRaw: string;
+    };
 
-      // Récupérer l'URL source de la CG
-      if (cgId) {
-        const urlRes = await dbQuery(
-          `SELECT url, pdf_file_path FROM central_cg WHERE id = $1`,
-          [cgId],
-        ).catch(() => ({ rows: [] as any[] }));
-        if (urlRes.rows[0]?.url) {
-          cgUrls.push({ policyName: p.name, url: urlRes.rows[0].url });
+    const policyResults = await Promise.all(
+      coveringPolicies.map(async (p): Promise<PolicyResult> => {
+        const cgId = (p as any).centralCgId;
+        const formulaRaw = (p.coverageDetail || '').trim();
+
+        let cgUrl: string | null = null;
+        let factRows: PolicyResult['factRows'] = [];
+
+        if (cgId) {
+          const formulaKey = formulaRaw
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '');
+
+          const queries: Array<Promise<any>> = [
+            dbQuery(`SELECT url FROM central_cg WHERE id = $1`, [cgId])
+              .catch(() => ({ rows: [] as any[] })),
+          ];
+
+          if (kws.length > 0) {
+            const kwConditions = kws
+              .map((_, i) => `(guarantee_key ILIKE $${i + 3} OR guarantee_label ILIKE $${i + 3})`)
+              .join(' OR ');
+            const params: any[] = [cgId, formulaKey || '%', ...kws.map(k => `%${k}%`)];
+            queries.push(
+              dbQuery(
+                `SELECT guarantee_label, formula_label, coverage_status, coverage_amount, franchise, coverage_notes
+                 FROM coverage_facts
+                 WHERE central_cg_id = $1
+                   AND (formula_key ILIKE $2 OR formula_key IS NULL OR $2 = '%')
+                   AND (${kwConditions})
+                 ORDER BY coverage_status, guarantee_label
+                 LIMIT 10`,
+                params,
+              ).catch(() => ({ rows: [] as any[] })),
+            );
+          }
+
+          const [urlRes, factsRes] = await Promise.all(queries);
+          cgUrl = urlRes.rows[0]?.url ?? null;
+          factRows = factsRes?.rows ?? [];
         }
-      }
 
-      if (!cgId || kws.length === 0) continue;
+        return { cgUrl, factRows, policyName: p.name, provider: p.provider, formulaRaw };
+      }),
+    );
 
-      const formulaRaw = (p.coverageDetail || '').trim();
-      const formulaKey = formulaRaw
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '');
+    for (const { cgUrl, factRows, policyName, provider, formulaRaw } of policyResults) {
+      if (cgUrl) cgUrls.push({ policyName, url: cgUrl });
+      if (factRows.length === 0) continue;
 
-      const kwConditions = kws.map((_, i) => `(guarantee_key ILIKE $${i + 3} OR guarantee_label ILIKE $${i + 3})`).join(' OR ');
-      const params: any[] = [cgId, formulaKey || '%', ...kws.map(k => `%${k}%`)];
-
-      const res = await dbQuery(
-        `SELECT guarantee_label, formula_label, coverage_status, coverage_amount, franchise, coverage_notes
-         FROM coverage_facts
-         WHERE central_cg_id = $1
-           AND (formula_key ILIKE $2 OR formula_key IS NULL OR $2 = '%')
-           AND (${kwConditions})
-         ORDER BY coverage_status, guarantee_label
-         LIMIT 10`,
-        params,
-      ).catch(() => ({ rows: [] as any[] }));
-
-      if (res.rows.length === 0) continue;
-
-      textLines.push(`\n  Contrat : ${p.name} (${p.provider}) — Formule : ${formulaRaw || 'N/A'}`);
-      for (const r of res.rows) {
+      textLines.push(`\n  Contrat : ${policyName} (${provider}) — Formule : ${formulaRaw || 'N/A'}`);
+      for (const r of factRows) {
         const status = r.coverage_status === 'included' ? '✅' :
                        r.coverage_status === 'optional'  ? '⚡' :
                        r.coverage_status === 'excluded'  ? '❌' : '❓';
@@ -252,7 +274,7 @@ export class ClaimsAgent {
         if (r.franchise)        detail += ` — Franchise : ${r.franchise}`;
         if (r.coverage_notes)   detail += ` (${r.coverage_notes})`;
         textLines.push(`    ${detail}`);
-        allRows.push({ policyName: p.name, provider: p.provider, ...r });
+        allRows.push({ policyName, provider, ...r });
       }
     }
 

@@ -89,6 +89,59 @@ export class AnalysisAgent {
         if (!urlByGroup.has(key)) urlByGroup.set(key, f.pdf_url);
       }
     }
+    // ── Chemin rapide : réponse directe depuis coverage_facts (zéro LLM) ─────
+    // Si les faits structurés répondent sans ambiguïté → pas de Gemini (~700 ms économisés)
+    if (hasFacts && coverageFacts.length > 0) {
+      const normalize = (s: string) =>
+        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const qNorm = normalize(question);
+      const stopWords = new Set([
+        'votre', 'votr', 'avec', 'pour', 'dans', 'estce', 'etes', 'vous',
+        'suisje', 'couvre', 'garantie', 'assurance', 'contrat', 'couverte',
+        'couvert', 'couverts', 'inclus', 'incluse', 'exclus', 'exclue',
+      ]);
+      const qWords = qNorm.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
+
+      if (qWords.length > 0) {
+        const relevant = coverageFacts.filter(f => {
+          const label = normalize(f.guarantee_label || '');
+          const key   = (f.guarantee_key || '').toLowerCase();
+          return qWords.some(w => label.includes(w) || key.includes(w));
+        });
+
+        if (relevant.length > 0) {
+          const includedFacts = relevant.filter(f => f.coverage_status === 'included');
+          const excludedFacts = relevant.filter(f => f.coverage_status === 'excluded');
+          const allSameStatus = relevant.every(f => f.coverage_status === relevant[0].coverage_status);
+
+          if (allSameStatus && (includedFacts.length > 0 || excludedFacts.length > 0)) {
+            const status: CoverageStatus = includedFacts.length > 0 ? 'couvert' : 'non_couvert';
+            const best = relevant[0];
+            const amountHint = best.coverage_amount ? ` (jusqu'à ${best.coverage_amount})` : '';
+            const summary = status === 'couvert'
+              ? `✅ La garantie "${best.guarantee_label}" est incluse dans votre contrat${amountHint}.`
+              : `❌ La garantie "${best.guarantee_label}" n'est pas couverte par votre contrat.`;
+            const cgUrl = [...urlByGroup.values()][0] ?? undefined;
+            console.log(
+              `[AnalysisAgent] Réponse directe coverage_facts (zéro LLM) — ${relevant.length} faits, status=${status}`
+            );
+            return {
+              status,
+              summary: best.coverage_notes ? `${summary} ${best.coverage_notes}` : summary,
+              garantie: best.guarantee_label,
+              montantMax: best.coverage_amount ?? undefined,
+              franchise: best.franchise ?? undefined,
+              lacunes: excludedFacts.map(f => f.guarantee_label),
+              sources: [best.insurer_label || policies[0]?.provider || ''].filter(Boolean),
+              cgUrl,
+              rawAnswer: '',
+            };
+          }
+        }
+      }
+    }
+    // ── Fin chemin rapide ─────────────────────────────────────────────────────
+
     const profileContext = userProfile
       ? `Profil: ${userProfile.adultsCount ?? 1} adulte(s), ${userProfile.childrenCount ?? 0} enfant(s), ` +
         `logement: ${userProfile.housingType ?? '?'}, statut: ${userProfile.housingStatus ?? '?'}`

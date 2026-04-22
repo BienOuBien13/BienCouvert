@@ -274,9 +274,20 @@ export default function CataloguePanel() {
   const doStopJob = async () => {
     if (!activeJobId) return;
     setStopping(true);
+    // Optimistic update — marque immédiatement toutes les entrées non terminées comme annulées
+    setJobData(prev => {
+      if (!prev) return prev;
+      const terminalSteps = new Set(['done', 'error', 'cancelled']);
+      return {
+        ...prev,
+        statuses: prev.statuses.map(s =>
+          terminalSteps.has(s.step) ? s : { ...s, step: 'cancelled' as EntryStep, message: 'Arrêt demandé…' }
+        ),
+      };
+    });
     try {
       await apiPost(`job/${activeJobId}/stop`);
-      showFlash('ok', 'Arrêt demandé — les entrées en attente seront annulées');
+      showFlash('ok', 'Arrêt demandé — l’entrée en cours se termine puis le job s’arrête');
     } catch (e: any) { showFlash('err', e.message); }
     setStopping(false);
   };
@@ -284,6 +295,16 @@ export default function CataloguePanel() {
   const doCancelEntry = async (catalogueId: number) => {
     if (!activeJobId) return;
     setCancellingEntry(catalogueId);
+    // Optimistic update
+    setJobData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        statuses: prev.statuses.map(s =>
+          s.catalogue_id === catalogueId ? { ...s, step: 'cancelled' as EntryStep, message: 'Annulation demandée…' } : s
+        ),
+      };
+    });
     try {
       await apiPost(`job/${activeJobId}/cancel-entry/${catalogueId}`);
     } catch (e: any) { showFlash('err', e.message); }
@@ -298,6 +319,19 @@ export default function CataloguePanel() {
     });
     if (res.ok) { showFlash('ok', 'URL effacée'); loadMatrix(); }
     else { const d = await res.json(); showFlash('err', d.message ?? 'Erreur'); }
+  };
+
+  /** Efface l'URL identifiée ET relance immédiatement la recherche automatique */
+  const doResetAndReidentify = async (id: number) => {
+    const csrf = await fetchCsrfToken();
+    const clearRes = await fetch(`${API}/api/admin/catalogue/entry/${id}/url`, {
+      method: 'DELETE', credentials: 'include',
+      headers: { ...hdrs, ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+    });
+    if (!clearRes.ok) { const d = await clearRes.json(); showFlash('err', d.message ?? 'Erreur effacement'); return; }
+    // Lance immédiatement l'ingestion pour cet entrée (SmartSearch relâche car URL vide)
+    try { await doSmartIngest([id]); }
+    catch (e: any) { showFlash('err', e.message); }
   };
 
   const filteredCells = (data?.cells ?? []).filter(c => {
@@ -410,7 +444,6 @@ export default function CataloguePanel() {
           <div className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
             {jobData.statuses.map(s => {
               const sc = STEP_CONFIG[s.step] ?? STEP_CONFIG.pending;
-              const isPending = s.step === 'pending';
               return (
                 <div key={s.catalogue_id} className="flex items-start gap-3 px-5 py-2.5">
                   <div className="shrink-0 mt-0.5">
@@ -426,11 +459,11 @@ export default function CataloguePanel() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-200 ${sc.color}`}>{sc.label}</span>
-                    {isPending && !jobData.completed && (
+                    {!['done', 'error', 'cancelled'].includes(s.step) && !jobData.completed && (
                       <button
                         onClick={() => doCancelEntry(s.catalogue_id)}
                         disabled={cancellingEntry === s.catalogue_id}
-                        title="Annuler cette entrée"
+                        title={s.step === 'pending' ? 'Annuler cette entrée' : 'Signaler l’arrêt (l’opération en cours se termine puis s’arrête)'}
                         className="p-1 text-slate-300 hover:text-red-500 rounded transition-colors disabled:opacity-40"
                       >
                         {cancellingEntry === s.catalogue_id
@@ -582,6 +615,12 @@ export default function CataloguePanel() {
                         className="p-1.5 text-slate-300 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors" title="Rechercher & Indexer">
                         <Play className="w-3.5 h-3.5" />
                       </button>
+                      {cell.current_url && (
+                        <button onClick={() => doResetAndReidentify(cell.id)}
+                          className="p-1.5 text-slate-300 hover:text-amber-600 rounded-lg hover:bg-amber-50 transition-colors" title="Réinitialiser l'URL et relancer la recherche automatique">
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button onClick={() => setEditUrl({ id: cell.id, value: cell.current_url ?? '' })}
                         className="p-1.5 text-slate-300 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors" title="Modifier l'URL">
                         <Pencil className="w-3.5 h-3.5" />

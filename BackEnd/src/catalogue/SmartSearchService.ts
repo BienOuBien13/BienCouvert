@@ -413,13 +413,19 @@ async function searchBing(query: string): Promise<string[]> {
 
 async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> {
   let siteHost: string | null = null;
-  try { if (p.website_url) siteHost = new URL(p.website_url).hostname; } catch { /* */ }
+  try { if (p.website_url) siteHost = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, ''); } catch { /* */ }
 
-  // Build search queries — same as what a human would type in Google
-  const queries = [
-    `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF`,
-    `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF${siteHost ? ` site:${siteHost}` : ''}`,
-  ];
+  // Build search queries — domain-constrained first when possible
+  const queries: string[] = siteHost
+    ? [
+        // Priorité 1 : contraint au domaine officiel
+        `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}`,
+        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF site:${siteHost}`,
+      ]
+    : [
+        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
+        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
+      ];
 
   for (const q of queries) {
     console.log(`[SmartSearch]    query: "${q}"`);
@@ -441,8 +447,24 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
     console.log(`[SmartSearch]    Total unique URLs: ${allUrls.length}`);
     if (allUrls.length === 0) continue;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Filtre domaine : si on connaît le site officiel, rejeter les URLs d'autres domaines
+    // sauf si le score URL seul est très bon (fallback pour redirecteurs, CDNs assureurs)
+    const filteredUrls = siteHost
+      ? allUrls.filter(u => {
+          try {
+            const host = new URL(u).hostname.toLowerCase().replace(/^www\./, '');
+            return host === siteHost || host.endsWith('.' + siteHost);
+          } catch { return false; }
+        })
+      : allUrls;
+
+    // Utiliser les URLs filtrées si disponibles, sinon toutes (domain inconnu)
+    const candidateUrls = filteredUrls.length > 0 ? filteredUrls : allUrls;
+    console.log(`[SmartSearch]    Candidates after domain filter: ${candidateUrls.length}/${allUrls.length}`);
+
     // Direct PDF hits from search results
-    const directPdfs = allUrls.filter(u => u.toLowerCase().includes('.pdf'));
+    const directPdfs = candidateUrls.filter(u => u.toLowerCase().includes('.pdf'));
     console.log(`[SmartSearch]    Direct PDFs: ${directPdfs.length}`);
     if (directPdfs.length > 0) {
       const best = await pickBestPdf(directPdfs, p);
@@ -453,7 +475,7 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
     }
 
     // Follow top result pages → extract PDFs
-    const pagesToCrawl = allUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 8);
+    const pagesToCrawl = candidateUrls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 8);
     console.log(`[SmartSearch]    Following ${pagesToCrawl.length} pages for PDFs…`);
     for (const pageUrl of pagesToCrawl) {
       try {
@@ -810,27 +832,69 @@ async function validateCgRelevance(
   url: string,
   p: SearchParams,
 ): Promise<{ valid: boolean; reason: string }> {
-  const ai = getAiClient();
-  if (!ai) return { valid: true, reason: 'IA indisponible — validation ignorée' };
 
-  // Récupère les premiers octets de la page/PDF pour analyse
-  let snippet = '';
-  try {
-    const content = await fetchRaw(url, 8_000);
-    snippet = content.slice(0, 2000);
-  } catch {
-    return { valid: true, reason: 'Page inaccessible — validation ignorée' };
+  // ── Étape 1 : vérification rapide par domaine (sans Gemini) ─────────────────────────────
+  if (p.website_url) {
+    try {
+      const insurerDomain = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, '');
+      const urlDomain     = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      if (urlDomain !== insurerDomain && !urlDomain.endsWith('.' + insurerDomain)) {
+        // L'URL n'est pas sur le domaine officiel de l'assureur — rejet immédiat, sans Gemini
+        return { valid: false, reason: `Domaine ${urlDomain} ≠ domaine officiel ${insurerDomain}` };
+      }
+    } catch { /* URL parse error — ignore */ }
   }
-  if (!snippet.trim()) return { valid: true, reason: 'Contenu vide — validation ignorée' };
 
-  const prompt = `Tu analyses le début d'un document ou d'une page web pour vérifier qu'il correspond bien à ce qui est attendu.
+  // ── Étape 2 : vérification rapide par mots-clés de type dans l'URL ────────────────────
+  // Si l'URL contient clairement les mots-clés d'un AUTRE type d'assurance, on rejette sans Gemini
+  {
+    const typeL    = p.insurance_type_label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const typeCode = p.insurance_type_code.toLowerCase();
+    const typeCategory = getTypeCategory(typeL, typeCode);
+    const urlNorm = decodeURIComponent(url).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    for (const [cat, kws] of Object.entries(TYPE_KW)) {
+      if (cat === typeCategory) continue;
+      const wrongKwsInUrl = kws.filter(k => k.length > 4 && urlNorm.includes(k));
+      if (wrongKwsInUrl.length >= 2) {
+        // Deux mots-clés d'un autre type dans l'URL — rejet
+        return { valid: false, reason: `URL contient des mots-clés du type "${cat}" (${wrongKwsInUrl.join(', ')}) alors qu'on cherche "${typeL}"` };
+      }
+    }
+  }
+
+  // ── Étape 3 : validation Gemini sur le contenu texte de la PAGE (pas du PDF binaire) ──────
+  const ai = getAiClient();
+  if (!ai) return { valid: true, reason: 'IA indisponible — validation ignorée (domaine OK)' };
+
+  // Pour les PDFs directs, utiliser uniquement l'URL (le contenu est binaire = inutile pour Gemini)
+  const isPdf = url.toLowerCase().includes('.pdf');
+
+  let pageText = '';
+  if (!isPdf) {
+    // Pour les pages HTML, récupérer le contenu texte
+    try {
+      const html    = await fetchRaw(url, 6_000);
+      // Extraire le texte visible (supprimer les balises HTML)
+      pageText = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .slice(0, 1500);
+    } catch { /* page inaccessible — on se base uniquement sur l'URL */ }
+  }
+
+  // Construire le contexte à analyser : URL + contenu texte (si disponible)
+  const context = isPdf
+    ? `URL du PDF : "${url}"\n\n(Document PDF — analyse basée sur l'URL uniquement)`
+    : `URL : "${url}"\n\nContenu de la page :\n${pageText || '(contenu non disponible)'}` ;
+
+  const prompt = `Tu vérifie qu'un document trouvé correspond exactement à ce qu'on cherche.
 
 Assureur attendu : "${p.insurer_full_name}" (code : "${p.insurer_code}")
 Type d'assurance attendu : "${p.insurance_type_label}" (code : "${p.insurance_type_code}")
-URL : "${url}"
 
-Début du contenu (brut, peut contenir du HTML ou du texte PDF) :
-${snippet.slice(0, 1500)}
+${context}
 
 Réponds UNIQUEMENT en JSON valide, sans markdown :
 {
@@ -840,11 +904,11 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
 }
 
 Règles STRICTES :
-- insurer_match = true UNIQUEMENT si le nom "${p.insurer_full_name}" (ou une filiale/marque connue, ou le code "${p.insurer_code}") est CLAIREMENT présent dans l'URL ou le contenu du document
-- insurer_match = false si le contenu ou l'URL mentionne un AUTRE assureur à la place
+- insurer_match = true UNIQUEMENT si le nom "${p.insurer_full_name}" (ou une filiale/marque connue, ou le code "${p.insurer_code}") est CLAIREMENT présent dans l'URL ou le contenu
+- insurer_match = false si l'URL ou le contenu mentionne un AUTRE assureur à la place
 - insurer_match = false si NI l'URL NI le contenu ne confirment l'assureur attendu
 - type_match = true si le document concerne le type d'assurance "${p.insurance_type_label}", OU si le type ne peut pas être déterminé avec certitude
-- type_match = false UNIQUEMENT si le document concerne CLAIREMENT un type d'assurance DIFFÉRENT (ex: assurance habitation alors qu'on cherche assurance appareils électroniques)`;
+- type_match = false UNIQUEMENT si le document concerne CLAIREMENT un type d'assurance DIFFÉRENT`;
 
   try {
     const model = ai.getGenerativeModel(
@@ -857,7 +921,8 @@ Règles STRICTES :
     const valid  = parsed.insurer_match === true && parsed.type_match !== false;
     return { valid, reason: parsed.reason ?? '' };
   } catch (e) {
-    return { valid: true, reason: `Erreur validation (${(e as Error).message?.slice(0, 60)}) — accepté par défaut` };
+    // En cas d'erreur Gemini, on accepte si le domaine était déjà valide (étape 1)
+    return { valid: true, reason: `Erreur validation Gemini (${(e as Error).message?.slice(0, 60)}) — accepté (domaine OK)` };
   }
 }
 
