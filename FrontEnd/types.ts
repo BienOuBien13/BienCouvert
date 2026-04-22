@@ -11,7 +11,7 @@ export enum PolicyType {
   OTHER = 'Autre'
 }
 
-export type AppView = 'home' | 'add' | 'policies' | 'chat' | 'analysis' | 'coverage' | 'experts' | 'profile' | 'admin' | 'monitoring' | 'sync' | 'contact' | 'partner' | 'sinistre';
+export type AppView = 'home' | 'add' | 'smart-add' | 'policies' | 'chat' | 'analysis' | 'coverage' | 'experts' | 'profile' | 'admin' | 'monitoring' | 'sync' | 'contact' | 'partner' | 'sinistre';
 
 export interface User {
   id: string;
@@ -52,6 +52,7 @@ export interface CentralCgEntry {
   productName?: string;             // Nom du produit (pour affichage)
   provider?: string;                // Alias insurer pour compatibilité geminiService
   pdfUrl?: string;                  // URL directe vers le PDF
+  documentUrl?: string;             // URL du document (alias pdfUrl)
   semanticSummary?: string;         // Résumé sémantique généré par l'IA
   indexedFormulas?: string[];       // Pour compatibilité
   indexedOptions?: string[];        // Pour compatibilité

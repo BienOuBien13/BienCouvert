@@ -122,13 +122,9 @@ export const AuthScreen: React.FC<Props> = ({ onLogin, onBack, resetToken }) => 
               <div className="mt-1 relative shadow-sm"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-slate-400" /></div>
               <input type="password" required value={password} onChange={(e) => {
                 setPassword(e.target.value);
-                if (mode === 'register' || mode === 'reset') {
-                  setPasswordWarning(validatePassword(e.target.value));
-                } else {
-                  setPasswordWarning('');
-                }
+                setPasswordWarning(validatePassword(e.target.value));
               }} className="focus:ring-primary-500 block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border outline-none" placeholder="••••••••" /></div>
-              {passwordWarning && (mode === 'register' || mode === 'reset') && (
+              {passwordWarning && (
                 <div className="text-xs text-orange-600 mt-1">{passwordWarning}</div>
               )}
             </div>

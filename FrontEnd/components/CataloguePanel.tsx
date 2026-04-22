@@ -37,7 +37,7 @@ interface MatrixResult {
 interface ScopeInsurer  { code: string; label: string; fullName: string; websiteUrl: string; }
 interface ScopeType     { code: string; labelFr: string; }
 
-type EntryStep = 'pending' | 'searching' | 'fetching' | 'classifying' | 'vectorizing' | 'done' | 'error';
+type EntryStep = 'pending' | 'searching' | 'fetching' | 'classifying' | 'vectorizing' | 'done' | 'error' | 'cancelled';
 
 interface EntryJobStatus {
   catalogue_id:         number;

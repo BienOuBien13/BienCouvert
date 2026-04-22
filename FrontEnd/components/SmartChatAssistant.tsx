@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Policy, User } from '../types';
+import { Policy, PolicyType, User } from '../types';
 import { Home, Car, Heart, Briefcase, Shield, Send, Sparkles, Package, Check, X, MessageSquare, Edit3, Plus, CreditCard, Smartphone, Scale, Loader } from 'lucide-react';
 import { uuid } from '../utils/uuid';
 import { fetchCsrfToken } from '../services/authService';
@@ -304,7 +304,7 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       name: contractNameInput,
       insurer: selectedInsurer,
       insurerCode: insurerData?.code || selectedInsurer,
-      type: selectedType,
+      type: selectedType as PolicyType,
       typeCode: typeData?.code || selectedType,
       coverage: selectedFormula,
       coverageDetail: `${selectedInsurer}\n\n📦 Formule: ${selectedFormula}\n\n🎯 Options:\n${selectedOptions.map(opt => `• ${opt}`).join('\n')}`,

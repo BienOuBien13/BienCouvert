@@ -106,7 +106,7 @@ export const AdminView: React.FC = () => {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // --- État du modal coverage_facts ---
-  const [factsDocId, setFactsDocId] = useState<number | null>(null);
+  const [factsDocId, setFactsDocId] = useState<string | number | null>(null);
   const [factsDocLabel, setFactsDocLabel] = useState('');
   const [facts, setFacts] = useState<CoverageFact[]>([]);
   const [factsLoading, setFactsLoading] = useState(false);
@@ -122,7 +122,7 @@ export const AdminView: React.FC = () => {
   const [promotingCgId, setPromotingCgId] = useState<number | null>(null);
 
   // Charge les faits de couverture d'un document CG central
-  const loadCoverageFacts = async (centralCgId: number, label: string) => {
+  const loadCoverageFacts = async (centralCgId: string | number, label: string) => {
     setFactsIsUser(false);
     setFactsDocId(centralCgId);
     setFactsDocLabel(label);
