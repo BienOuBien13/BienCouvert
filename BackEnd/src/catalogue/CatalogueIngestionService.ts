@@ -283,7 +283,7 @@ async function runJob(
           job.errors++;
           // Persister la raison en DB
           await pool.query(
-            `UPDATE document_catalogue SET matrix_status = 'not_found', notes = $1, updated_at = NOW() WHERE id = $2`,
+            `UPDATE document_catalogue SET matrix_status = 'missing', notes = $1, updated_at = NOW() WHERE id = $2`,
             [ejs.message.slice(0, 500), e.id]
           ).catch(() => {});
           continue;
