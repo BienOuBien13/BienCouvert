@@ -75,7 +75,7 @@ function formatCoverageResponse(
   return response.trim();
 }
 
-function formatClaimsResponse(claims: ClaimsResult): string {
+function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): string {
   // ── Demande de clarification (quel contrat ?) ──────────────────────────────
   if (claims.needsClarification) {
     return `❓ **Précisez votre contrat**\n\n${claims.needsClarification}`;
@@ -105,6 +105,49 @@ function formatClaimsResponse(claims: ClaimsResult): string {
       if (s.contact) response += `📞 Contact : ${s.contact}\n`;
       response += '\n';
     });
+  }
+
+  // ── Détails de garantie depuis coverage_facts ────────────────────────────
+  if (coverageFacts.length > 0) {
+    // Filtrer les faits liés au type de sinistre (mots-clés du sinistre dans guarantee_label/key)
+    const sTypeNorm = claims.sinisterType
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    // Mots-clés liés au sinistre for matching
+    const sKeywords = sTypeNorm.split(/\s+/).filter(w => w.length > 3);
+
+    const relevant = coverageFacts.filter((f: any) => {
+      const label = (f.guarantee_label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const key   = (f.guarantee_key   || '').toLowerCase();
+      return sKeywords.some(kw => label.includes(kw) || key.includes(kw));
+    });
+
+    // Si aucun fait spécifique, on prend les 5 premiers faits du contrat concerné
+    const factsToShow = relevant.length > 0
+      ? relevant.slice(0, 8)
+      : coverageFacts.slice(0, 5);
+
+    if (factsToShow.length > 0) {
+      response += `\n📋 Détails de garantie :\n`;
+      const statusEmoji: Record<string, string> = {
+        included:       '✅',
+        excluded:       '❌',
+        optional:       '⚙️',
+        not_applicable: '—',
+      };
+      factsToShow.forEach((f: any) => {
+        const emoji = statusEmoji[f.coverage_status] ?? '❓';
+        let line = `${emoji} **${f.guarantee_label}**`;
+        if (f.formula_label) line += ` _(${f.formula_label})_`;
+        if (f.coverage_amount) line += ` — Plafond : ${f.coverage_amount}`;
+        if (f.franchise)       line += ` — Franchise : ${f.franchise}`;
+        if (f.coverage_notes)  line += `\n   ${f.coverage_notes}`;
+        response += `${line}\n`;
+      });
+      response += '\n';
+    }
   }
 
   // ── Liens vers les conditions générales ───────────────────────────────────
@@ -280,11 +323,17 @@ export class OrchestratorAgent {
 
       // ── SINISTRE ────────────────────────────────────────────────────────
       case 'SINISTRE': {
-        // ClaimsAgent seul — le RAGAgent n'est pas utilisé dans la réponse sinistre
+        // ClaimsAgent + coverage_facts en parallèle pour enrichir la réponse
         logAgent(claimsAgent.name);
         const sinisterType = intent.subtype || message;
-        const claimsResult = await claimsAgent.guide({ sinisterType, policies, userId });
-        response = formatClaimsResponse(claimsResult);
+        const [claimsResult, coverageFacts] = await Promise.all([
+          claimsAgent.guide({ sinisterType, policies, userId }),
+          resolveCoverageFacts(storage, policies, 'Orchestrator/sinistre').catch(() => []),
+        ]);
+        if (coverageFacts.length > 0) {
+          console.log(`[Orchestrator] ${coverageFacts.length} faits structurés chargés (sinistre)`);
+        }
+        response = formatClaimsResponse(claimsResult, coverageFacts);
         break;
       }
 

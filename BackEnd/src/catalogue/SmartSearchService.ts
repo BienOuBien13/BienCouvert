@@ -208,8 +208,21 @@ function scorePdf(url: string, p: SearchParams): number {
     }
   }
 
-  // Insurer name in URL (+15)
+  // Insurer name or code in URL (+15)
   if (u.includes(p.insurer_code.toLowerCase())) s += 15;
+
+  // URL on insurer's official domain (+20) or penalty on wrong domain (-30)
+  if (p.website_url) {
+    try {
+      const insurerDomain = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, '');
+      const pdfDomain     = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      if (pdfDomain === insurerDomain || pdfDomain.endsWith('.' + insurerDomain)) {
+        s += 20;  // same official domain
+      } else if (!u.includes(p.insurer_code.toLowerCase()) && !u.includes(insurerDomain.split('.')[0])) {
+        s -= 30;  // not on insurer domain and insurer not mentioned in URL
+      }
+    } catch { /* URL parse error — ignore */ }
+  }
 
   // Recent year in URL (+10)
   if (/20(2[4-9]|3[0-9])/.test(u)) s += 10;
@@ -224,7 +237,7 @@ function scorePdf(url: string, p: SearchParams): number {
 }
 
 /** Pick the best-scored PDF from a list, validate it, return url+score or null. */
-async function pickBestPdf(urls: string[], p: SearchParams, minScore = 0): Promise<{ url: string; score: number } | null> {
+async function pickBestPdf(urls: string[], p: SearchParams, minScore = 10): Promise<{ url: string; score: number } | null> {
   const scored = urls.map(u => ({ url: u, score: scorePdf(u, p) })).sort((a, b) => b.score - a.score);
   for (const c of scored.slice(0, 8)) {
     if (c.score < minScore) break;
@@ -468,14 +481,19 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
   const site = p.website_url ?? '';
 
   // Prompts designed to force Gemini to actually search and return URLs.
-  // Key insight: ask for a LIST of URLs, not a description — longer output = more data.
+  // Key constraint: ONLY URLs from the target insurer's official website.
+  const siteConstraint = site ? `UNIQUEMENT sur le site ${site}` : `UNIQUEMENT du site officiel de ${p.insurer_full_name}`;
   const prompts = [
     // Prompt A: short, direct, triggers Google Search grounding immediately
-    `Search: "${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf"\n\nList ALL URLs you find, especially .pdf links and download pages from ${site}. One URL per line. No explanation needed.`,
-    // Prompt B: if A fails, French phrasing with explicit site
-    `Trouve le PDF "${p.doc_type_label}" assurance ${p.insurance_type_label} de ${p.insurer_full_name}${site ? ` (${site})` : ''}. Liste toutes les URLs trouvées (PDF et pages de téléchargement), une par ligne.`,
-    // Prompt C: broader fallback
-    `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF télécharger. Liste les URLs trouvées.`,
+    `Search: "${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf site:${site || p.insurer_full_name.toLowerCase().replace(/\s+/g, '')+'.fr'}"
+
+IMPORTANT: Liste ${siteConstraint}. N'inclus JAMAIS d'URLs d'autres assureurs. Une URL par ligne.`,
+    // Prompt B: French phrasing with explicit site + type constraint
+    `Trouve le PDF "${p.doc_type_label}" pour l'assurance "${p.insurance_type_label}" de ${p.insurer_full_name}${site ? ` (${site})` : ''}.
+CONTRAINTE STRICTE: retourne ${siteConstraint}. Le document doit concerner uniquement "${p.insurance_type_label}", pas un autre type d'assurance.
+Liste toutes les URLs (PDF et pages de téléchargement), une par ligne.`,
+    // Prompt C: broader fallback — still insurer-constrained
+    `${p.insurer_full_name} "${p.insurance_type_label}" "conditions générales" PDF télécharger. Retourne ${siteConstraint}. Liste les URLs trouvées.`,
   ];
 
   for (const [pi, prompt] of prompts.entries()) {
@@ -738,9 +756,12 @@ async function tryGeminiKnowledge(p: SearchParams): Promise<SmartSearchResult | 
 
   const siteHint = p.website_url ? ` (${p.website_url})` : '';
   const prompt   = `Tu connais la structure des sites web des assureurs français.
-Pour ${p.insurer_full_name}${siteHint}, propose jusqu'à 6 URLs vraisemblables pour le PDF "${p.doc_type_label}" en assurance ${p.insurance_type_label}.
-Inclus des URLs directes de fichiers PDF ET des URLs de pages web de téléchargement.
-Ne génère QUE des URLs basées sur des patterns réels. Ne génère pas d'URLs inventées.
+Pour ${p.insurer_full_name}${siteHint}, propose jusqu'à 6 URLs vraisemblables pour le PDF "${p.doc_type_label}" en assurance "${p.insurance_type_label}".
+
+CONTRAINTES IMPÉRATIVES :
+1. Toutes les URLs DOIVENT être sur le domaine officiel de ${p.insurer_full_name}${p.website_url ? ` (${p.website_url})` : ''}.
+2. Le document doit concerner UNIQUEMENT le type d'assurance "${p.insurance_type_label}" — ne propose pas de CG pour un autre type.
+3. Ne génère QUE des URLs basées sur des patterns réels connus. Confidence < 0.5 si tu n'es pas sûr.
 JSON: {"candidates":[{"url":"https://...","confidence":0.7,"is_page":false},...]}`;
 
   try {
@@ -818,10 +839,12 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
   "reason": "explication courte"
 }
 
-Règles :
-- insurer_match = true si le nom de l'assureur, un de ses synonymes ou d'une filiale connue est clairement mentionné dans le contenu ou l'URL
-- type_match = true si le document traite spécifiquement du type d'assurance attendu (et pas d'un autre type sans rapport)
-- En cas de doute, préférer true (on ne veut pas bloquer des documents légitimes)`;
+Règles STRICTES :
+- insurer_match = true UNIQUEMENT si le nom "${p.insurer_full_name}" (ou une filiale/marque connue, ou le code "${p.insurer_code}") est CLAIREMENT présent dans l'URL ou le contenu du document
+- insurer_match = false si le contenu ou l'URL mentionne un AUTRE assureur à la place
+- insurer_match = false si NI l'URL NI le contenu ne confirment l'assureur attendu
+- type_match = true si le document concerne le type d'assurance "${p.insurance_type_label}", OU si le type ne peut pas être déterminé avec certitude
+- type_match = false UNIQUEMENT si le document concerne CLAIREMENT un type d'assurance DIFFÉRENT (ex: assurance habitation alors qu'on cherche assurance appareils électroniques)`;
 
   try {
     const model = ai.getGenerativeModel(
@@ -830,7 +853,8 @@ Règles :
     const result = await model.generateContent([prompt]);
     const text   = result.response.text().trim();
     const parsed = JSON.parse(text);
-    const valid  = parsed.insurer_match !== false && parsed.type_match !== false;
+    // insurer_match must be explicitly true — type_match fails only if explicitly false
+    const valid  = parsed.insurer_match === true && parsed.type_match !== false;
     return { valid, reason: parsed.reason ?? '' };
   } catch (e) {
     return { valid: true, reason: `Erreur validation (${(e as Error).message?.slice(0, 60)}) — accepté par défaut` };
@@ -862,10 +886,13 @@ export async function smartSearchForDocument(params: {
 
   /** Valide un résultat et retourne null s'il est rejeté */
   async function validate(result: SmartSearchResult | null, label: string): Promise<SmartSearchResult | null> {
-    if (!result?.pdf_url) return result;   // pas de PDF → pas de validation (page_url accepté tel quel)
-    const check = await validateCgRelevance(result.pdf_url, p);
+    if (!result) return null;
+    // Valider le PDF en priorité, sinon la page si elle est présente
+    const urlToCheck = result.pdf_url ?? result.page_url;
+    if (!urlToCheck) return result;
+    const check = await validateCgRelevance(urlToCheck, p);
     if (!check.valid) {
-      console.warn(`[SmartSearch] ⛔ PDF rejeté (${label}): ${check.reason} — ${result.pdf_url.slice(0, 80)}`);
+      console.warn(`[SmartSearch] ⛔ Résultat rejeté (${label}): ${check.reason} — ${urlToCheck.slice(0, 80)}`);
       return null;
     }
     if (check.reason) console.log(`[SmartSearch]    ✔ Validation OK (${label}): ${check.reason}`);
