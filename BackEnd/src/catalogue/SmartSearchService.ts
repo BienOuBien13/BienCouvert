@@ -440,20 +440,12 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
     'lelynx.fr',
   ];
 
-  // Build search queries — domain-constrained first when possible, then open fallback
-  const queries: string[] = siteHost
-    ? [
-        // Priorité 1 : contraint au domaine officiel
-        `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}`,
-        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF site:${siteHost}`,
-        // Fallback ouvert : sans restriction de domaine (trouve les agrégateurs PDF)
-        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
-        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
-      ]
-    : [
-        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
-        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
-      ];
+  // Build search queries — global, sans restriction de domaine
+  const queries: string[] = [
+    `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
+    `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
+    ...(siteHost ? [`${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}`] : []),
+  ];
 
   for (const q of queries) {
     console.log(`[SmartSearch]    query: "${q}"`);
@@ -475,22 +467,9 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
     console.log(`[SmartSearch]    Total unique URLs: ${allUrls.length}`);
     if (allUrls.length === 0) continue;
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Filtre domaine : si on connaît le site officiel, favoriser ce domaine + agrégateurs PDF
-    // de confiance. Les autres domaines sont filtrés, sauf si aucun URL officiel trouvé.
-    const filteredUrls = siteHost
-      ? allUrls.filter(u => {
-          try {
-            const host = new URL(u).hostname.toLowerCase().replace(/^www\./, '');
-            return host === siteHost || host.endsWith('.' + siteHost)
-              || TRUSTED_AGGREGATORS.some(a => host === a || host.endsWith('.' + a));
-          } catch { return false; }
-        })
-      : allUrls;
-
-    // Utiliser les URLs filtrées si disponibles, sinon toutes (domain inconnu)
-    const candidateUrls = filteredUrls.length > 0 ? filteredUrls : allUrls;
-    console.log(`[SmartSearch]    Candidates after domain filter: ${candidateUrls.length}/${allUrls.length}`);
+    // Pas de filtre de domaine — on cherche globalement
+    const candidateUrls = allUrls;
+    console.log(`[SmartSearch]    Candidates (no domain filter): ${candidateUrls.length}`);
 
     // Direct PDF hits from search results
     const directPdfs = candidateUrls.filter(u => u.toLowerCase().includes('.pdf'));
@@ -531,24 +510,17 @@ async function tryGeminiGrounding(p: SearchParams): Promise<SmartSearchResult | 
 
   const site = p.website_url ?? '';
 
-  // Prompts designed to force Gemini to actually search and return URLs.
-  // Key constraint: ONLY URLs from the target insurer's official website.
-  const siteConstraint = site ? `UNIQUEMENT sur le site ${site}` : `UNIQUEMENT du site officiel de ${p.insurer_full_name}`;
+  // Prompts sans restriction de domaine — cherche partout (site officiel + agrégateurs)
   const prompts = [
-    // Prompt A: short, direct, triggers Google Search grounding immediately
-    `Search: "${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} filetype:pdf site:${site || p.insurer_full_name.toLowerCase().replace(/\s+/g, '')+'.fr'}"
-
-IMPORTANT: Liste ${siteConstraint}. N'inclus JAMAIS d'URLs d'autres assureurs. Une URL par ligne.`,
-    // Prompt B: French phrasing with explicit site + type constraint
-    `Trouve le PDF "${p.doc_type_label}" pour l'assurance "${p.insurance_type_label}" de ${p.insurer_full_name}${site ? ` (${site})` : ''}.
-CONTRAINTE STRICTE: retourne ${siteConstraint}. Le document doit concerner uniquement "${p.insurance_type_label}", pas un autre type d'assurance.
-Liste toutes les URLs (PDF et pages de téléchargement), une par ligne.`,
-    // Prompt C: broader fallback — still insurer-constrained
-    `${p.insurer_full_name} "${p.insurance_type_label}" "conditions générales" PDF télécharger. Retourne ${siteConstraint}. Liste les URLs trouvées.`,
-    // Prompt D: fully open — no site restriction, aggregators included
-    `Cherche le PDF des "${p.doc_type_label}" pour l'assurance "${p.insurance_type_label}" de ${p.insurer_full_name}.
-Cherche sur TOUS les sites : le site officiel${site ? ` (${site})` : ''}, index-assurance.fr, ffa-assurance.fr, planete-assurance.net, et tout autre site hébergeant des CG d'assurance français.
-N'impose aucune restriction de domaine. Retourne toutes les URLs PDF que tu trouves, une par ligne.`,
+    // Prompt A: direct, global, triggers Google Search grounding
+    `Trouve le PDF "${p.doc_type_label}" pour l'assurance "${p.insurance_type_label}" de ${p.insurer_full_name}.
+Cherche sur TOUS les sites disponibles : site officiel${site ? ` (${site})` : ''}, index-assurance.fr, ffa-assurance.fr, planete-assurance.net, et tout hébergeur de CG d'assurance français.
+Liste toutes les URLs PDF trouvées, une par ligne. N'impose aucune restriction de domaine.`,
+    // Prompt B: search query style
+    `Search: "${p.insurer_full_name} ${p.insurance_type_label} conditions générales PDF"
+Retourne toutes les URLs de PDF trouvées sur n'importe quel site. Une URL par ligne.`,
+    // Prompt C: fallback ciblé site officiel
+    `${p.insurer_full_name} "${p.insurance_type_label}" "conditions générales" PDF télécharger${site ? ` site:${site}` : ''}. Liste les URLs trouvées.`,
   ];
 
   for (const [pi, prompt] of prompts.entries()) {
@@ -925,21 +897,8 @@ async function validateCgRelevance(
   p: SearchParams,
 ): Promise<{ valid: boolean; reason: string }> {
 
-  // ── Étape 1 : vérification rapide par domaine (sans Gemini) ─────────────────────────────
-  if (p.website_url) {
-    try {
-      const insurerDomain = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, '');
-      const urlDomain     = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
-      if (urlDomain !== insurerDomain && !urlDomain.endsWith('.' + insurerDomain)) {
-        // Les agrégateurs PDF de confiance sont toujours acceptés (index-assurance.fr, etc.)
-        const TRUSTED_VALIDATION_AGG = ['index-assurance.fr','ffa-assurance.fr','planete-assurance.net','assurland.com','reassurez-moi.fr','meilleurtaux.com','lelynx.fr'];
-        if (!TRUSTED_VALIDATION_AGG.some(a => urlDomain === a || urlDomain.endsWith('.' + a))) {
-          // L'URL n'est pas sur le domaine officiel de l'assureur — rejet immédiat, sans Gemini
-          return { valid: false, reason: `Domaine ${urlDomain} ≠ domaine officiel ${insurerDomain}` };
-        }
-      }
-    } catch { /* URL parse error — ignore */ }
-  }
+  // ── Étape 1 : plus de restriction de domaine — n'importe quel site peut héberger la CG ──
+  // (agrégateurs comme index-assurance.fr, ffa-assurance.fr, CDNs, etc. tous autorisés)
 
   // ── Étape 2 : vérification rapide par mots-clés de type dans l'URL ────────────────────
   // Si l'URL contient clairement les mots-clés d'un AUTRE type d'assurance, on rejette sans Gemini
