@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import pool from '../db';
 import { smartSearchForDocument } from './SmartSearchService';
 import { ingestDocumentForCatalogue } from '../services/cgIngestionService';
+import { requestStopVectorization } from '../services/pageVectorizationService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ const MAX_JOBS_KEPT  = 10;
 // Registres de demandes d'arrêt/annulation (nettoyés en fin de job)
 const stopRegistry   = new Set<string>();                    // job_ids → arrêt total
 const cancelRegistry = new Map<string, Set<number>>();       // job_id → catalogue_ids à sauter
+const activeVecRegistry = new Map<string, number>();         // job_id → centralCgId en cours de vectorisation
 
 function pruneOldJobs() {
   if (jobRegistry.size <= MAX_JOBS_KEPT) return;
@@ -94,6 +96,12 @@ export function listRecentJobs(): CatalogueJob[] {
 export function requestStopJob(jobId: string): boolean {
   if (!jobRegistry.has(jobId)) return false;
   stopRegistry.add(jobId);
+  // Propager l'arrêt à la vectorisation en cours (si présente)
+  const activeCgId = activeVecRegistry.get(jobId);
+  if (activeCgId !== undefined) {
+    requestStopVectorization(activeCgId);
+    console.log(`[CatalogueJob] Stop propagé à la vectorisation CG #${activeCgId}`);
+  }
   return true;
 }
 
@@ -314,7 +322,14 @@ async function runJob(
           ejs.step    = step as EntryStep;
           ejs.message = msg;
         },
+        onCgIdCreated: (cgId: number) => {
+          // Enregistrer le cgId actif pour pouvoir propager un stop pendant la vectorisation
+          activeVecRegistry.set(job.job_id, cgId);
+          // Si un stop a déjà été demandé, le propager immédiatement
+          if (stopRegistry.has(job.job_id)) requestStopVectorization(cgId);
+        },
       });
+      activeVecRegistry.delete(job.job_id);
 
       if (result.success) {
         ejs.step          = 'done';
@@ -399,5 +414,6 @@ async function runJob(
   // Nettoyage des registres de contrôle
   stopRegistry.delete(job.job_id);
   cancelRegistry.delete(job.job_id);
+  activeVecRegistry.delete(job.job_id);
   job.completed = true;
 }

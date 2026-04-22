@@ -992,8 +992,9 @@ export async function ingestDocumentForCatalogue(params: {
   insuranceTypeCode:  string;
   pdfUrl:             string;
   onProgress?:        (step: string, message: string) => void;
+  onCgIdCreated?:     (cgId: number) => void;
 }): Promise<IngestCatalogueResult> {
-  const { catalogueId, insurerCode, insuranceTypeCode, pdfUrl, onProgress } = params;
+  const { catalogueId, insurerCode, insuranceTypeCode, pdfUrl, onProgress, onCgIdCreated } = params;
   const progress = (step: string, msg: string) => { if (onProgress) onProgress(step, msg); };
 
   try {
@@ -1125,6 +1126,8 @@ export async function ingestDocumentForCatalogue(params: {
 
     // ── VECTORIZER ───────────────────────────────────────────────────────────
     progress('vectorizing', `Vectorisation page par page (central_cg #${centralCgId})…`);
+    // Notifier le job de l'ID créé pour permettre la propagation d'un stop
+    if (onCgIdCreated) onCgIdCreated(centralCgId);
     const vecResult = await vectorizeCgByPages(pool as Pool, centralCgId, pdfUrl, pdfBase64);
 
     // ── Mettre à jour document_catalogue ─────────────────────────────────────

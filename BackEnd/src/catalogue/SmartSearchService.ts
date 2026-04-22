@@ -427,21 +427,16 @@ async function tryWebSearch(p: SearchParams): Promise<SmartSearchResult | null> 
   let siteHost: string | null = null;
   try { if (p.website_url) siteHost = new URL(p.website_url).hostname.toLowerCase().replace(/^www\./, ''); } catch { /* */ }
 
-  // Exclusions de recherche pour éviter les DIP/IPID/notices quand on cherche des CG
-  const cgExclusions = p.doc_type === 'CG'
-    ? ' -IPID -DIP -"document d\'information" -"notice d\'information"'
-    : '';
-
   // Build search queries — domain-constrained first when possible
   const queries: string[] = siteHost
     ? [
         // Priorité 1 : contraint au domaine officiel
-        `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}${cgExclusions}`,
-        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF site:${siteHost}${cgExclusions}`,
+        `${p.insurer_full_name} ${p.doc_type_label} ${p.insurance_type_label} PDF site:${siteHost}`,
+        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF site:${siteHost}`,
       ]
     : [
-        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF${cgExclusions}`,
-        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF${cgExclusions}`,
+        `${p.insurer_full_name} "${p.doc_type_label}" ${p.insurance_type_label} PDF`,
+        `${p.insurer_full_name} conditions générales ${p.insurance_type_label} PDF`,
       ];
 
   for (const q of queries) {
@@ -925,8 +920,7 @@ Règles STRICTES :
 - insurer_match = false si l'URL ou le contenu mentionne un AUTRE assureur à la place
 - insurer_match = false si NI l'URL NI le contenu ne confirment l'assureur attendu
 - type_match = true si le document concerne le type d'assurance "${p.insurance_type_label}", OU si le type ne peut pas être déterminé avec certitude
-- type_match = false UNIQUEMENT si le document concerne CLAIREMENT un type d'assurance DIFFÉRENT${p.doc_type === 'CG' ? `
-- type_match = false si le document est un IPID, un DIP, une notice d'information, une fiche-conseil ou tout résumé court — on cherche uniquement les CONDITIONS GÉNÉRALES complètes` : ''}`;
+- type_match = false UNIQUEMENT si le document concerne CLAIREMENT un type d'assurance DIFFÉRENT`;
 
   try {
     const model = ai.getGenerativeModel(
