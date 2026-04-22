@@ -658,6 +658,28 @@ Réponds UNIQUEMENT avec un JSON valide, sans commentaire :
   }
 }
 
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+/**
+ * Valide insurance_sub_type_code contre la table insurance_sub_types.
+ * Retourne le code s'il existe (case-insensitive), null sinon.
+ * Évite la FK constraint violation "central_cg_insurance_sub_type_code_fkey".
+ */
+async function resolveSubTypeCode(dbPool: any, code: string | null | undefined): Promise<string | null> {
+  if (!code) return null;
+  try {
+    const res = await dbPool.query(
+      `SELECT code FROM insurance_sub_types WHERE LOWER(code) = LOWER($1) LIMIT 1`,
+      [code]
+    );
+    if (res.rows.length > 0) return res.rows[0].code as string;
+    console.warn(`[CLASSIFIER] insurance_sub_type_code "${code}" inconnu dans insurance_sub_types — mis à null`);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── ORCHESTRATEUR ────────────────────────────────────────────────────────────
 
 /**
@@ -839,6 +861,8 @@ export async function runIngestion(scope: IngestionScope): Promise<{
             // ── Insérer dans central_cg ──────────────────────────────────
             const fileName = `${classif.insurer_code}_${classif.insurance_type_code}_${Date.now()}.pdf`;
             const pdfBase64 = fetched.buffer.toString('base64');
+            // Valider le sub_type_code (FK constraint) — null si code inconnu en DB
+            classif.insurance_sub_type_code = await resolveSubTypeCode(pool, classif.insurance_sub_type_code);
 
             const insertResult = await pool.query<{ id: number }>(
               `INSERT INTO central_cg
@@ -1069,6 +1093,8 @@ export async function ingestDocumentForCatalogue(params: {
     // ── INSERT central_cg ─────────────────────────────────────────────────────
     const fileName   = `${insurerCode}_${insuranceTypeCode}_${Date.now()}.pdf`;
     const pdfBase64  = fetched.buffer.toString('base64');
+    // Valider le sub_type_code (FK constraint) — null si code inconnu en DB
+    classif.insurance_sub_type_code = await resolveSubTypeCode(pool, classif.insurance_sub_type_code);
     const insertRes  = await pool.query<{ id: number }>(
       `INSERT INTO central_cg
          (insurer_code, insurance_type_code, insurance_sub_type_code, document_type_code,
