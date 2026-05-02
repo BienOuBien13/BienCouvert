@@ -15,7 +15,8 @@ const DEFAULT_LIMIT = 5;
 
 /**
  * Recherche full-text PostgreSQL (fallback quand embedding indisponible).
- * Utilise to_tsquery + ILIKE sur content_text des pages vectorisées.
+ * Utilise plusieurs ILIKE indexés via gin_trgm_ops (migration 023) sur content_text
+ * des pages vectorisées. Chaque mot-clé contribue à un score de pertinence.
  */
 async function textSearchCentralCg(queryText: string, insurers: string[] | undefined, limit: number): Promise<RAGChunk[]> {
   // Découper la query en mots-clés pertinents (enlever mots vides courts)
@@ -24,11 +25,22 @@ async function textSearchCentralCg(queryText: string, insurers: string[] | undef
     .replace(/[^a-zàâäéèêëîïôùûüç\s]/g, ' ')
     .split(/\s+/)
     .filter(w => w.length > 3)
-    .slice(0, 6);
+    .slice(0, 5);
 
   if (keywords.length === 0) return [];
 
-  const params: any[] = [`%${keywords.join('%')}%`]; // ILIKE simplifié
+  // Construction d'une requête multi-ILIKE : chaque mot-clé est un filtre (AND).
+  // L'index trigram (idx_central_cg_pages_content_trgm) accélère chaque ILIKE.
+  // Score = somme des matches (mot le plus précis remonte en premier).
+  const params: any[] = [];
+  const ilikeConditions = keywords.map(kw => {
+    params.push(`%${kw}%`);
+    return `p.content_text ILIKE $${params.length}`;
+  });
+
+  // Score : combien de keywords matchent (utile pour ranker quand on a beaucoup de mots)
+  const scoreExpr = keywords.map((_, i) => `(p.content_text ILIKE $${i + 1})::int`).join(' + ');
+
   let sql = `
     SELECT
       cg.insurer_code,
@@ -38,18 +50,19 @@ async function textSearchCentralCg(queryText: string, insurers: string[] | undef
       p.chunk_type,
       p.page_number,
       COALESCE(i.label, cg.insurer_code) as insurer_label,
-      0.5 as similarity
+      (${scoreExpr})::float / ${keywords.length} as similarity
     FROM central_cg_pages p
     JOIN central_cg cg ON p.central_cg_id = cg.id
     LEFT JOIN insurers i ON cg.insurer_code = i.code
     WHERE cg.status = 'active'
-      AND p.content_text ILIKE $1
+      AND (${ilikeConditions.join(' OR ')})
   `;
   if (insurers && insurers.length > 0) {
     params.push(insurers);
     sql += ` AND cg.insurer_code = ANY($${params.length})`;
   }
-  sql += ` ORDER BY p.page_number LIMIT $${params.length + 1}`;
+  // Tri par pertinence décroissante puis page (résultats déterministes)
+  sql += ` ORDER BY similarity DESC, p.page_number ASC LIMIT $${params.length + 1}`;
   params.push(limit);
 
   try {
@@ -57,7 +70,7 @@ async function textSearchCentralCg(queryText: string, insurers: string[] | undef
     return result.rows.map((row: any) => ({
       content: row.content_text || '',
       source: `${row.insurer_label || row.insurer_code} p.${row.page_number ?? '?'}`,
-      similarity: 0.5,
+      similarity: typeof row.similarity === 'number' ? row.similarity : 0.5,
       chunkType: row.chunk_type,
       pageNumber: row.page_number,
     }));

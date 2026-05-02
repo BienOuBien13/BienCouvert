@@ -671,6 +671,46 @@ router.get('/me/analysis-profile', authMiddleware, async (req: any, res) => {
 });
 
 /**
+ * Route GET /api/auth/me/profile-status (protégée)
+ * Indique au frontend si le profil utilisateur est suffisamment complet
+ * pour permettre à l'AdvisorAgent de fournir des recommandations personnalisées.
+ *
+ * Champs obligatoires pour considérer le profil "complet" :
+ *   - adultsCount, childrenCount (composition foyer)
+ *   - housingStatus (propriétaire/locataire/bailleur)
+ *
+ * Permet au frontend d'afficher un onboarding (modal/banner) si incomplet.
+ */
+router.get('/me/profile-status', authMiddleware, async (req: any, res) => {
+  try {
+    const profile = await storage.readAnalysisProfile(parseInt(req.user.id));
+    const isComplete = !!(
+      profile &&
+      profile.adultsCount !== undefined && profile.adultsCount !== null &&
+      profile.childrenCount !== undefined && profile.childrenCount !== null &&
+      profile.housingStatus
+    );
+    // Pourcentage de complétion (utile pour barre de progression UI)
+    const requiredFields = ['adultsCount', 'childrenCount', 'housingStatus', 'vehiclesCount', 'professionalCategory'];
+    const filled = profile ? requiredFields.filter(k => {
+      const v = (profile as any)[k];
+      return v !== undefined && v !== null && v !== '';
+    }).length : 0;
+    res.json({
+      complete: isComplete,
+      completionPercent: Math.round((filled / requiredFields.length) * 100),
+      missingFields: profile ? requiredFields.filter(k => {
+        const v = (profile as any)[k];
+        return v === undefined || v === null || v === '';
+      }) : requiredFields,
+    });
+  } catch (err) {
+    console.error('GET /me/profile-status error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
  * Route PUT /api/auth/me/analysis-profile (protégée)
  * Crée ou met à jour le profil de profilage détaillé de l'utilisateur.
  */

@@ -2,10 +2,11 @@
 // OptimizerAgent — Optimiseur de portefeuille ET de circuit IA
 // Deux responsabilités complémentaires :
 //  1. Analyser le portefeuille assurance → trouver doublons, lacunes, économies
+//     (détection déterministe via coverage_facts puis affinement Gemini)
 //  2. Analyser le pipeline d'exécution → proposer des raccourcis d'orchestration
 // =============================================================================
 
-import { getAiClient } from '../services/geminiService';
+import { getAiClient, resolveCoverageFacts } from '../services/geminiService';
 import { Policy } from '../types';
 import {
   OptimizerInput,
@@ -14,6 +15,7 @@ import {
   RAGResult,
 } from './types';
 import { OptimizationFinding } from '../types';
+import { storage } from '../storage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Analyse du circuit IA (meta-optimisation)
@@ -120,9 +122,87 @@ export class OptimizerAgent {
       };
     }
 
+    // ── Détection déterministe (sans LLM) : doublons exact (même assureur+type+sous-type)
+    // Trouve immédiatement les doublons évidents avant l'analyse LLM, et garantit
+    // qu'ils apparaissent toujours même si Gemini échoue.
+    const deterministicFindings: OptimizationFinding[] = [];
+    const groupKey = (p: any) =>
+      `${(p.insurerCode || p.provider || '').toLowerCase()}|${(p.typeCode || p.type || '').toLowerCase()}|${(p.subTypeCode || '').toLowerCase()}`;
+    const grouped = new Map<string, Policy[]>();
+    for (const p of policies) {
+      const k = groupKey(p);
+      if (!grouped.has(k)) grouped.set(k, []);
+      grouped.get(k)!.push(p);
+    }
+    for (const [, group] of grouped) {
+      if (group.length > 1) {
+        const totalPremium = group.reduce((sum, p: any) => sum + (Number(p.annualPremium) || 0), 0);
+        // Estimation : économiser le contrat le moins-disant si on garde le mieux-couvrant
+        const minPremium = Math.min(...group.map((p: any) => Number(p.annualPremium) || 0).filter(v => v > 0));
+        deterministicFindings.push({
+          title: `Doublon ${group[0].provider} (${group[0].type})`,
+          description: `${group.length} contrats du même assureur sur le même type d'assurance. Forte probabilité de couvertures redondantes.`,
+          type: 'duplicate',
+          severity: 'high',
+          involvedPolicies: group.map(p => p.name),
+          estimatedSaving: minPremium > 0 ? Math.round(minPremium) : 0,
+          recommendation: 'Comparer les garanties et conserver le contrat offrant le meilleur rapport couverture/prime.',
+        } as OptimizationFinding);
+      }
+    }
+
+    // ── Comparaison déterministe via coverage_facts (chevauchement de garanties) ─
+    // Pour chaque paire de polices avec centralCgId distinct, compare les garanties incluses.
+    let coverageOverlapCount = 0;
+    try {
+      const policiesWithCg = policies.filter((p: any) => p.centralCgId);
+      if (policiesWithCg.length >= 2) {
+        const facts = await resolveCoverageFacts(storage, policiesWithCg, 'OptimizerAgent');
+        // Index par central_cg_id → ensemble de guarantee_key inclus/optionnels
+        const factsByCg = new Map<number, Set<string>>();
+        for (const f of facts) {
+          if (f.coverage_status !== 'included' && f.coverage_status !== 'optional') continue;
+          // Retrouver le central_cg_id (peut être absent dans le fait, on remonte via policy)
+          // Note : resolveCoverageFacts ne renvoie pas systématiquement central_cg_id ; on indexe par insurer+type
+          const cgKey = `${f.insurer_label || ''}|${f.formula_label || ''}`;
+          // Utilise plutôt guarantee_key directement par police via mapping policy->facts
+          // Simplification : compter le nombre total de garanties communes
+        }
+        // Pour la version simple : signaler si >= 5 garanties communes dans le résultat global
+        const guaranteeCounts = new Map<string, number>();
+        for (const f of facts) {
+          if (!['included', 'optional'].includes(f.coverage_status)) continue;
+          const k = (f.guarantee_key || f.guarantee_label || '').toLowerCase();
+          if (k) guaranteeCounts.set(k, (guaranteeCounts.get(k) || 0) + 1);
+        }
+        coverageOverlapCount = Array.from(guaranteeCounts.values()).filter(n => n >= 2).length;
+        if (coverageOverlapCount >= 5 && policiesWithCg.length >= 2) {
+          deterministicFindings.push({
+            title: `${coverageOverlapCount} garanties potentiellement redondantes`,
+            description: `Plusieurs de vos contrats couvrent les mêmes garanties (${coverageOverlapCount} chevauchements détectés via les conditions générales).`,
+            type: 'duplicate',
+            severity: 'medium',
+            involvedPolicies: policiesWithCg.map((p: any) => p.name),
+            estimatedSaving: 0,
+            recommendation: 'Vérifiez les garanties communes pour ajuster les niveaux et éviter les doubles cotisations.',
+          } as OptimizationFinding);
+        }
+        console.log(`[OptimizerAgent] Détection déterministe : ${deterministicFindings.length} findings, ${coverageOverlapCount} chevauchements coverage_facts`);
+      }
+    } catch (e: any) {
+      console.warn('[OptimizerAgent] Comparaison coverage_facts échouée:', e.message);
+    }
+
     const ai = getAiClient();
     if (!ai) {
-      return { findings: [], totalEstimatedSaving: 0, circuitOptimizations, prioritized: [] };
+      // Pas de Gemini : retourner uniquement les findings déterministes
+      const detSavings = deterministicFindings.reduce((s, f) => s + (f.estimatedSaving || 0), 0);
+      return {
+        findings: deterministicFindings,
+        totalEstimatedSaving: detSavings,
+        circuitOptimizations,
+        prioritized: deterministicFindings.slice(0, 3),
+      };
     }
 
     // Enrichir avec les chunks RAG si disponibles
@@ -185,24 +265,46 @@ Réponds UNIQUEMENT en JSON :
       const result = await model.generateContent([prompt]);
       const parsed = JSON.parse(result.response.text());
 
-      const findings: OptimizationFinding[] = Array.isArray(parsed.findings) ? parsed.findings : [];
-      const totalEstimatedSaving: number = parsed.totalEstimatedSaving || 0;
+      const llmFindings: OptimizationFinding[] = Array.isArray(parsed.findings) ? parsed.findings : [];
+      const llmTotal: number = parsed.totalEstimatedSaving || 0;
+
+      // Fusion : déterministe en premier (haute fiabilité), puis LLM
+      // Dédoublonnage simple : on évite deux findings 'duplicate' avec même set de polices
+      const seenDuplicateKeys = new Set<string>();
+      const allFindings: OptimizationFinding[] = [];
+      for (const f of [...deterministicFindings, ...llmFindings]) {
+        if (f.type === 'duplicate') {
+          const key = (f.involvedPolicies || []).slice().sort().join('|');
+          if (seenDuplicateKeys.has(key)) continue;
+          seenDuplicateKeys.add(key);
+        }
+        allFindings.push(f);
+      }
+      const totalEstimatedSaving =
+        deterministicFindings.reduce((s, f) => s + (f.estimatedSaving || 0), 0) + llmTotal;
 
       // Top 3 par sévérité
       const severityOrder = { high: 0, medium: 1, low: 2 };
-      const prioritized = [...findings]
+      const prioritized = [...allFindings]
         .sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3))
         .slice(0, 3);
 
       return {
-        findings,
+        findings: allFindings,
         totalEstimatedSaving,
         circuitOptimizations,
         prioritized,
       };
     } catch (e: any) {
       console.error('[OptimizerAgent] Erreur LLM:', e.message);
-      return { findings: [], totalEstimatedSaving: 0, circuitOptimizations, prioritized: [] };
+      // En cas d'échec LLM, on retourne au moins les findings déterministes
+      const detSavings = deterministicFindings.reduce((s, f) => s + (f.estimatedSaving || 0), 0);
+      return {
+        findings: deterministicFindings,
+        totalEstimatedSaving: detSavings,
+        circuitOptimizations,
+        prioritized: deterministicFindings.slice(0, 3),
+      };
     }
   }
 

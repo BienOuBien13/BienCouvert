@@ -729,8 +729,46 @@ export const chunkText = (text: string, maxChars: number = 3000): string[] => {
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: résolution robuste des coverage_facts pour un ensemble de policies
 // Gère tous les cas: centralCgId direct, fallback insurer+type, LIKE partiel, table_json
+//
+// Optimisation : cache Redis 10 min sur la clé { policyIds, formulas, cgIds }.
+// Les coverage_facts sont stables (modifiés uniquement via PATCH admin), donc le
+// cache est sûr et accélère significativement l'assistant pour requêtes répétées.
 // ─────────────────────────────────────────────────────────────────────────────
+function buildCoverageFactsCacheKey(policies: any[]): string {
+  // Clé déterministe : tri pour stabilité, on inclut tous les axes utilisés par la résolution
+  const parts = policies
+    .map((p: any) => [
+      p.id ?? '',
+      p.centralCgId ?? '',
+      p.userCgId ?? '',
+      p.insurerCode ?? '',
+      p.typeCode ?? '',
+      p.subTypeCode ?? '',
+      (p.formula || '').toLowerCase().trim(),
+    ].join('|'))
+    .sort();
+  return `coverage-facts:${parts.join(';')}`;
+}
+
 export async function resolveCoverageFacts(storage: any, policies: any[], label = ''): Promise<any[]> {
+  const tag = label ? `[${label}] ` : '';
+
+  // ── Cache Redis : clé déterministe sur les policies ──
+  const cacheKey = buildCoverageFactsCacheKey(policies);
+  const cached = await cacheGet<any[]>(cacheKey);
+  if (cached) {
+    console.log(`${tag}🎯 Cache hit coverage_facts (${cached.length} faits)`);
+    return cached;
+  }
+
+  const result = await resolveCoverageFactsImpl(storage, policies, label);
+
+  // TTL 10 min — coverage_facts sont stables (modifiés uniquement par admin)
+  await cacheSet(cacheKey, result, 600);
+  return result;
+}
+
+async function resolveCoverageFactsImpl(storage: any, policies: any[], label = ''): Promise<any[]> {
   const tag = label ? `[${label}] ` : '';
   let coverageFacts: any[] = [];
 

@@ -203,11 +203,19 @@ export interface OrchestratorInput {
 }
 
 export interface OrchestratorOutput {
-  response: string;           // Réponse finale à streamer au client
+  response: string;           // Réponse finale (markdown lisible) à streamer au client
   intent: AgentIntent;
   agentsUsed: string[];       // Pour observabilité/debug
   processingMs: number;
   optimizations?: CircuitOptimization[];
+  /**
+   * Représentation structurée de la réponse, quand l'intention le permet.
+   * Permet au frontend d'afficher des cards/tableaux/badges plutôt que du markdown brut.
+   * - QUESTION_GARANTIE / CONSEIL : { kind: 'coverage', status, garantie, montantMax, franchise, sources, cgUrl, recommendations[] }
+   * - SINISTRE : { kind: 'claims', sinisterType, urgencyLevel, coveringPolicies[], steps[], cgUrls[] }
+   * - OPTIMISATION : { kind: 'optimizer', findings[], totalEstimatedSaving }
+   */
+  structured?: any;
 }
 
 // Plan d'exécution interne de l'orchestrateur

@@ -435,8 +435,9 @@ router.delete('/:id', authMiddleware, async (req: any, res) => {
  * Route POST /api/policies/search
  * Recherche d'informations sur une police via le service d'IA externe.
  * Utilisé pour trouver des détails sur un produit d'assurance en ligne.
+ * 🔒 Auth requise : prévient l'abus de l'API Gemini (coûts).
  */
-router.post('/search', async (req, res) => {
+router.post('/search', authMiddleware, async (req, res) => {
   const { provider, type, name } = req.body;
   try {
     const result = await searchPolicyInfo(provider, type, name);
@@ -450,8 +451,9 @@ router.post('/search', async (req, res) => {
  * Route POST /api/policies/summarize
  * Génération d'un résumé pour un document (PDF, image, etc.) via l'IA.
  * Utilisé pour prévisualiser le contenu d'un document avant de créer la police.
+ * 🔒 Auth requise : prévient l'abus de l'API Gemini (coûts).
  */
-router.post('/summarize', async (req, res) => {
+router.post('/summarize', authMiddleware, async (req, res) => {
   const { fileBase64, mimeType } = req.body;
   if (!fileBase64 || !mimeType) return res.status(400).json({ message: 'Missing fileBase64 or mimeType' });
   try {
@@ -467,13 +469,20 @@ router.post('/summarize', async (req, res) => {
  * Route POST /api/policies/detect-duplicates
  * Détection des doublons potentiels entre plusieurs polices d'assurance.
  * Analyse les polices fournies et identifie les couvertures redondantes.
+ * 🔒 Auth requise : utilise Gemini + filtre les polices par utilisateur.
  */
-router.post('/detect-duplicates', async (req, res) => {
-  const policies = req.body.policies as any[] || [];
+router.post('/detect-duplicates', authMiddleware, async (req: any, res) => {
   try {
+    // Sécurité IDOR : ne considérer que les polices appartenant au user (ou toutes si admin)
+    const requestedIds = (req.body.policies as any[] || [])
+      .map((p: any) => parseInt(p.id))
+      .filter((id: number) => !isNaN(id));
+    const ownedPolicies = await storage.readPolicies(req.user.id);
+    const policies = ownedPolicies.filter((p: any) => requestedIds.includes(parseInt(p.id)));
     const findings = await detectDuplicates(policies);
     res.json(findings);
   } catch (e) {
+    console.error('detect-duplicates error:', e);
     res.status(500).json({ message: 'Error detecting duplicates' });
   }
 });
@@ -491,7 +500,7 @@ router.post('/detect-duplicates', async (req, res) => {
  * Supporte les query params : ?type=auto, ?insurer=AXA
  * Les types sont normalisés en minuscules (auto, habitation, bancaire, etc.)
  */
-router.get('/central-cg', async (req, res) => {
+router.get('/central-cg', authMiddleware, async (req, res) => {
   try {
     const entries = await storage.readCentralCg();
     
@@ -671,7 +680,7 @@ router.post('/central-cg', authMiddleware, adminMiddleware, async (req, res) => 
  * Retourne le statut de vectorisation d'une CG (pending/processing/done/failed/partial).
  * Permet au frontend de suivre la progression de l'indexation en temps réel.
  */
-router.get('/central-cg/:id/vectorization-status', async (req, res) => {
+router.get('/central-cg/:id/vectorization-status', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
@@ -721,7 +730,7 @@ router.get('/central-cg/:id/vectorization-status', async (req, res) => {
  * Relance la vectorisation d'un CG central existant (utile si le PDF était absent lors de la création).
  * Utilise le pdf_base64 ou pdf_file_path déjà stocké en DB.
  */
-router.post('/central-cg/:id/reprocess', async (req, res) => {
+router.post('/central-cg/:id/reprocess', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
@@ -815,7 +824,7 @@ router.post('/central-cg/:id/reprocess', async (req, res) => {
  * Route POST /api/policies/central-cg/:id/stop-vectorization
  * Arrête proprement une vectorisation en cours pour un CG donné.
  */
-router.post('/central-cg/:id/stop-vectorization', async (req, res) => {
+router.post('/central-cg/:id/stop-vectorization', authMiddleware, adminMiddleware, async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
   requestStopVectorization(id);
@@ -826,9 +835,9 @@ router.post('/central-cg/:id/stop-vectorization', async (req, res) => {
 /**
  * Route DELETE /api/policies/central-cg/:id
  * Suppression d'une entrée du référentiel central par son ID.
- * Accès restreint aux administrateurs.
+ * 🔒 Accès restreint aux administrateurs (auth + admin requis).
  */
-router.delete('/central-cg/:id', async (req, res) => {
+router.delete('/central-cg/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     await storage.deleteCentralCgEntry(id);
@@ -845,7 +854,7 @@ router.delete('/central-cg/:id', async (req, res) => {
  * Utilisé pour vérifier si une CG existe déjà avant d'uploader un document.
  * Retourne null si aucune correspondance n'est trouvée.
  */
-router.get('/central-cg/search', async (req, res) => {
+router.get('/central-cg/search', authMiddleware, async (req, res) => {
   try {
     const { provider, name, type } = req.query;
     

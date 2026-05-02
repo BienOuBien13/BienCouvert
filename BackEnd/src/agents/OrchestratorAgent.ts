@@ -275,6 +275,7 @@ export class OrchestratorAgent {
     const policyIds = policies.map((p) => String(p.id));
 
     let response = '';
+    let structured: any = undefined;
 
     // ═══════════════════════════════════════════════════════════════════════
     // ROUTAGE PAR INTENTION
@@ -318,6 +319,20 @@ export class OrchestratorAgent {
         }
 
         response = formatCoverageResponse(analysis, advisor);
+        // Format structuré : permet au front d'afficher une card avec badges status/montant/franchise
+        structured = {
+          kind: 'coverage',
+          status: analysis.status,
+          summary: analysis.summary,
+          garantie: analysis.garantie || null,
+          montantMax: analysis.montantMax || null,
+          franchise: analysis.franchise || null,
+          lacunes: analysis.lacunes || [],
+          sources: analysis.sources || [],
+          cgUrl: analysis.cgUrl || null,
+          recommendations: advisor?.recommendations || [],
+          urgencyLevel: advisor?.urgencyLevel || 'low',
+        };
         break;
       }
 
@@ -334,6 +349,15 @@ export class OrchestratorAgent {
           console.log(`[Orchestrator] ${coverageFacts.length} faits structurés chargés (sinistre)`);
         }
         response = formatClaimsResponse(claimsResult, coverageFacts);
+        structured = {
+          kind: 'claims',
+          sinisterType: claimsResult.sinisterType,
+          urgencyLevel: claimsResult.urgencyLevel,
+          coveringPolicies: claimsResult.coveringPolicies,
+          steps: claimsResult.steps,
+          cgUrls: claimsResult.cgUrls || [],
+          needsClarification: claimsResult.needsClarification || null,
+        };
         break;
       }
 
@@ -357,6 +381,12 @@ export class OrchestratorAgent {
 
         response = formatOptimizerResponse(optimizerResult);
         circuitOptimizations.push(...optimizerResult.circuitOptimizations);
+        structured = {
+          kind: 'optimizer',
+          totalEstimatedSaving: optimizerResult.totalEstimatedSaving,
+          findings: optimizerResult.findings,
+          prioritized: optimizerResult.prioritized,
+        };
         break;
       }
 
@@ -401,6 +431,7 @@ export class OrchestratorAgent {
       agentsUsed,
       processingMs,
       optimizations: circuitOptimizations,
+      structured,
     };
   }
 

@@ -401,7 +401,7 @@ router.get('/central/documents', async (req: Request, res: Response) => {
 // Met à jour les formules et options indexées d'un document CG (sans re-vectoriser)
 // Body: { indexedFormulas?: string[], indexedOptions?: Record<string, string[]>, description?: string }
 // -----------------------------------------------------------------------------
-router.patch('/central/:id', async (req: Request, res: Response) => {
+router.patch('/central/:id', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { indexedFormulas, indexedOptions, description } = req.body;
@@ -445,12 +445,11 @@ router.patch('/central/:id', async (req: Request, res: Response) => {
 // POST /api/cg/user/upload
 // Upload d'une CG personnalisée — réponse immédiate, traitement asynchrone
 // -----------------------------------------------------------------------------
-router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Response) => {
+router.post('/user/upload', authMiddleware, upload.single('pdf'), async (req: any, res: Response) => {
   try {
     const {
       insurance_type_code,
       insurer_code,
-      user_email,
       contract_name,
       contract_version,
       doc_type,
@@ -458,11 +457,13 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
       insurance_sub_type_code,   // NOUVEAU — optionnel
       document_type_code,        // NOUVEAU — optionnel (défaut : doc_type || 'CG')
     } = req.body;
+    // 🔒 Anti-IDOR : email pris depuis le JWT, jamais du body
+    const user_email: string = req.user.email;
     const file = req.file;
 
-    if (!insurance_type_code || !insurer_code || !user_email) {
-      return res.status(400).json({ 
-        error: 'Les champs insurance_type_code, insurer_code et user_email sont requis' 
+    if (!insurance_type_code || !insurer_code) {
+      return res.status(400).json({
+        error: 'Les champs insurance_type_code et insurer_code sont requis'
       });
     }
 
@@ -567,11 +568,12 @@ router.post('/user/upload', upload.single('pdf'), async (req: Request, res: Resp
 // GET /api/cg/user/status/:id
 // Statut de traitement d'une CG utilisateur (pour polling frontend)
 // -----------------------------------------------------------------------------
-router.get('/user/status/:id', async (req: Request, res: Response) => {
+router.get('/user/status/:id', authMiddleware, async (req: any, res: Response) => {
   try {
     const { id } = req.params;
+    // 🔒 Vérifie ownership (sauf admin)
     const result = await query(
-      `SELECT id, vectorization_status, pages_total, pages_processed, vectorization_error, metadata
+      `SELECT id, vectorization_status, pages_total, pages_processed, vectorization_error, metadata, owner
        FROM user_cg WHERE id = $1`,
       [id]
     );
@@ -581,6 +583,10 @@ router.get('/user/status/:id', async (req: Request, res: Response) => {
     }
 
     const row = result.rows[0];
+    // 🔒 Ownership check (sauf admin)
+    if (!req.user?.isAdmin && row.owner && row.owner !== req.user.email) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
     const meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata || {});
 
     // Calcul du pourcentage global
@@ -777,7 +783,7 @@ Réponds UNIQUEMENT avec le JSON, sans aucun texte avant ou après.`;
 // GET /api/cg/files/central/:id
 // Sert le fichier PDF d'une CG centrale depuis le disque (pdf_file_path)
 // -----------------------------------------------------------------------------
-router.get('/files/central/:id', async (req: Request, res: Response) => {
+router.get('/files/central/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
@@ -807,18 +813,24 @@ router.get('/files/central/:id', async (req: Request, res: Response) => {
 // GET /api/cg/files/user/:id
 // Sert le fichier PDF d'une CG utilisateur depuis le disque (pdf_file_path)
 // -----------------------------------------------------------------------------
-router.get('/files/user/:id', async (req: Request, res: Response) => {
+router.get('/files/user/:id', authMiddleware, async (req: any, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
 
     const result = await query(
-      'SELECT pdf_file_path, target_filename FROM user_cg WHERE id = $1',
+      'SELECT pdf_file_path, target_filename, owner FROM user_cg WHERE id = $1',
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
 
-    const { pdf_file_path, target_filename } = result.rows[0];
+    // 🔒 Ownership check (sauf admin)
+    const row = result.rows[0];
+    if (!req.user?.isAdmin && row.owner && row.owner !== req.user.email) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const { pdf_file_path, target_filename } = row;
     if (!pdf_file_path) return res.status(404).json({ error: 'Fichier non disponible sur disque' });
 
     const fullPath = path.join(PDF_STORAGE_DIR, pdf_file_path);
@@ -838,7 +850,7 @@ router.get('/files/user/:id', async (req: Request, res: Response) => {
 // Retourne tous les coverage_facts pour un document CG central
 // Groupés par guarantee_label × formula_key pour la vue admin
 // -----------------------------------------------------------------------------
-router.get('/coverage-facts/:centralCgId', async (req: Request, res: Response) => {
+router.get('/coverage-facts/:centralCgId', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { centralCgId } = req.params;
     const result = await query(
@@ -862,7 +874,7 @@ router.get('/coverage-facts/:centralCgId', async (req: Request, res: Response) =
 // Met à jour le coverage_status (et notes/amount optionnels) d'un fait de couverture
 // Body: { coverage_status: 'included'|'optional'|'excluded'|'not_applicable', coverage_notes?: string, coverage_amount?: string }
 // -----------------------------------------------------------------------------
-router.patch('/coverage-fact/:id', async (req: Request, res: Response) => {
+router.patch('/coverage-fact/:id', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { coverage_status, coverage_notes, coverage_amount } = req.body;
@@ -894,7 +906,7 @@ router.patch('/coverage-fact/:id', async (req: Request, res: Response) => {
 // DELETE /api/cg/coverage-fact/:id
 // Supprime un fait de couverture individuel (ex: doublon ou extraction erronée)
 // -----------------------------------------------------------------------------
-router.delete('/coverage-fact/:id', async (req: Request, res: Response) => {
+router.delete('/coverage-fact/:id', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     await query('DELETE FROM coverage_facts WHERE id = $1', [req.params.id]);
     res.json({ success: true });
@@ -959,9 +971,15 @@ router.delete('/admin/user-cg/:id', authMiddleware, adminMiddleware, async (req:
 
 // GET /api/cg/user-coverage-facts/:userCgId
 // Retourne les faits de couverture d'un CG utilisateur
-router.get('/user-coverage-facts/:userCgId', async (req: Request, res: Response) => {
+router.get('/user-coverage-facts/:userCgId', authMiddleware, async (req: any, res: Response) => {
   try {
     const { userCgId } = req.params;
+    // 🔒 Ownership check
+    const owner = await query('SELECT owner FROM user_cg WHERE id = $1', [userCgId]);
+    if (owner.rows.length === 0) return res.status(404).json({ error: 'CG introuvable' });
+    if (!req.user?.isAdmin && owner.rows[0].owner && owner.rows[0].owner !== req.user.email) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
     const result = await query(
       `SELECT id, guarantee_key, guarantee_label, formula_key, formula_label,
               coverage_status, coverage_amount, coverage_notes, franchise,
@@ -980,13 +998,23 @@ router.get('/user-coverage-facts/:userCgId', async (req: Request, res: Response)
 
 // PATCH /api/cg/user-coverage-fact/:id
 // Met à jour le statut d'un fait de couverture utilisateur
-router.patch('/user-coverage-fact/:id', async (req: Request, res: Response) => {
+router.patch('/user-coverage-fact/:id', authMiddleware, async (req: any, res: Response) => {
   try {
     const { id } = req.params;
     const { coverage_status } = req.body;
     const VALID = ['included', 'optional', 'excluded', 'not_applicable'];
     if (!VALID.includes(coverage_status)) {
       return res.status(400).json({ error: `coverage_status doit être l'un de : ${VALID.join(', ')}` });
+    }
+    // 🔒 Ownership check via user_cg
+    const owner = await query(
+      `SELECT uc.owner FROM user_coverage_facts ucf
+       JOIN user_cg uc ON uc.id = ucf.user_cg_id
+       WHERE ucf.id = $1`, [id]
+    );
+    if (owner.rows.length === 0) return res.status(404).json({ error: 'Fait introuvable' });
+    if (!req.user?.isAdmin && owner.rows[0].owner && owner.rows[0].owner !== req.user.email) {
+      return res.status(403).json({ error: 'Accès refusé' });
     }
     await query(
       `UPDATE user_coverage_facts SET coverage_status = $1 WHERE id = $2`,
@@ -1008,7 +1036,7 @@ router.patch('/user-coverage-fact/:id', async (req: Request, res: Response) => {
 //   - La propriété remain préservée via owner = 'shared_by_<email>'
 //   - Réponse immédiate (202) — vectorisation en arrière-plan
 // -----------------------------------------------------------------------------
-router.post('/user/promote-to-central/:userCgId', async (req: Request, res: Response) => {
+router.post('/user/promote-to-central/:userCgId', authMiddleware, async (req: any, res: Response) => {
   try {
     const userCgId = parseInt(req.params.userCgId);
     if (isNaN(userCgId)) {
@@ -1029,6 +1057,11 @@ router.post('/user/promote-to-central/:userCgId', async (req: Request, res: Resp
     }
 
     const userCg = cgResult.rows[0];
+
+    // 🔒 Ownership check : seul le propriétaire (ou admin) peut promouvoir son CG
+    if (!req.user?.isAdmin && userCg.owner && userCg.owner !== req.user.email) {
+      return res.status(403).json({ error: 'Vous ne pouvez partager que vos propres CG' });
+    }
 
     // Seuls les documents type 'CG' peuvent être partagés
     const resolvedDocType: string = userCg.document_type_code || 'CG';

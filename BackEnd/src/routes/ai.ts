@@ -49,6 +49,7 @@ router.post('/chat', authMiddleware, async (req: any, res) => {
 
     res.json({
       response: result.response,
+      structured: result.structured || null,
       _meta: {
         intent: result.intent,
         agentsUsed: result.agentsUsed,
