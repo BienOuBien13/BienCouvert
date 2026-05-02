@@ -782,13 +782,14 @@ async function tryGeminiKnowledge(p: SearchParams): Promise<SmartSearchResult | 
   if (!ai) return null;
 
   const siteHint = p.website_url ? ` (${p.website_url})` : '';
-  const prompt   = `Tu connais la structure des sites web des assureurs français.
-Pour ${p.insurer_full_name}${siteHint}, propose jusqu'à 6 URLs vraisemblables pour le PDF "${p.doc_type_label}" en assurance "${p.insurance_type_label}".
+  const prompt   = `Tu connais les sites des assureurs français et les hébergeurs de documents d'assurance.
+Propose jusqu'à 8 URLs pour le PDF "${p.doc_type_label}" de ${p.insurer_full_name}${siteHint} pour l'assurance "${p.insurance_type_label}".
 
-CONTRAINTES IMPÉRATIVES :
-1. Toutes les URLs DOIVENT être sur le domaine officiel de ${p.insurer_full_name}${p.website_url ? ` (${p.website_url})` : ''}.
-2. Le document doit concerner UNIQUEMENT le type d'assurance "${p.insurance_type_label}" — ne propose pas de CG pour un autre type.
-3. Ne génère QUE des URLs basées sur des patterns réels connus. Confidence < 0.5 si tu n'es pas sûr.
+INSTRUCTIONS :
+1. Propose des URLs sur le site officiel${p.website_url ? ` (${p.website_url})` : ''} ET sur des agrégateurs comme index-assurance.fr (pattern: https://www.index-assurance.fr/fichiers/cg/conditions-generales-{assureur}-{type}-{année}.pdf)
+2. Pour index-assurance.fr, les slugs sont en français minuscule sans accents: ex conditions-generales-maif-auto-janvier-2023.pdf
+3. Ne génère QUE des URLs réalistes basées sur des patterns connus. Confidence < 0.5 si incertain.
+4. Le document doit concerner "${p.insurance_type_label}" spécifiquement.
 JSON: {"candidates":[{"url":"https://...","confidence":0.7,"is_page":false},...]}`;
 
   try {
@@ -833,47 +834,84 @@ async function tryAggregatorSearch(p: SearchParams): Promise<SmartSearchResult |
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const insurerSlug = normalize(p.insurer_full_name.replace(/\s*assurances?\s*$/i, ''));
+  const typeSlug    = normalize(p.insurance_type_label).split('-')[0]; // ex: 'automobile' -> 'automobile'
 
-  // 1. index-assurance.fr — directory listing /fichiers/cg/ + homepage
+  // ─ Stratégie 1 : Construction directe d'URLs par pattern connu sur index-assurance.fr ──────────
+  // Pattern: conditions-generales-{assureur}-{type}-{année}.pdf
+  const BASE = 'https://www.index-assurance.fr/fichiers/cg/';
+  const currentYear = new Date().getFullYear();
+  const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+  // Type aliases courants dans le nom de fichier
+  const typeAliases: string[] = [typeSlug];
+  if (['automobile', 'auto'].some(k => typeSlug.includes(k))) typeAliases.push('auto', 'automobile');
+  if (typeSlug.includes('habitation')) typeAliases.push('habitation', 'mrh', 'multirisque');
+  if (typeSlug.includes('sante') || typeSlug.includes('mutuelle')) typeAliases.push('sante', 'mutuelle', 'complementaire');
+  // Mois courants dans certains noms de fichiers
+  const monthNames = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+  const urlCandidates: string[] = [];
+  for (const yr of years) {
+    for (const t of [...new Set(typeAliases)]) {
+      // Pattern sans mois
+      urlCandidates.push(`${BASE}conditions-generales-${insurerSlug}-${t}-${yr}.pdf`);
+      urlCandidates.push(`${BASE}cg-${insurerSlug}-${t}-${yr}.pdf`);
+      urlCandidates.push(`${BASE}${insurerSlug}-conditions-generales-${t}-${yr}.pdf`);
+      // Pattern avec mois (janvier = le plus commun pour les mises à jour)
+      for (const m of monthNames.slice(0, 4)) { // janvier à avril
+        urlCandidates.push(`${BASE}conditions-generales-${insurerSlug}-${t}-${m}-${yr}.pdf`);
+      }
+    }
+    // Version sans type
+    urlCandidates.push(`${BASE}conditions-generales-${insurerSlug}-${yr}.pdf`);
+  }
+
+  console.log(`[SmartSearch]    Aggregator pattern: testing ${urlCandidates.length} URL candidates for ${insurerSlug}/${typeSlug}`);
+  for (const candidate of urlCandidates) {
+    if (await isValidPdf(candidate, 6_000)) {
+      console.log(`[SmartSearch]    Aggregator pattern HIT: ${candidate}`);
+      return { pdf_url: candidate, page_url: null, confidence: 0.92, strategy: 'web_search',
+        notes: `PDF trouvé par pattern URL index-assurance.fr` };
+    }
+  }
+
+  // ─ Stratégie 2 : Listing HTML des répertoires agrégateurs ──────────────────────────
   const indexPages = [
     'https://www.index-assurance.fr/fichiers/cg/',
-    'https://www.index-assurance.fr/',
+    `https://www.index-assurance.fr/?s=${encodeURIComponent(p.insurer_full_name + ' ' + typeSlug)}`,
   ];
   for (const pageUrl of indexPages) {
     try {
       const html = await fetchRaw(pageUrl, 10_000);
+      if (!html || html.length < 100) continue;
       const pdfs = extractPdfLinks(html, pageUrl);
-      // Keep only PDFs whose URL contains a meaningful part of the insurer slug
       const slugParts = insurerSlug.split('-').filter(pt => pt.length > 3);
       const relevant = slugParts.length > 0
         ? pdfs.filter(u => slugParts.some(pt => u.toLowerCase().includes(pt)))
         : pdfs;
-      const best = await pickBestPdf(relevant.length > 0 ? relevant : pdfs, p, 20);
-      if (best && best.score > 0) {
-        console.log(`[SmartSearch]    Aggregator hit on ${new URL(pageUrl).hostname}: ${best.url.slice(0, 80)}`);
+      const best = await pickBestPdf(relevant.length > 0 ? relevant : pdfs, p, 10);
+      if (best) {
+        console.log(`[SmartSearch]    Aggregator listing hit: ${best.url.slice(0, 80)}`);
         return { pdf_url: best.url, page_url: pageUrl, confidence: 0.88, strategy: 'web_search',
           notes: `PDF trouvé sur ${new URL(pageUrl).hostname} (score ${best.score})` };
       }
     } catch { /* aggregator inaccessible */ }
   }
 
-  // 2. DDG constrained to index-assurance.fr
+  // ─ Stratégie 3 : DDG contraint à index-assurance.fr ──────────────────────────────────
   try {
     const ddgQuery = `${p.insurer_full_name} ${p.insurance_type_label} conditions générales PDF site:index-assurance.fr`;
     console.log(`[SmartSearch]    Aggregator DDG query: "${ddgQuery}"`);
     const urls = await searchDDG(ddgQuery);
     const pdfs = urls.filter(u => u.toLowerCase().includes('.pdf'));
-    const best = await pickBestPdf(pdfs, p, 20);
+    const best = await pickBestPdf(pdfs, p, 10);
     if (best) {
       return { pdf_url: best.url, page_url: null, confidence: 0.90, strategy: 'web_search',
         notes: `PDF index-assurance.fr via DDG (score ${best.score})` };
     }
-    // Follow pages returned by DDG
     for (const pu of urls.filter(u => !u.toLowerCase().includes('.pdf')).slice(0, 5)) {
       try {
         const html = await fetchRaw(pu, 8_000);
         const pagePdfs = extractPdfLinks(html, pu);
-        const pageBest = await pickBestPdf(pagePdfs, p, 15);
+        const pageBest = await pickBestPdf(pagePdfs, p, 10);
         if (pageBest) {
           return { pdf_url: pageBest.url, page_url: pu, confidence: 0.87, strategy: 'web_search',
             notes: `PDF extrait de page agrégateur (score ${pageBest.score})` };
