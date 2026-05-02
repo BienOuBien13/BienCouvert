@@ -18,7 +18,7 @@ ALTER TABLE document_catalogue
 -- 3. Créer une nouvelle contrainte unique tenant compte du sous-type
 --    COALESCE gère les NULLs : deux entrées sans sous-type restent uniques sur (insurer, type, doctype)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_catalogue_full
-    ON document_catalogue (insurer_code, insurance_type_code, COALESCE(insurance_sub_type_code, ''), doc_type);
+    ON document_catalogue (insurer_code, insurance_type_code, (COALESCE(insurance_sub_type_code, '')), doc_type);
 
 -- 4. Index pour les requêtes par sous-type
 CREATE INDEX IF NOT EXISTS idx_doc_catalogue_subtype
