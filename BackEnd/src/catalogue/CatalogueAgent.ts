@@ -48,6 +48,7 @@ export async function getMatrix(filters?: {
        COALESCE(i.label, dc.insurer_code) AS insurer_label,
        dc.insurance_type_code,
        COALESCE(t.label_fr, dc.insurance_type_code) AS insurance_type_label,
+       dc.insurance_sub_type_code,
        dc.doc_type,
        dc.matrix_status,
        dc.central_cg_id,

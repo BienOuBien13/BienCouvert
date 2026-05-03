@@ -51,6 +51,7 @@ export interface MatrixCell {
   insurer_label: string;
   insurance_type_code: string;
   insurance_type_label: string;
+  insurance_sub_type_code: string | null;
   doc_type: DocType;
   matrix_status: MatrixStatus;
   central_cg_id: number | null;

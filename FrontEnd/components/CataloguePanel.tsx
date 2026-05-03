@@ -9,17 +9,18 @@ import { fetchCsrfToken } from '../services/authService';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MatrixCell {
-  id:                   number;
-  insurer_code:         string;
-  insurer_label:        string;
-  insurance_type_code:  string;
-  insurance_type_label: string;
-  doc_type:             string;
-  matrix_status:        string;
-  central_cg_id:        number | null;
-  current_url:          string | null;
-  indexed_at:           string | null;
-  last_checked_at:      string | null;
+  id:                       number;
+  insurer_code:             string;
+  insurer_label:            string;
+  insurance_type_code:      string;
+  insurance_type_label:     string;
+  insurance_sub_type_code:  string | null;
+  doc_type:                 string;
+  matrix_status:            string;
+  central_cg_id:            number | null;
+  current_url:              string | null;
+  indexed_at:               string | null;
+  last_checked_at:          string | null;
 }
 
 interface MatrixStats {
@@ -134,7 +135,7 @@ export default function CataloguePanel() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [editUrl,         setEditUrl]         = useState<{ id: number; value: string } | null>(null);
   const [showAddModal,    setShowAddModal]    = useState(false);
-  const [addForm,         setAddForm]         = useState({ insurer_code: '', insurance_type_code: '', doc_type: 'CG', url: '' });
+  const [addForm,         setAddForm]         = useState({ insurer_code: '', insurance_type_code: '', insurance_sub_type_code: '', doc_type: 'CG', url: '' });
   const [addLoading,      setAddLoading]      = useState(false);
   const [flash,           setFlash]           = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [stopping,        setStopping]        = useState(false);
@@ -262,8 +263,9 @@ export default function CataloguePanel() {
     if (!addForm.insurer_code || !addForm.insurance_type_code || !addForm.doc_type) { showFlash('err', 'Tous les champs requis'); return; }
     setAddLoading(true);
     try {
-      await apiPost('entry', addForm); showFlash('ok', 'Entrée ajoutée'); setShowAddModal(false);
-      setAddForm({ insurer_code: '', insurance_type_code: '', doc_type: 'CG', url: '' }); loadMatrix();
+      const payload = { ...addForm, insurance_sub_type_code: addForm.insurance_sub_type_code || undefined };
+      await apiPost('entry', payload); showFlash('ok', 'Entrée ajoutée'); setShowAddModal(false);
+      setAddForm({ insurer_code: '', insurance_type_code: '', insurance_sub_type_code: '', doc_type: 'CG', url: '' }); loadMatrix();
     } catch (e: any) { showFlash('err', e.message); }
     setAddLoading(false);
   };
@@ -568,6 +570,9 @@ export default function CataloguePanel() {
                   </td>
                   <td className="px-4 py-2">
                     <span className="text-[10px] font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded-lg">{cell.insurance_type_label}</span>
+                    {cell.insurance_sub_type_code && (
+                      <span className="ml-1 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">{cell.insurance_sub_type_code}</span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{DOC_TYPE_LABELS[cell.doc_type] ?? cell.doc_type}</span>
@@ -675,6 +680,13 @@ export default function CataloguePanel() {
                   <option key={t.code} value={t.code}>{t.labelFr ?? t.label ?? t.code}</option>
                 ))}
               </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400">Sous-type <span className="font-normal normal-case">(optionnel)</span></label>
+              <input type="text" placeholder="ex: PREV_INDIV, AUTO_MOTO…"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:ring-2 focus:ring-blue-400"
+                value={addForm.insurance_sub_type_code} onChange={e => setAddForm(f => ({ ...f, insurance_sub_type_code: e.target.value }))} />
+              <p className="text-[10px] text-slate-400">Saisir si plusieurs variantes existent pour ce type × assureur</p>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400">Type de document *</label>
