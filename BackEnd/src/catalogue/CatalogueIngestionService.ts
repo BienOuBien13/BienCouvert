@@ -138,6 +138,7 @@ export async function launchSmartIngestion(
     insurer_code: string;
     insurer_label: string;
     insurance_type_code: string;
+    insurance_sub_type_code: string | null;
     type_label: string;
     doc_type: string;
     current_url: string | null;
@@ -150,6 +151,7 @@ export async function launchSmartIngestion(
        dc.insurer_code,
        i.label  AS insurer_label,
        dc.insurance_type_code,
+       dc.insurance_sub_type_code,
        it.label_fr AS type_label,
        dc.doc_type,
        dc.current_url,
@@ -216,6 +218,7 @@ async function runJob(
     insurer_full_name: string;
     website_url: string | null;
     insurance_type_code: string;
+    insurance_sub_type_code: string | null;
     type_label: string;
     doc_type: string;
     current_url: string | null;
@@ -314,10 +317,11 @@ async function runJob(
 
     try {
       const result = await ingestDocumentForCatalogue({
-        catalogueId:         e.id,
-        insurerCode:         e.insurer_code,
-        insuranceTypeCode:   e.insurance_type_code,
-        pdfUrl:              targetUrl,
+        catalogueId:            e.id,
+        insurerCode:            e.insurer_code,
+        insuranceTypeCode:      e.insurance_type_code,
+        insuranceSubTypeCode:   e.insurance_sub_type_code,
+        pdfUrl:                 targetUrl,
         onProgress:          (step, msg) => {
           ejs.step    = step as EntryStep;
           ejs.message = msg;

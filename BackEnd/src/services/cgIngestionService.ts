@@ -990,14 +990,17 @@ export interface IngestCatalogueResult {
  *  - Force les codes assureur/type depuis le catalogue (hints prioritaires)
  */
 export async function ingestDocumentForCatalogue(params: {
-  catalogueId:        number;
-  insurerCode:        string;
-  insuranceTypeCode:  string;
-  pdfUrl:             string;
-  onProgress?:        (step: string, message: string) => void;
-  onCgIdCreated?:     (cgId: number) => void;
+  catalogueId:            number;
+  insurerCode:            string;
+  insuranceTypeCode:      string;
+  insuranceSubTypeCode?:  string | null; // sous-type depuis document_catalogue — prioritaire sur le classifier
+  pdfUrl:                 string;
+  onProgress?:            (step: string, message: string) => void;
+  onCgIdCreated?:         (cgId: number) => void;
 }): Promise<IngestCatalogueResult> {
   const { catalogueId, insurerCode, insuranceTypeCode, pdfUrl, onProgress, onCgIdCreated } = params;
+  // Le sous-type catalogue est transmis explicitement OU relu depuis la DB si absent
+  let catalogueSubType: string | null | undefined = params.insuranceSubTypeCode;
   const progress = (step: string, msg: string) => { if (onProgress) onProgress(step, msg); };
 
   try {
@@ -1093,6 +1096,18 @@ export async function ingestDocumentForCatalogue(params: {
     // Forcer les codes depuis le catalogue (l'utilisateur sait ce qu'il ingère)
     classif.insurer_code        = insurerCode;
     classif.insurance_type_code = insuranceTypeCode;
+    // ⚠ Forcer le sous-type depuis la DB pour éviter que le classifier ne change le subtype
+    // d'une ligne et crée un doublon avec une autre ligne du même (insurer, type, doc_type).
+    if (catalogueSubType === undefined) {
+      // Pas transmis par l'appelant → relire depuis la DB
+      const subRow = await pool.query<{ insurance_sub_type_code: string | null }>(
+        `SELECT insurance_sub_type_code FROM document_catalogue WHERE id = $1`,
+        [catalogueId]
+      );
+      catalogueSubType = subRow.rows[0]?.insurance_sub_type_code ?? null;
+    }
+    // Le sous-type catalogue est prioritaire sur la détection Gemini
+    classif.insurance_sub_type_code = catalogueSubType ?? classif.insurance_sub_type_code ?? null;
 
     // ── INSERT central_cg ─────────────────────────────────────────────────────
     const fileName   = `${insurerCode}_${insuranceTypeCode}_${Date.now()}.pdf`;
