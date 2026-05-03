@@ -910,6 +910,8 @@ export async function runIngestion(scope: IngestionScope): Promise<{
             console.log(`✅ [${insurer.code}/${type.code}] Done — ${vecResult.pagesProcessed} pages, ${vecResult.factsCreated} faits`);
 
             // ── Mettre à jour document_catalogue ─────────────────────────
+            // ⚠ Filtrer aussi par insurance_sub_type_code pour ne pas écraser
+            //   d'autres lignes du même (insurer, type, doc_type) avec un subtype différent.
             try {
               await pool.query(
                 `UPDATE document_catalogue
@@ -925,7 +927,8 @@ export async function runIngestion(scope: IngestionScope): Promise<{
                      next_check_at           = NOW() + (check_frequency_days || ' days')::INTERVAL
                  WHERE insurer_code        = $7
                    AND insurance_type_code = $8
-                   AND doc_type            = $9`,
+                   AND doc_type            = $9
+                   AND insurance_sub_type_code IS NOT DISTINCT FROM $6`,
                 [
                   centralCgId,
                   candidate.url,

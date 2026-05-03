@@ -60,8 +60,8 @@ const DOMAIN_CFG: Record<string, {
 }> = {
   [PolicyType.AUTO]:      { Icon: Car,        gradient: 'from-sky-400 to-blue-700',      glow: 'shadow-sky-500/50',    short: 'Auto',       stop1: '#38bdf8', textColor: 'text-sky-700',    bgLight: 'bg-sky-50'    },
   [PolicyType.HOME]:      { Icon: Home,       gradient: 'from-violet-400 to-purple-800', glow: 'shadow-violet-500/50', short: 'Habitation', stop1: '#a78bfa', textColor: 'text-violet-700', bgLight: 'bg-violet-50' },
-  [PolicyType.HEALTH]:    { Icon: HeartPulse, gradient: 'from-rose-400 to-pink-700',     glow: 'shadow-rose-500/50',   short: 'SantÃ©',      stop1: '#fb7185', textColor: 'text-rose-700',   bgLight: 'bg-rose-50'   },
-  [PolicyType.LIFE]:      { Icon: Heart,      gradient: 'from-red-400 to-rose-800',      glow: 'shadow-red-500/50',    short: 'PrÃ©voyance', stop1: '#f87171', textColor: 'text-red-700',    bgLight: 'bg-red-50'    },
+  [PolicyType.HEALTH]:    { Icon: HeartPulse, gradient: 'from-rose-400 to-pink-700',     glow: 'shadow-rose-500/50',   short: 'Santé',      stop1: '#fb7185', textColor: 'text-rose-700',   bgLight: 'bg-rose-50'   },
+  [PolicyType.LIFE]:      { Icon: Heart,      gradient: 'from-red-400 to-rose-800',      glow: 'shadow-red-500/50',    short: 'Prévoyance', stop1: '#f87171', textColor: 'text-red-700',    bgLight: 'bg-red-50'    },
   [PolicyType.LEGAL]:     { Icon: Scale,      gradient: 'from-amber-400 to-orange-600',  glow: 'shadow-amber-500/50',  short: 'Juridique',  stop1: '#fbbf24', textColor: 'text-amber-700',  bgLight: 'bg-amber-50'  },
   [PolicyType.BANK_CARD]: { Icon: CreditCard, gradient: 'from-teal-400 to-emerald-700',  glow: 'shadow-teal-500/50',   short: 'Carte',      stop1: '#2dd4bf', textColor: 'text-teal-700',   bgLight: 'bg-teal-50'   },
   [PolicyType.LOAN]:      { Icon: Banknote,   gradient: 'from-green-400 to-emerald-800', glow: 'shadow-green-500/50',  short: 'Emprunteur', stop1: '#4ade80', textColor: 'text-green-700',  bgLight: 'bg-green-50'  },
@@ -202,7 +202,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
   const gapTypes      = TYPE_ORDER.filter(t => !grouped[t]?.length);
   const pct           = coveredTypes.length / TYPE_ORDER.length;
   const totalPremium  = policies.reduce((s, p) => s + getPrice(p), 0);
-  const scoreLabel    = pct >= 0.8 ? 'Excellent' : pct >= 0.55 ? 'Bien couvert' : pct >= 0.33 ? 'Ã€ complÃ©ter' : 'Insuffisant';
+  const scoreLabel    = pct >= 0.8 ? 'Excellent' : pct >= 0.55 ? 'Bien couvert' : pct >= 0.33 ? 'À compléter' : 'Insuffisant';
   const scoreColor    = pct >= 0.8 ? '#34d399' : pct >= 0.55 ? '#38bdf8' : pct >= 0.33 ? '#fbbf24' : '#f87171';
   const R = 52; const C = 2 * Math.PI * R; const arcLen = pct * C * 0.75;
 
@@ -274,7 +274,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
             <div className="w-2 h-2 rounded-full" style={{ background: scoreColor }} />
             <span className="font-black text-sm" style={{ color: scoreColor }}>{scoreLabel}</span>
           </div>
-          <p className="text-white/20 text-xs mt-1">domaines assurÃ©s</p>
+          <p className="text-white/20 text-xs mt-1">domaines assurés</p>
         </div>
 
         {/* Stats */}
@@ -282,7 +282,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
           <div className="relative z-10 flex gap-3 mt-8 mb-6">
             {[
               { label: 'Contrats',  value: String(policies.length),                      color: 'text-white' },
-              { label: 'Budget/an', value: totalPremium > 0 ? fmt(totalPremium) : 'â€”',  color: 'text-white' },
+              { label: 'Budget/an', value: totalPremium > 0 ? fmt(totalPremium) : '—',  color: 'text-white' },
               { label: 'Lacunes',   value: String(gapTypes.length),                      color: 'text-rose-400' },
             ].map(({ label, value, color }) => (
               <div key={label} className="flex-1 rounded-2xl px-3 py-3 border bg-white/[0.04]" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
@@ -346,7 +346,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
                           <div className="flex-1 min-w-0">
                             <p className="text-white/60 text-[9px] font-black uppercase tracking-[0.2em]">{type}</p>
                             <p className="text-white font-black text-xl leading-tight truncate mt-0.5">{grp[0].name || grp[0].insurer}</p>
-                            <p className="text-white/60 text-xs mt-1 truncate">{grp[0].insurer}{grp[0].coverageDetail ? ` Â· ${grp[0].coverageDetail}` : ''}</p>
+                            <p className="text-white/60 text-xs mt-1 truncate">{grp[0].insurer}{grp[0].coverageDetail ? ` · ${grp[0].coverageDetail}` : ''}</p>
                           </div>
                           <div className="shrink-0 text-right">
                             {price > 0 && <p className="text-white font-black text-base">{fmt(price)}</p>}
@@ -470,66 +470,98 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
                 </div>
               )}
 
-              {/* Matrix */}
+{/* Stats summary */}
+              {matrix.length > 0 && loadingCount === 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Catégories', value: String(matrix.length),                                              cls: 'text-slate-900',   bg: 'bg-white border-slate-100' },
+                    { label: 'Couvertes',  value: String(matrix.filter(r => r.excludedCount === 0).length),           cls: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-100' },
+                    { label: 'Lacunes',    value: String(matrix.filter(r => r.includedCount === 0).length),           cls: 'text-red-600',     bg: 'bg-red-50 border-red-100' },
+                  ].map(s => (
+                    <div key={s.label} className={`${s.bg} rounded-2xl p-3 border text-center`}>
+                      <p className={`text-xl font-black ${s.cls}`}>{s.value}</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-0.5">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Category cards */}
               {matrix.length > 0 && (
                 <div className="space-y-2">
-                  <SectionLabel count={matrix.length} color="bg-primary-500" label="CatÃ©gories" />
                   {matrix.map(row => {
-                    const style  = getCategoryStyle(row.category);
-                    const isOpen = expandedCat === row.category;
+                    const style      = getCategoryStyle(row.category);
+                    const isOpen     = expandedCat === row.category;
+                    const totalPol   = row.perPolicy.length;
+                    const partialCnt = row.perPolicy.filter(pp => pp.status === 'partial').length;
+                    const covRatio   = totalPol > 0 ? (row.includedCount + partialCnt * 0.5) / totalPol : 0;
                     return (
-                      <div key={row.category} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                        {/* Row header */}
+                      <div key={row.category} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100">
+                        {/* Colored accent top bar */}
+                        <div className={`h-1 ${style.dot}`} />
                         <button
                           onClick={() => setExpandedCat(isOpen ? null : row.category)}
-                          className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-slate-50/50 active:bg-slate-100/50 transition-colors"
+                          className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-slate-50/60 active:bg-slate-100/40 transition-colors"
                         >
-                          <div className={`w-3 h-3 rounded-full shrink-0 ${style.dot}`} />
-                          <span className="font-black text-slate-900 text-sm flex-1">{row.category}</span>
-                          {/* Summary chips */}
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {row.includedCount > 0 && (
-                              <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                                âœ“ {row.includedCount}
-                              </span>
-                            )}
-                            {row.excludedCount > 0 && (
-                              <span className="text-[10px] font-black text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                                âœ• {row.excludedCount}
-                              </span>
-                            )}
-                            {isOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                          <div className="flex-1 min-w-0">
+                            <span className="font-bold text-slate-800 text-sm">{row.category}</span>
+                            {/* Coverage progress bar */}
+                            <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full transition-all duration-500" style={{
+                                width: `${Math.round(covRatio * 100)}%`,
+                                background: covRatio >= 0.8 ? '#34d399' : covRatio >= 0.4 ? '#fbbf24' : '#f87171',
+                              }} />
+                            </div>
                           </div>
+                          {/* Policy avatar circles (overlapping) */}
+                          <div className="flex items-center -space-x-1.5 shrink-0">
+                            {row.perPolicy.map(pp => (
+                              <div key={pp.policyId}
+                                className={`w-7 h-7 rounded-full border-2 border-white flex items-center justify-center text-[9px] font-black shadow-sm ${
+                                  pp.status === 'included' ? 'bg-emerald-400 text-white' :
+                                  pp.status === 'excluded' ? 'bg-red-400 text-white' :
+                                  'bg-amber-400 text-white'
+                                }`}
+                                title={pp.policyName}>
+                                {(pp.policyName || pp.policyInsurer).charAt(0).toUpperCase()}
+                              </div>
+                            ))}
+                          </div>
+                          {isOpen
+                            ? <ChevronUp className="w-4 h-4 text-slate-300 shrink-0 ml-1" />
+                            : <ChevronDown className="w-4 h-4 text-slate-300 shrink-0 ml-1" />}
                         </button>
 
-                        {/* Expanded per-policy rows */}
+                        {/* Expanded: 2-column policy card grid */}
                         {isOpen && (
-                          <div className={`border-t border-slate-100 divide-y divide-slate-50 border-l-4 ${style.border}`}>
-                            {row.perPolicy.map(pp => {
-                              const domCfg = getDomainCfg(pp.policyType);
-                              // First included item for limit/franchise display
-                              const keyItem = pp.items.find(i => i.included) ?? pp.items[0];
-                              return (
-                                <div key={pp.policyId} className="flex items-start gap-3 px-5 py-3.5">
-                                  {/* Policy domain icon */}
-                                  <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${domCfg.gradient} flex items-center justify-center shrink-0 mt-0.5 shadow-sm`}>
-                                    <domCfg.Icon className="w-3.5 h-3.5 text-white" />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-black text-slate-900 truncate">{pp.policyName}</p>
-                                    <p className="text-[10px] text-slate-400 font-medium mt-0.5 truncate">{pp.policyInsurer}</p>
-                                    {/* Guarantee details */}
+                          <div className="px-4 pb-4 border-t border-slate-50">
+                            <div className="grid grid-cols-2 gap-2 mt-3">
+                              {row.perPolicy.map(pp => {
+                                const domCfg  = getDomainCfg(pp.policyType);
+                                const keyItem = pp.items.find(i => i.included) ?? pp.items[0];
+                                return (
+                                  <div key={pp.policyId} className={`rounded-xl p-3 ${
+                                    pp.status === 'included' ? 'bg-emerald-50 border border-emerald-100' :
+                                    pp.status === 'excluded' ? 'bg-red-50 border border-red-100' :
+                                    'bg-amber-50 border border-amber-100'
+                                  }`}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <div className={`w-7 h-7 rounded-xl bg-gradient-to-br ${domCfg.gradient} flex items-center justify-center shrink-0 shadow-sm`}>
+                                        <domCfg.Icon className="w-3.5 h-3.5 text-white" />
+                                      </div>
+                                      <p className="text-xs font-black text-slate-800 truncate flex-1 leading-snug">{pp.policyName}</p>
+                                    </div>
+                                    <StatusChip status={pp.status} />
                                     {keyItem?.limit && (
-                                      <p className="text-[10px] text-slate-500 font-bold mt-1">Plafond : {keyItem.limit}</p>
+                                      <p className="text-[9px] text-slate-500 mt-2 font-bold">↑ {keyItem.limit}</p>
                                     )}
-                                    {keyItem?.note && (
-                                      <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed line-clamp-2">{keyItem.note}</p>
+                                    {keyItem?.note && !keyItem.limit && (
+                                      <p className="text-[9px] text-slate-400 mt-2 leading-snug line-clamp-2">{keyItem.note}</p>
                                     )}
                                   </div>
-                                  <StatusChip status={pp.status} />
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -538,7 +570,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
                 </div>
               )}
 
-              {/* Empty: loading not started yet */}
+                            {/* Empty: loading not started yet */}
               {loadingCount === 0 && matrix.length === 0 && loadedCount === 0 && (
                 <div className="text-center py-12 text-slate-400">
                   <Layers className="w-12 h-12 mx-auto mb-4 opacity-20" />
