@@ -546,7 +546,7 @@ export default function CataloguePanel() {
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} className="rounded cursor-pointer accent-blue-600" />
                 </th>
                 <th className="px-4 py-3">Assureur</th>
-                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Type / Sous-type</th>
                 <th className="px-3 py-3">Doc</th>
                 <th className="px-4 py-3">Statut</th>
                 <th className="px-4 py-3">URL</th>
@@ -571,7 +571,9 @@ export default function CataloguePanel() {
                   <td className="px-4 py-2">
                     <span className="text-[10px] font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded-lg">{cell.insurance_type_label}</span>
                     {cell.insurance_sub_type_code && (
-                      <span className="ml-1 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">{cell.insurance_sub_type_code}</span>
+                      <div className="mt-1">
+                        <span className="text-[9px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded font-mono">{cell.insurance_sub_type_code}</span>
+                      </div>
                     )}
                   </td>
                   <td className="px-3 py-2">

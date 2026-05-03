@@ -108,7 +108,13 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
   }
 
   // ── Détails de garantie depuis coverage_facts ────────────────────────────
-  if (coverageFacts.length > 0) {
+  // On n'affiche cette section que si les étapes n'embarquent pas déjà les
+  // garanties (cas buildStepsFromFacts qui injecte "✅ Garanties applicables" dans step 2)
+  const stepsAlreadyEmbedFacts = claims.steps.some(
+    s => s.description.includes('✅ Garanties applicables'),
+  );
+
+  if (!stepsAlreadyEmbedFacts && coverageFacts.length > 0) {
     // Filtrer les faits liés au type de sinistre (mots-clés du sinistre dans guarantee_label/key)
     const sTypeNorm = claims.sinisterType
       .toLowerCase()
@@ -205,6 +211,30 @@ async function generateGeneralResponse(
   const ai = getAiClient();
   if (!ai) return 'Service IA temporairement indisponible.';
 
+  // Détection rapide des questions hors-assurance (sans appel LLM)
+  const msgNorm = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const INSURANCE_SIGNALS = [
+    'assurance', 'assure', 'couvert', 'contrat', 'garantie', 'sinistre', 'police',
+    'franchise', 'cotisation', 'prime', 'resilie', 'resiliation', 'indemnisation',
+    'prevoyance', 'mutuelle', 'habitation', 'automobile', 'sante', 'prevoyance',
+    'portefeuille', 'formule', 'maif', 'maaf', 'macif', 'axa', 'allianz', 'mma',
+    'matmut', 'april', 'coverage', 'claim', 'policy',
+  ];
+  const OFF_TOPIC_SIGNALS = [
+    'recette', 'cuisine', 'cuire', 'cuisson', 'ingredient', 'plat', 'repas', 'meteo',
+    'temperature', 'sport', 'foot', 'tennis', 'basket', 'blague', 'chanson', 'film',
+    'livre', 'roman', 'jeu video', 'programmation', 'code', 'algorithme', 'mathematique',
+    'histoire', 'geographie', 'capitale', 'calcul', 'traduction', 'langue', 'politique',
+    'president', 'actualite', 'news', 'voyage', 'hotel', 'billet', 'vol',
+  ];
+  const hasInsuranceSignal = INSURANCE_SIGNALS.some(s => msgNorm.includes(s));
+  const hasOffTopicSignal  = OFF_TOPIC_SIGNALS.some(s => msgNorm.includes(s));
+
+  // Réponse immédiate si clairement hors-sujet (pas de signal assurance ET signal off-topic)
+  if (!hasInsuranceSignal && hasOffTopicSignal) {
+    return 'Je suis l\'assistant IA de BienCouvert, spécialisé en assurances. Je ne peux pas vous aider sur ce sujet.';
+  }
+
   const historyText = history
     .slice(-6) // 3 derniers échanges
     .map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.text}`)
@@ -214,7 +244,7 @@ async function generateGeneralResponse(
     .map((p) => `- ${p.name} chez ${p.provider} (${p.type})`)
     .join('\n');
 
-  const prompt = `Tu es AssurClair, assistant expert en assurances.
+  const prompt = `Tu es l'assistant IA de BienCouvert, uniquement spécialisé en assurances.
 
 CONTRATS DE L'UTILISATEUR :
 ${policyContext || 'Aucun contrat chargé.'}
@@ -224,10 +254,10 @@ ${historyText || 'Début de conversation.'}
 
 QUESTION : ${message}
 
-Règles :
-- Réponds en bullet points avec "-"
-- Cite le nom exact du contrat concerné
-- Sois concis (max 5 bullet points)
+Règles STRICTES :
+- Si la question ne concerne PAS l'assurance, réponds UNIQUEMENT : "Je suis l'assistant IA de BienCouvert, spécialisé en assurances. Je ne peux pas vous aider sur ce sujet."
+- Si la question concerne l'assurance, réponds en bullet points avec "-", max 5 points
+- Cite le nom exact du contrat concerné si applicable
 - Si tu ne sais pas, dis-le honnêtement sans inventer
 - Pas de markdown gras (**) dans la réponse`;
 

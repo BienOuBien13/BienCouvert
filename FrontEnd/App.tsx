@@ -477,7 +477,7 @@ function App() {
              <span className="text-sm font-bold hidden sm:inline">Monitoring</span>
            </button>
            )}
-           {user?.isPartner && (
+           {user?.isPartner && false && (
            <button
              onClick={() => setActiveView('partner')}
              className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'partner' ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
@@ -487,6 +487,7 @@ function App() {
              <span className="text-sm font-bold hidden sm:inline">Partenaire</span>
            </button>
            )}
+           {false && (
            <button
              onClick={() => setActiveView('sinistre')}
              className={`flex items-center gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-xl border shadow-sm transition-all active:scale-95 ${activeView === 'sinistre' ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'}`}
@@ -495,6 +496,7 @@ function App() {
              <ShieldAlert className="w-4 h-4" />
              <span className="text-sm font-bold hidden sm:inline">Sinistre</span>
            </button>
+           )}
            <button onClick={() => setActiveView('profile')} className={`p-1.5 md:p-2 rounded-xl border border-slate-100 shadow-sm active:scale-95 transition-all ${activeView === 'profile' ? 'bg-primary-600 text-white' : 'bg-white text-slate-400'}`} title="Profil & Paramètres">
              <Settings className="w-5 h-5" />
            </button>

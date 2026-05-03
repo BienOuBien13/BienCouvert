@@ -572,10 +572,10 @@ router.post('/catalogue/watchdog/stop', authMiddleware, adminMiddleware, (_req: 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/catalogue/entry
 // Ajoute manuellement une entrée dans le catalogue documentaire
-// Body: { insurer_code, insurance_type_code, doc_type, url? }
+// Body: { insurer_code, insurance_type_code, doc_type, insurance_sub_type_code?, url? }
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/catalogue/entry', authMiddleware, adminMiddleware, async (req: any, res) => {
-  const { insurer_code, insurance_type_code, doc_type, url } = req.body ?? {};
+  const { insurer_code, insurance_type_code, doc_type, url, insurance_sub_type_code } = req.body ?? {};
   if (!insurer_code || !insurance_type_code || !doc_type) {
     return res.status(400).json({ message: 'Champs requis : insurer_code, insurance_type_code, doc_type' });
   }
@@ -583,15 +583,16 @@ router.post('/catalogue/entry', authMiddleware, adminMiddleware, async (req: any
   if (!validDocTypes.includes(doc_type)) {
     return res.status(400).json({ message: `doc_type invalide. Valeurs acceptées : ${validDocTypes.join(', ')}` });
   }
+  const subType = insurance_sub_type_code?.trim() || null;
   try {
     const result = await pool.query<{ id: number }>(
       `INSERT INTO document_catalogue
-         (insurer_code, insurance_type_code, doc_type, matrix_status, current_url, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-       ON CONFLICT (insurer_code, insurance_type_code, doc_type) DO UPDATE
+         (insurer_code, insurance_type_code, insurance_sub_type_code, doc_type, matrix_status, current_url, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+       ON CONFLICT (insurer_code, insurance_type_code, (COALESCE(insurance_sub_type_code, '')), doc_type) DO UPDATE
          SET current_url = EXCLUDED.current_url, updated_at = NOW()
        RETURNING id`,
-      [insurer_code, insurance_type_code, doc_type, url ? 'discovered' : 'unknown', url ?? null]
+      [insurer_code, insurance_type_code, subType, doc_type, url ? 'discovered' : 'unknown', url ?? null]
     );
     res.json({ ok: true, id: result.rows[0].id, message: 'Entrée ajoutée au catalogue' });
   } catch (err: any) {

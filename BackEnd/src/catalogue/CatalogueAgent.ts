@@ -115,7 +115,7 @@ export async function syncMatrix(): Promise<number> {
       FROM insurers i
       CROSS JOIN insurance_types t
       WHERE i.is_active = true AND t.is_active = true
-      ON CONFLICT (insurer_code, insurance_type_code, doc_type) DO NOTHING
+      ON CONFLICT (insurer_code, insurance_type_code, (COALESCE(insurance_sub_type_code, '')), doc_type) DO NOTHING
       RETURNING id
     )
     SELECT COUNT(*)::int AS count FROM inserted

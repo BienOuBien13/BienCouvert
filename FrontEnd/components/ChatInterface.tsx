@@ -273,7 +273,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white chat-scroll">
         {messages.length === 0 && !isLive && (
           <div className="h-full flex flex-col items-center justify-center text-center opacity-60 mt-10">
             <div className="w-16 h-16 bg-primary-50 rounded-full flex items-center justify-center mb-4">

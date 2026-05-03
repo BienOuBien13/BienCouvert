@@ -365,7 +365,7 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 chat-scroll">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] ${message.sender === 'user' ? 'bg-primary-600 text-white' : 'bg-white text-slate-900'} rounded-2xl p-4 shadow-sm`}>

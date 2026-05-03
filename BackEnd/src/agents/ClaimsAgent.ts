@@ -120,15 +120,48 @@ export class ClaimsAgent {
 
     const isLow = sin.includes('bris') || sin.includes('vitrage');
 
-    // Ligne de synthèse des garanties par contrat
-    const guaranteed = factsRows.filter(r => r.coverage_status === 'included' || r.coverage_status === 'optional');
-    const excluded   = factsRows.filter(r => r.coverage_status === 'excluded');
+    // Déduplication des garanties : supprime les libellés quasi-identiques
+    // (ex: "Bris d'élément vitré" / "Le bris d'élément vitré" / "• bris d'éléments vitrés")
+    const normLabel = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+       .replace(/^[•\-*\s]+/, '')   // bullet de tête
+       .trim();
+    const stem = (w: string) =>
+      w.endsWith('s') && w.length > 4 ? w.slice(0, -1) : w;
+    const keywordsOf = (s: string): Set<string> =>
+      new Set(normLabel(s).split(/[\s'',._-]+/).filter(w => w.length > 3).map(stem));
+    const isSemDuplicate = (a: string, b: string): boolean => {
+      const ka = keywordsOf(a); const kb = keywordsOf(b);
+      const smaller = ka.size <= kb.size ? ka : kb;
+      const larger  = ka.size <= kb.size ? kb : ka;
+      if (smaller.size === 0) return false;
+      const overlap = [...smaller].filter(w => larger.has(w)).length;
+      return overlap / smaller.size >= 0.6;
+    };
+
+    const allGuaranteed = factsRows.filter(r => r.coverage_status === 'included' || r.coverage_status === 'optional');
+    const excluded       = factsRows.filter(r => r.coverage_status === 'excluded');
+
+    // Conserver la ligne la plus informative parmi les doublons sémantiques
+    const guaranteed: typeof allGuaranteed = [];
+    for (const r of allGuaranteed) {
+      const dupIdx = guaranteed.findIndex(e => isSemDuplicate(e.guarantee_label, r.guarantee_label));
+      if (dupIdx === -1) {
+        guaranteed.push(r);
+      } else {
+        // Remplacer si la nouvelle ligne contient plus d'informations
+        const existing = guaranteed[dupIdx];
+        const newScore = (r.coverage_amount ? 2 : 0) + (r.franchise ? 1 : 0) + (r.coverage_notes ? 1 : 0);
+        const oldScore = (existing.coverage_amount ? 2 : 0) + (existing.franchise ? 1 : 0) + (existing.coverage_notes ? 1 : 0);
+        if (newScore > oldScore) guaranteed[dupIdx] = r;
+      }
+    }
 
     const factsSummary = guaranteed.map(r => {
-      let line = `${r.policyName} (${r.provider}) → ${r.guarantee_label}`;
+      let line = `${r.policyName} → ${r.guarantee_label}`;
       if (r.coverage_amount) line += ` — plafond : ${r.coverage_amount}`;
-      if (r.franchise)        line += ` — franchise : ${r.franchise}`;
-      if (r.coverage_notes)   line += ` (${r.coverage_notes})`;
+      if (r.franchise)        line += `\n   Franchise : ${r.franchise}`;
+      if (r.coverage_notes)   line += `\n   ${r.coverage_notes}`;
       return line;
     }).join('\n');
 
@@ -137,8 +170,21 @@ export class ClaimsAgent {
       : '';
 
     const insurerNames = [...new Set(coveringPolicies.map(p => p.provider))].join(', ');
-    const policyNames  = coveringPolicies.map(p => `${p.name} (${p.coverageDetail || 'formule souscrite'})`).join(', ');
+    // Afficher uniquement le nom du contrat (sans la formule en parenthèses)
+    const policyNames  = coveringPolicies.map(p => p.name).join(', ');
     const contactLine  = `Votre espace client ${insurerNames}, par téléphone ou via l'application mobile`;
+
+    // Résumé des conditions financières pour l'étape 3
+    const bestFact = guaranteed.find(r => r.coverage_amount || r.franchise);
+    const noFranchise = guaranteed.some(
+      r => r.franchise === '0' || r.franchise?.includes('0 €') ||
+           r.franchise?.toLowerCase().includes('sans franchise') ||
+           r.coverage_notes?.toLowerCase().includes('sans franchise') ||
+           r.coverage_notes?.toLowerCase().includes('pas de franchise'),
+    );
+    let step3Extra = '';
+    if (noFranchise) step3Extra = 'Aucune franchise n\'est appliquée en cas de réparation sans remplacement.';
+    else if (bestFact?.franchise) step3Extra = `Franchise applicable : ${bestFact.franchise}.`;
 
     const steps: ClaimsStep[] = [
       {
@@ -150,14 +196,14 @@ export class ClaimsAgent {
       {
         step: 2,
         title: `Déclarer à ${insurerNames}`,
-        description: `Déclarez le sinistre "${sinisterType}" auprès de ${insurerNames} dans les délais légaux. Vos contrats concernés : ${policyNames}.\n\n✅ Garanties applicables :\n${factsSummary}${exclusionsSummary ? `\n\n❌ Exclusions : ${exclusionsSummary}` : ''}`,
+        description: `Déclarez le sinistre auprès de ${insurerNames} dans les délais légaux. Contrat concerné : ${policyNames}.\n\n✅ Garanties applicables :\n${factsSummary}${exclusionsSummary ? `\n\n❌ Exclusions : ${exclusionsSummary}` : ''}`,
         deadline: legalDelay,
         contact: contactLine,
       },
       {
         step: 3,
         title: 'Réparation et indemnisation',
-        description: `Après déclaration, ${insurerNames} vous orientera vers un réparateur agréé. ${guaranteed.some(r => r.franchise === '0' || r.franchise?.includes('0 €') || r.franchise?.toLowerCase().includes('sans franchise')) ? 'Aucune franchise ne sera appliquée si le sinistre le permet.' : guaranteed.some(r => r.franchise) ? `Franchise applicable : ${guaranteed.find(r => r.franchise)?.franchise}` : ''} ${guaranteed.some(r => r.coverage_amount) ? `Plafond d'indemnisation : ${guaranteed.find(r => r.coverage_amount)?.coverage_amount}` : ''}`.trim(),
+        description: `Après déclaration, ${insurerNames} vous orientera vers un réparateur agréé ou un prestataire de son réseau.${step3Extra ? ` ${step3Extra}` : ''}`,
         deadline: 'Selon délais assureur',
         contact: contactLine,
       },
