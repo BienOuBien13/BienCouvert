@@ -569,6 +569,9 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {insuranceTypes.map(type => {
             const iconName = (type as any).icon || '';
+            const iconUrl = iconName.startsWith('/') || iconName.startsWith('http')
+              ? iconName
+              : `/insurance-types/${type.code}.png`;
             const IconComponent = LUCIDE_ICON_MAP[iconName] || insuranceIconsFallback[type.code] || ShieldPlus;
             const gradientClass = (type as any).color?.includes('from-') ? (type as any).color : 'from-primary-500 to-primary-600';
             const isSelected = selectedType?.code === type.code;
@@ -582,8 +585,25 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                     : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm hover:bg-gray-50'
                 }`}
               >
-                <div className={`w-16 h-16 rounded-xl flex items-center justify-center bg-gradient-to-br ${gradientClass}`}>
-                  <IconComponent className="w-9 h-9 text-white" />
+                <div className={`w-16 h-16 rounded-xl flex items-center justify-center bg-gradient-to-br ${gradientClass} overflow-hidden`}>
+                  <img
+                    src={iconUrl}
+                    alt={type.labelFr}
+                    loading="lazy"
+                    className="w-12 h-12 object-contain"
+                    onError={e => {
+                      const img = e.currentTarget;
+                      img.style.display = 'none';
+                      const parent = img.parentElement;
+                      if (parent && !parent.querySelector('[data-lucide-fallback]')) {
+                        const span = document.createElement('span');
+                        span.dataset.lucideFallback = '1';
+                        span.className = 'text-white text-2xl font-black';
+                        span.textContent = type.labelFr.substring(0, 2).toUpperCase();
+                        parent.appendChild(span);
+                      }
+                    }}
+                  />
                 </div>
                 <span className={`text-xs font-medium text-center leading-tight ${
                   isSelected ? 'text-blue-700' : 'text-gray-700'

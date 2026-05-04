@@ -100,16 +100,6 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
 
   const coveredTypes = TYPE_ORDER.filter(t => grouped[t]?.length);
   const gapTypes = TYPE_ORDER.filter(t => !grouped[t]?.length);
-  const totalPremium = policies.reduce((s, p) => s + getPrice(p), 0);
-
-  const pct = TYPE_ORDER.length > 0 ? coveredTypes.length / TYPE_ORDER.length : 0;
-  const scoreLabel =
-    pct >= 0.8 ? 'Excellent' : pct >= 0.55 ? 'Bien couvert' : pct >= 0.33 ? 'A completer' : 'Insuffisant';
-  const scoreColor =
-    pct >= 0.8 ? '#34d399' : pct >= 0.55 ? '#38bdf8' : pct >= 0.33 ? '#fbbf24' : '#f87171';
-  const R = 52;
-  const C = 2 * Math.PI * R;
-  const arcLen = pct * C * 0.75;
 
   useEffect(() => {
     if (activeTab !== 'needs' || policies.length === 0) return;
@@ -190,77 +180,9 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
   return (
     <div className="-mx-3 -mt-3 animate-fadeIn">
 
-      {/* HERO dark */}
-      <div className="relative bg-[#060c18] overflow-hidden px-5 pt-10 pb-6">
-        <div className="absolute inset-0 pointer-events-none">
-          <div
-            className="absolute top-0 left-1/4 w-64 h-64 rounded-full opacity-25 blur-[90px]"
-            style={{ background: 'radial-gradient(circle, #6366f1, transparent)' }}
-          />
-          <div
-            className="absolute top-0 right-1/4 w-64 h-64 rounded-full opacity-20 blur-[90px]"
-            style={{ background: 'radial-gradient(circle, #38bdf8, transparent)' }}
-          />
-        </div>
-
-        <p className="relative z-10 text-white/30 text-[10px] font-black uppercase tracking-[0.3em] mb-8 text-center">
-          Votre Bouclier
-        </p>
-
-        <div className="relative z-10 flex flex-col items-center">
-          <div className="relative w-36 h-36">
-            <svg viewBox="0 0 120 120" className="w-full h-full -rotate-[135deg]">
-              <circle cx="60" cy="60" r={R} fill="none" strokeWidth="7"
-                stroke="#ffffff08"
-                strokeDasharray={`${C * 0.75} ${C}`}
-                strokeLinecap="round"
-              />
-              <circle cx="60" cy="60" r={R} fill="none" strokeWidth="7"
-                stroke="url(#scoreGrad)"
-                strokeDasharray={`${arcLen} ${C}`}
-                strokeLinecap="round"
-              />
-              <defs>
-                <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#818cf8" />
-                  <stop offset="100%" stopColor="#38bdf8" />
-                </linearGradient>
-              </defs>
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-4xl font-black text-white leading-none">{coveredTypes.length}</span>
-              <span className="text-white/30 text-xs font-bold">/ {TYPE_ORDER.length}</span>
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full" style={{ background: scoreColor }} />
-            <span className="font-black text-sm" style={{ color: scoreColor }}>{scoreLabel}</span>
-          </div>
-          <p className="text-white/20 text-xs mt-1">domaines assures</p>
-        </div>
-
-        {policies.length > 0 && (
-          <div className="relative z-10 flex gap-3 mt-6 mb-5">
-            {[
-              { label: 'Contrats',  value: String(policies.length) },
-              { label: 'Budget/an', value: totalPremium > 0 ? fmt(totalPremium) : '--' },
-              { label: 'Lacunes',   value: String(gapTypes.length), red: gapTypes.length > 0 },
-            ].map(({ label, value, red }) => (
-              <div
-                key={label}
-                className="flex-1 rounded-2xl px-3 py-3 border bg-white/[0.04]"
-                style={{ borderColor: 'rgba(255,255,255,0.07)' }}
-              >
-                <p className="text-white/30 text-[9px] font-black uppercase tracking-widest">{label}</p>
-                <p className={`${red ? 'text-rose-400' : 'text-white'} text-lg font-black mt-0.5 leading-none`}>
-                  {value}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="relative z-10 flex gap-1 p-1 bg-white/[0.06] rounded-2xl border border-white/[0.08]">
+      {/* TAB SWITCHER — visible, sticky */}
+      <div className="sticky top-0 z-20 bg-white border-b border-slate-100 px-4 py-3 shadow-sm">
+        <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl">
           {([
             { id: 'contracts' as ViewTab, label: 'Mes contrats', Icon: LayoutGrid },
             { id: 'needs'     as ViewTab, label: 'Par besoin',   Icon: Sparkles   },
@@ -271,7 +193,7 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all ${
                 activeTab === id
                   ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-white/40 hover:text-white/70'
+                  : 'text-slate-400 hover:text-slate-600'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
