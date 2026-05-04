@@ -140,7 +140,7 @@ export const AnalysisView: React.FC<Props> = ({ policies, profile, onUpdateProfi
     setIsExporting(true);
     try {
       await new Promise(res => setTimeout(res, 800));
-      generateOptimizationPDF(user, policies, findings);
+      await generateOptimizationPDF(user, policies, findings);
     } finally {
       setIsExporting(false);
     }

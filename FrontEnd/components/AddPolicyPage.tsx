@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon, Package, Scale, Smartphone, Shield, CreditCard, Search } from 'lucide-react';
+import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon, Package, Scale, Smartphone, Shield, CreditCard, Search, Plane } from 'lucide-react';
 import { getInsuranceSubTypes, getInsuranceTypes as fetchInsuranceTypes, type InsuranceSubType } from '../services/masterDataService';
 import { API_URL } from '../services/apiUrl';
 
@@ -40,6 +40,7 @@ const insuranceIconsFallback: Record<string, React.FC<any>> = {
   AUT: Car, AUT01: Car,
   HAB: Home, HAB01: Home,
   SAN: Heart, SAN01: Heart,
+  VOYAGE: Plane,
   PRE: Heart, PRE01: Heart,
   PRO: Briefcase,
   DEFAULT: ShieldPlus
@@ -47,7 +48,7 @@ const insuranceIconsFallback: Record<string, React.FC<any>> = {
 
 // Mapping nom icône API → composant Lucide
 const LUCIDE_ICON_MAP: Record<string, React.FC<any>> = {
-  Car, Home, Heart, Shield, Briefcase, CreditCard, Smartphone, Scale, Package,
+  Car, Home, Heart, Shield, Briefcase, CreditCard, Smartphone, Scale, Package, Plane,
   ShieldPlus, Sport: ShieldPlus,
 };
 
@@ -504,7 +505,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
       </div>
 
       {/* Sélecteur de mode — onglets bien visibles */}
-      <div className="flex mb-6 border-b-2 border-gray-200">
+      <div className="flex gap-2 mb-6 bg-slate-100 p-1 rounded-2xl">
         <button
           onClick={async () => {
             if (mode !== 'standard') {
@@ -516,13 +517,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               setError('');
             }
           }}
-          className={`flex-1 py-3 px-4 font-semibold text-sm transition-all border-b-4 -mb-0.5 ${
+          className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
             mode === 'standard'
-              ? 'border-blue-600 text-blue-700 bg-blue-50'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              ? 'bg-white text-blue-700 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          📋 Contrats centraux disponibles
+          Référentiel BienCouvert
         </button>
         <button
           onClick={async () => {
@@ -535,13 +536,13 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               setError('');
             }
           }}
-          className={`flex-1 py-3 px-4 font-semibold text-sm transition-all border-b-4 -mb-0.5 ${
+          className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
             mode === 'custom'
-              ? 'border-blue-600 text-blue-700 bg-blue-50'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              ? 'bg-white text-blue-700 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          📄 Ajout de conditions
+          Mes contrats perso
         </button>
       </div>
 
@@ -552,7 +553,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           : 'bg-amber-50 text-amber-800 border border-amber-100'
       }`}>
         {mode === 'standard'
-          ? '🔎 Les CG listées proviennent de notre référentiel central. Choisissez votre assureur et votre formule.'
+          ? 'Le référentiel BienCouvert est basé sur les conditions générales ou notes d\'information disponibles sur internet. Choisissez votre assureur et votre formule pour constituer votre portefeuille d\'assurance.'
           : '📤 Chargez vos propres Conditions Générales (PDF) pour les analyser et les ajouter à votre portefeuille.'}
       </div>
 
@@ -675,7 +676,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                     {insurer.code === 'AUTRE' ? (
                       <span className="text-3xl">🏢</span>
                     ) : insurer.logoUrl ? (
-                      <img src={insurer.logoUrl} alt={insurer.label} className="w-14 h-14 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                      <img src={insurer.logoUrl} alt={insurer.label} className="w-14 h-14 object-contain" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
                     ) : (
                       <span className="text-white font-bold text-xl">{insurer.label.substring(0, 2)}</span>
                     )}

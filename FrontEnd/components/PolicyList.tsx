@@ -159,7 +159,7 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
     setIsExporting(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 800));
-      generatePortfolioPDF(user, policies);
+      await generatePortfolioPDF(user, policies);
     } finally {
       setIsExporting(false);
     }
@@ -222,7 +222,7 @@ export const PolicyList: React.FC<Props> = ({ policies, onDelete, onEdit, onUpda
                     {/* Header assureur + infos clés */}
                     <div className="flex items-center gap-4 pb-2">
                       {(policy as any).insurerLogo && (
-                        <img src={(policy as any).insurerLogo} alt={policy.insurer} className="h-9 object-contain" />
+                        <img src={(policy as any).insurerLogo} alt={policy.insurer} className="h-9 object-contain" loading="lazy" />
                       )}
                       <div className="flex-1 space-y-1">
                         {policy.annualPremium && (

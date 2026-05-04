@@ -280,8 +280,7 @@ export const ChatInterface: React.FC<Props> = ({ policies, messages, setMessages
               <Sparkles className="w-8 h-8 text-primary-400" />
             </div>
             <p className="text-slate-500 max-w-xs">
-              "Est-ce que je suis couvert pour le bris de glace ?"<br/>
-              "Quel est le montant de ma franchise ?"
+              "Est-ce que je suis couvert pour le bris de glace ?"
             </p>
           </div>
         )}

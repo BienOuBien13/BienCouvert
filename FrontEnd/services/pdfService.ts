@@ -3,6 +3,24 @@ import { jsPDF } from 'jspdf';
 import { Policy, OptimizationFinding, User } from '../types';
 
 const primaryColor = [2, 132, 199]; // primary-600
+
+const isNativePlatform = (): boolean =>
+  !!(window as any).Capacitor?.isNativePlatform?.();
+
+const shareOrSavePDF = async (doc: jsPDF, fileName: string): Promise<void> => {
+  if (isNativePlatform() && navigator.share) {
+    try {
+      const blob = doc.output('blob');
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      await navigator.share({ files: [file], title: fileName });
+      return;
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return; // user cancelled
+      console.warn('Web Share API failed, falling back to download', err);
+    }
+  }
+  doc.save(fileName);
+};
 const slateColor = [30, 41, 59]; // slate-800
 
 const centerText = (doc: jsPDF, text: string, y: number) => {
@@ -39,7 +57,7 @@ const drawFooter = (doc: jsPDF) => {
   }
 };
 
-export const generateOptimizationPDF = (user: User, policies: Policy[], findings: OptimizationFinding[]) => {
+export const generateOptimizationPDF = async (user: User, policies: Policy[], findings: OptimizationFinding[]): Promise<void> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const profile = user.profile || {};
@@ -127,10 +145,10 @@ export const generateOptimizationPDF = (user: User, policies: Policy[], findings
   });
 
   drawFooter(doc);
-  doc.save(`BienCouvert_Audit_${user.lastName}.pdf`);
+  await shareOrSavePDF(doc, `BienCouvert_Audit_${user.lastName}.pdf`);
 };
 
-export const generatePortfolioPDF = (user: User, policies: Policy[]) => {
+export const generatePortfolioPDF = async (user: User, policies: Policy[]): Promise<void> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -190,5 +208,5 @@ export const generatePortfolioPDF = (user: User, policies: Policy[]) => {
   }
 
   drawFooter(doc);
-  doc.save(`BienCouvert_Portefeuille_${user.lastName}.pdf`);
+  await shareOrSavePDF(doc, `BienCouvert_Portefeuille_${user.lastName}.pdf`);
 };

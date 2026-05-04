@@ -38,7 +38,7 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, policies, finding
     try {
       // Small timeout to ensure visual feedback
       await new Promise(resolve => setTimeout(resolve, 800));
-      generateOptimizationPDF(user, policies, findings);
+      await generateOptimizationPDF(user, policies, findings);
     } finally {
       setIsGeneratingPDF(false);
     }

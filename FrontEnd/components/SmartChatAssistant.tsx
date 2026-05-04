@@ -400,7 +400,7 @@ Réponds en JSON: {"formulas": [{"name": "Formule 1", "options": ["option1", "op
                       className={`${insurer.id === 'autre' ? insurer.color + ' text-white' : 'bg-white border-2 border-slate-200 hover:border-primary-500'} p-2 rounded-lg hover:scale-105 transition-all flex flex-col items-center gap-1`}
                     >
                       {insurer.logo ? (
-                        <img src={insurer.logo} alt={insurer.name} className="w-12 h-12 object-contain" />
+                        <img src={insurer.logo} alt={insurer.name} className="w-12 h-12 object-contain" loading="lazy" />
                       ) : (
                         <Plus className="w-8 h-8" />
                       )}
