@@ -247,36 +247,38 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-8 py-6 space-y-3">
           <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Informations légales</h3>
-          <a
-            href="https://biencouvert.app/cgu"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
+          <button
+            onClick={() => {
+              const isNative = (window as any).Capacitor?.isNativePlatform?.();
+              window.open('https://biencouvert.fr/cgu', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+            }}
+            className="w-full flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
           >
             <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
               <FileText className="w-4 h-4 text-blue-600" />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 text-left">
               <p className="font-bold text-slate-800 text-sm">Conditions Générales d'Utilisation</p>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">Consulter les CGU</p>
             </div>
             <X className="w-4 h-4 text-slate-300 rotate-45 group-hover:text-slate-400 transition-colors" />
-          </a>
-          <a
-            href="https://biencouvert.app/confidentialite"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
+          </button>
+          <button
+            onClick={() => {
+              const isNative = (window as any).Capacitor?.isNativePlatform?.();
+              window.open('https://biencouvert.fr/confidentialite', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+            }}
+            className="w-full flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
           >
             <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
               <Shield className="w-4 h-4 text-emerald-600" />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 text-left">
               <p className="font-bold text-slate-800 text-sm">Politique de confidentialité</p>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">Consulter la politique de confidentialité</p>
             </div>
             <X className="w-4 h-4 text-slate-300 rotate-45 group-hover:text-slate-400 transition-colors" />
-          </a>
+          </button>
         </div>
       </div>
 

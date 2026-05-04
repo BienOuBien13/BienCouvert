@@ -404,7 +404,17 @@ function App() {
           </div>
         );
       case 'chat':
-        return <div className="h-[calc(100vh-140px)] animate-fadeIn"><ChatInterface policies={policies} messages={messages} setMessages={setMessages} /></div>;
+        return (
+          <div
+            className="animate-fadeIn"
+            style={{
+              // Hauteur = viewport dynamique − barre de statut − header − nav bas − padding du main
+              height: 'calc(100dvh - env(safe-area-inset-top, 0px) - 3.5rem - env(safe-area-inset-bottom, 0px) - 5rem - 0.75rem)',
+            }}
+          >
+            <ChatInterface policies={policies} messages={messages} setMessages={setMessages} />
+          </div>
+        );
       case 'analysis':
         return <div className="animate-fadeIn"><AnalysisView policies={policies} profile={userProfile} onUpdateProfile={handleUpdateProfile} user={user} onFinishSimulation={() => setIsClearModalOpen(true)} /></div>;
       case 'coverage':

@@ -538,7 +538,9 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     
     console.log('👤 Current user:', { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email });
     
-    const { firstName, lastName, email, password, profile, geminiAiConsent } = req.body;
+    // Accepte les deux formats : { firstName, ... } (flat) et { user: { firstName, ... } } (wrapped)
+    const body = req.body?.user ?? req.body;
+    const { firstName, lastName, email, password, profile, geminiAiConsent } = body;
     
     // Mise Ã  jour des champs fournis (ne modifie que les champs prÃ©sents dans la requÃªte)
     // â ️ L'email est une clÃ© unique et ne peut pas Ãªtre modifiÃ© aprÃ¨s crÃ©ation du compte

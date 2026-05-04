@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts, getCoverageAnalysis } from '../services/geminiService';
+import { sendMessageToAssistant, sendMessageToAssistantStream, searchPolicyInfo, detectDuplicates, parsePoliciesFromText, indexCgDocument, generateShareableReport, resolveCoverageFacts, getCoverageAnalysis, getAiClient } from '../services/geminiService';
 import { extractTableFromPageImage } from '../services/tableExtractionService';
 import { storage } from '../storage';
 import { query as dbQuery } from '../db';
@@ -386,6 +386,73 @@ router.get('/debug-extract-page', async (req, res) => {
   } catch (err: any) {
     console.error('❌ debug-extract-page error:', err);
     res.status(500).json({ error: err?.message || 'Erreur interne' });
+  }
+});
+
+// ── Endpoint IA : regroupe les garanties par besoin de vie (cross-contrats) ──
+// POST /api/ai/group-coverage  { policyData: [{id, name, type, insurer, items}] }
+router.post('/group-coverage', authMiddleware, async (req: any, res) => {
+  const { policyData } = req.body;
+  if (!policyData || !Array.isArray(policyData)) {
+    return res.status(400).json({ message: 'Missing policyData' });
+  }
+
+  try {
+    const ai = getAiClient();
+    if (!ai) return res.json({ groupedNeeds: [] });
+
+    const safeData = policyData.map((p: any) => ({
+      id: String(p.id),
+      name: String(p.name || p.insurer || ''),
+      type: String(p.type || ''),
+      insurer: String(p.insurer || ''),
+      items: Array.isArray(p.items) ? p.items.slice(0, 40) : [],
+    }));
+
+    const prompt = `Tu analyses les contrats d'assurance d'un utilisateur et dois regrouper les garanties par BESOIN DE VIE concret et compréhensible.
+
+Contrats et garanties disponibles :
+${JSON.stringify(safeData, null, 2)}
+
+Regroupe ces garanties par besoin concret du quotidien. Exemples : "Vol de voiture", "Perte de clés", "Dégâts des eaux", "Hospitalisation urgente", "Accident / blessure corporelle", "Voyage annulé / rapatriation", "Litige juridique", "Casse smartphone", "Incendie / explosion", "Décès / invalidité", "Panne mécanique", "Bris de glace", "Catastrophe naturelle".
+
+Réponds UNIQUEMENT avec un tableau JSON valide sans markdown ni balises :
+[
+  {
+    "need": "Perte de clés",
+    "emoji": "🔑",
+    "category": "Vie quotidienne",
+    "coveringPolicies": [
+      { "policyId": "...", "policyName": "...", "level": "full", "detail": "Serrurier 300€" }
+    ]
+  }
+]
+
+Règles strictes :
+- 10 à 20 besoins maximum, ordonnés par importance / fréquence
+- "level" : "full" = bien couvert, "partial" = partiellement/avec conditions, "none" = explicitement exclu
+- N'inclus un contrat que s'il a une garantie pertinente pour ce besoin
+- "detail" : 8 mots max, précis (montant ou condition clé)
+- "category" doit être l'une de : "Vie quotidienne", "Véhicule", "Habitation", "Santé", "Prévoyance", "Voyage"
+- Un même besoin peut et doit être couvert par plusieurs contrats si c'est le cas (c'est l'intérêt !)
+- Identifie intelligemment les recoupements : une carte bancaire Premium couvre souvent vol/assistance/voyage`;
+
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' }, 'groupCoverage');
+    const result = await model.generateContent([{ text: prompt }]);
+    const raw = result.response.text().trim()
+      .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/g, '');
+
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.warn('[group-coverage] No JSON array found in Gemini response');
+      return res.json({ groupedNeeds: [] });
+    }
+
+    const groupedNeeds = JSON.parse(jsonMatch[0]);
+    return res.json({ groupedNeeds });
+  } catch (e) {
+    console.error('[group-coverage] error:', e);
+    return res.status(500).json({ message: 'AI grouping error' });
   }
 });
 

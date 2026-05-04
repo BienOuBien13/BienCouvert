@@ -223,6 +223,38 @@ export const getCoverageDetails = async (policy: Policy): Promise<CoverageData> 
   }
 };
 
+// ─ Regroupement intelligent des garanties par besoin de vie (IA) ──────────────
+
+export type GroupedNeed = {
+  need: string;
+  emoji: string;
+  category: string;
+  coveringPolicies: Array<{
+    policyId: string;
+    policyName: string;
+    level: 'full' | 'partial' | 'none';
+    detail: string;
+  }>;
+};
+
+/**
+ * Envoie les données de couverture de toutes les polices au backend,
+ * qui appelle Gemini pour regrouper intelligemment les garanties par besoin de vie.
+ */
+export const groupCoveragesByNeed = async (
+  policyData: Array<{ id: string; name: string; type: string; insurer: string; items: any[] }>
+): Promise<GroupedNeed[]> => {
+  try {
+    const result = await apiFetch('/ai/group-coverage', {
+      body: JSON.stringify({ policyData }),
+    });
+    return result.groupedNeeds || [];
+  } catch (e) {
+    console.error('Erreur groupCoveragesByNeed:', e);
+    throw e;
+  }
+};
+
 /**
  * Détecte les optimisations possibles via le backend
  */
