@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Home, Heart, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon, Package, Scale, Smartphone, Shield, CreditCard, Search, Plane } from 'lucide-react';
+import { Car, Home, Heart, HeartPulse, Briefcase, ShieldPlus, Upload, Check, X, AlertCircle, FileText, Link as LinkIcon, Package, Scale, Smartphone, Shield, CreditCard, Search, Plane, PawPrint, Banknote, Key } from 'lucide-react';
 import { getInsuranceSubTypes, getInsuranceTypes as fetchInsuranceTypes, type InsuranceSubType } from '../services/masterDataService';
 import { API_URL } from '../services/apiUrl';
 
@@ -35,21 +35,37 @@ interface CGData {
   insurance_type_name: string;
 }
 
-// Icônes Lucide de secours (si l'image PNG n'est pas disponible)
+// Mapping code → icône Lucide + gradient Tailwind par type d'assurance
+const INSURANCE_TYPE_STYLE: Record<string, { Icon: React.FC<any>; gradient: string }> = {
+  AUT01:  { Icon: Car,        gradient: 'from-sky-400 to-blue-700'      },
+  HAB01:  { Icon: Home,       gradient: 'from-violet-400 to-purple-800'  },
+  SAN01:  { Icon: HeartPulse, gradient: 'from-rose-400 to-pink-700'     },
+  PRE01:  { Icon: Shield,     gradient: 'from-red-400 to-rose-800'      },
+  PRO01:  { Icon: Briefcase,  gradient: 'from-amber-400 to-orange-700'  },
+  VIE01:  { Icon: Heart,      gradient: 'from-pink-400 to-red-700'      },
+  JUR01:  { Icon: Scale,      gradient: 'from-yellow-400 to-amber-700'  },
+  VOY01:  { Icon: Plane,      gradient: 'from-cyan-400 to-teal-700'     },
+  ANI01:  { Icon: PawPrint,   gradient: 'from-lime-400 to-green-700'    },
+  APP01:  { Icon: Smartphone, gradient: 'from-slate-400 to-slate-700'   },
+  BAN01:  { Icon: CreditCard, gradient: 'from-teal-400 to-emerald-700'  },
+  EMP01:  { Icon: Banknote,   gradient: 'from-green-400 to-emerald-800' },
+  LOI01:  { Icon: Key,        gradient: 'from-indigo-400 to-indigo-800' },
+  AUTRE:  { Icon: ShieldPlus, gradient: 'from-slate-500 to-slate-700'   },
+  DEFAULT:{ Icon: ShieldPlus, gradient: 'from-primary-500 to-primary-700'},
+};
+
+const getTypeStyle = (code: string) =>
+  INSURANCE_TYPE_STYLE[code] ?? INSURANCE_TYPE_STYLE['DEFAULT'];
+
+// Icônes de secours par code (legacy fallback)
 const insuranceIconsFallback: Record<string, React.FC<any>> = {
   AUT: Car, AUT01: Car,
   HAB: Home, HAB01: Home,
-  SAN: Heart, SAN01: Heart,
+  SAN: HeartPulse, SAN01: HeartPulse,
   VOYAGE: Plane,
-  PRE: Heart, PRE01: Heart,
+  PRE: Shield, PRE01: Shield,
   PRO: Briefcase,
   DEFAULT: ShieldPlus
-};
-
-// Mapping nom icône API → composant Lucide
-const LUCIDE_ICON_MAP: Record<string, React.FC<any>> = {
-  Car, Home, Heart, Shield, Briefcase, CreditCard, Smartphone, Scale, Package, Plane,
-  ShieldPlus, Sport: ShieldPlus,
 };
 
 interface AddPolicyPageProps {
@@ -564,16 +580,11 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         </div>
       )}
 
-      {/* Étape 1: Sélection du type d'assurance — grille avec images */}
+      {/* Étape 1: Sélection du type d'assurance */}
       {step === 'selectType' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {insuranceTypes.map(type => {
-            const iconName = (type as any).icon || '';
-            const iconUrl = iconName.startsWith('/') || iconName.startsWith('http')
-              ? iconName
-              : `/insurance-types/${type.code}.png`;
-            const IconComponent = LUCIDE_ICON_MAP[iconName] || insuranceIconsFallback[type.code] || ShieldPlus;
-            const gradientClass = (type as any).color?.includes('from-') ? (type as any).color : 'from-primary-500 to-primary-600';
+            const { Icon, gradient } = getTypeStyle(type.code);
             const isSelected = selectedType?.code === type.code;
             return (
               <button
@@ -585,25 +596,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                     : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm hover:bg-gray-50'
                 }`}
               >
-                <div className={`w-16 h-16 rounded-xl flex items-center justify-center bg-gradient-to-br ${gradientClass} overflow-hidden`}>
-                  <img
-                    src={iconUrl}
-                    alt={type.labelFr}
-                    loading="lazy"
-                    className="w-12 h-12 object-contain"
-                    onError={e => {
-                      const img = e.currentTarget;
-                      img.style.display = 'none';
-                      const parent = img.parentElement;
-                      if (parent && !parent.querySelector('[data-lucide-fallback]')) {
-                        const span = document.createElement('span');
-                        span.dataset.lucideFallback = '1';
-                        span.className = 'text-white text-2xl font-black';
-                        span.textContent = type.labelFr.substring(0, 2).toUpperCase();
-                        parent.appendChild(span);
-                      }
-                    }}
-                  />
+                <div className={`w-16 h-16 rounded-xl flex items-center justify-center bg-gradient-to-br ${gradient}`}>
+                  <Icon className="w-9 h-9 text-white" />
                 </div>
                 <span className={`text-xs font-medium text-center leading-tight ${
                   isSelected ? 'text-blue-700' : 'text-gray-700'

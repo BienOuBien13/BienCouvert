@@ -34,9 +34,10 @@ export class ClaimsAgent {
       { triggers: ['sante', 'maladie', 'hospitalisation', 'chirurgie', 'médecin', 'medecin'], policyTypes: ['sante', 'mutuelle', 'prevoyance'] },
       { triggers: ['deces', 'décès', 'invalide', 'invalidite'],    policyTypes: ['prevoyance', 'vie', 'deces'] },
       { triggers: ['litige', 'juridique', 'judiciaire', 'avocat'], policyTypes: ['protection juridique', 'juridique'] },
-      { triggers: ['cle perdue', 'clé perdue', 'serrure', 'serrurier'], policyTypes: ['habitation', 'mrh'] },
+      // Perte de clés : peut concerner l'habitation OU le véhicule
+      { triggers: ['cle perdue', 'clé perdue', 'serrure', 'serrurier', 'perte cle', 'perte de cle'], policyTypes: ['habitation', 'mrh', 'automobile', 'auto'] },
       { triggers: ['telephone', 'smartphone', 'portable', 'mobile', 'écran cassé', 'ecran casse'], policyTypes: ['habitation', 'mrh', 'appareils mobiles'] },
-      { triggers: ['perte', 'perdu'],                              policyTypes: ['habitation', 'mrh'] },
+      { triggers: ['perte', 'perdu'],                              policyTypes: ['habitation', 'mrh', 'automobile', 'auto'] },
     ];
 
     const match = TYPE_MAP.find(entry =>
@@ -196,7 +197,7 @@ export class ClaimsAgent {
       {
         step: 2,
         title: `Déclarer à ${insurerNames}`,
-        description: `Déclarez le sinistre auprès de ${insurerNames} dans les délais légaux. Contrat concerné : ${policyNames}.\n\n✅ Garanties applicables :\n${factsSummary}${exclusionsSummary ? `\n\n❌ Exclusions : ${exclusionsSummary}` : ''}`,
+        description: `Déclarez le sinistre auprès de ${insurerNames} dans les délais légaux. Contrat concerné : ${policyNames}.${exclusionsSummary ? `\n\n❌ Exclusions : ${exclusionsSummary}` : ''}`,
         deadline: legalDelay,
         contact: contactLine,
       },
@@ -334,9 +335,33 @@ export class ClaimsAgent {
   }
 
   async guide(input: ClaimsInput): Promise<ClaimsResult> {
-    const { sinisterType, policies, userId, sessionId, targetPolicyId } = input;
+    const { sinisterType, policies, userId, sessionId, targetPolicyId, originalMessage } = input;
 
     let coveringPolicies = this.identifyCoveringPolicies(sinisterType, policies);
+
+    // ── Affinage par contexte : si le message mentionne un véhicule, prioriser l'auto ──
+    if (originalMessage && coveringPolicies.length > 1) {
+      const normalize = (s: string) =>
+        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const msgNorm = normalize(originalMessage);
+      const vehicleKeywords = ['voiture', 'vehicule', 'auto', 'voitur', 'moto', 'camion', 'scooter'];
+      const mentionsVehicle = vehicleKeywords.some(k => msgNorm.includes(k));
+      // Détecter si un nom de contrat auto apparaît dans le message
+      const autoByPolicyName = coveringPolicies.filter(p => {
+        const nameNorm = normalize(p.name);
+        return msgNorm.includes(nameNorm) &&
+          (normalize(p.type || '').includes('auto') || normalize(p.type || '').includes('vehicule'));
+      });
+      if (autoByPolicyName.length > 0) {
+        coveringPolicies = autoByPolicyName;
+      } else if (mentionsVehicle) {
+        const autoOnly = coveringPolicies.filter(p => {
+          const typeNorm = normalize(p.type || '');
+          return typeNorm.includes('auto') || typeNorm.includes('vehicule') || typeNorm.includes('moto');
+        });
+        if (autoOnly.length > 0) coveringPolicies = autoOnly;
+      }
+    }
 
     // ── Filtrer sur le contrat ciblé si l'utilisateur a précisé ─────────────
     if (targetPolicyId) {
@@ -367,6 +392,15 @@ export class ClaimsAgent {
     const fastSteps = this.buildStepsFromFacts(sinisterType, coveringPolicies, factRows);
     if (fastSteps) {
       console.log(`[ClaimsAgent] Réponse depuis coverage_facts (zéro LLM)`);
+      // Préparer les détails de garanties à afficher AVANT les étapes
+      const included = factRows.filter(r => r.coverage_status === 'included' || r.coverage_status === 'optional');
+      const coverageDetails = included.map(r => ({
+        policyName: r.policyName,
+        guarantee_label: r.guarantee_label,
+        coverage_status: r.coverage_status,
+        coverage_amount: r.coverage_amount,
+        franchise: r.franchise,
+      }));
       return {
         sinisterType,
         coveringPolicies: coveringPolicies.map(p => p.name),
@@ -374,6 +408,7 @@ export class ClaimsAgent {
         urgencyLevel: 'low',
         cgUrls,
         sessionId,
+        coverageDetails: coverageDetails.length > 0 ? coverageDetails : undefined,
       };
     }
 

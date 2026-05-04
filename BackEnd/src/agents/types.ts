@@ -123,6 +123,7 @@ export interface ClaimsInput {
   userId: number;
   sessionId?: string;
   targetPolicyId?: string;     // Précisé lors d'une clarification (quel véhicule/contrat ?)
+  originalMessage?: string;    // Message brut de l'utilisateur (pour contexte véhicule/domicile)
 }
 
 export interface ClaimsStep {
@@ -141,6 +142,14 @@ export interface ClaimsResult {
   sessionId?: string;
   cgUrls?: Array<{ policyName: string; url: string }>;  // Liens vers les CG
   needsClarification?: string;  // Question posée à l'utilisateur si ambiguïté
+  /** Garanties structurées à afficher AVANT les étapes (depuis coverage_facts) */
+  coverageDetails?: Array<{
+    policyName: string;
+    guarantee_label: string;
+    coverage_status: string;
+    coverage_amount: string | null;
+    franchise: string | null;
+  }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

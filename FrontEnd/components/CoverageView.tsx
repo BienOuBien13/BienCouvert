@@ -98,7 +98,11 @@ export default function CoverageView({ policies, onSelectPolicy, onAddPolicy }: 
     return acc;
   }, {});
 
-  const coveredTypes = TYPE_ORDER.filter(t => grouped[t]?.length);
+  // Types dans le portefeuille mais hors TYPE_ORDER (ex: "Professionnel", types custom)
+  const extraTypes = Object.keys(grouped).filter(t => !TYPE_ORDER.includes(t as PolicyType));
+  const allTypes = [...TYPE_ORDER, ...extraTypes];
+
+  const coveredTypes = allTypes.filter(t => grouped[t]?.length);
   const gapTypes = TYPE_ORDER.filter(t => !grouped[t]?.length);
 
   useEffect(() => {

@@ -14,9 +14,11 @@ interface Props {
   onUpdateProfile?: (profile: UserProfileData) => void;
   onClose?: () => void;
   onDeleteAccount?: () => void;
+  onNavigateToTerms?: () => void;
+  onNavigateToPrivacy?: () => void;
 }
 
-export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile, onClose, onDeleteAccount }) => {
+export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfile, onClose, onDeleteAccount, onNavigateToTerms, onNavigateToPrivacy }) => {
   const [firstName, setFirstName] = useState(user.firstName);
   const [lastName, setLastName] = useState(user.lastName);
   const [email, setEmail] = useState(user.email);
@@ -249,8 +251,12 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
           <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Informations légales</h3>
           <button
             onClick={() => {
-              const isNative = (window as any).Capacitor?.isNativePlatform?.();
-              window.open('https://biencouvert.fr/cgu', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+              if (onNavigateToTerms) {
+                onNavigateToTerms();
+              } else {
+                const isNative = (window as any).Capacitor?.isNativePlatform?.();
+                window.open('https://biencouvert.fr/cgu', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+              }
             }}
             className="w-full flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
           >
@@ -265,8 +271,12 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
           </button>
           <button
             onClick={() => {
-              const isNative = (window as any).Capacitor?.isNativePlatform?.();
-              window.open('https://biencouvert.fr/confidentialite', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+              if (onNavigateToPrivacy) {
+                onNavigateToPrivacy();
+              } else {
+                const isNative = (window as any).Capacitor?.isNativePlatform?.();
+                window.open('https://biencouvert.fr/confidentialite', isNative ? '_system' : '_blank', 'noopener,noreferrer');
+              }
             }}
             className="w-full flex items-center gap-3 px-5 py-4 bg-slate-50 rounded-2xl hover:bg-slate-100 active:scale-[0.98] transition-all group"
           >

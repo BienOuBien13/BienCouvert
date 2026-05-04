@@ -97,12 +97,24 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
     response += '⚠️ Aucun contrat identifié pour ce type de sinistre. Vérifiez votre portefeuille.\n\n';
   }
 
-  // ── Garanties AVANT la procédure ─────────────────────────────────────────
-  // On n'affiche cette section que si les étapes n'embarquent pas déjà les
-  // garanties (cas buildStepsFromFacts qui injecte "✅ Garanties applicables" dans step 2)
-  const stepsAlreadyEmbedFacts = claims.steps.some(
-    s => s.description.includes('✅ Garanties applicables'),
-  );
+  // ── Garanties AVANT la procédure (fast path depuis coverage_facts) ────────
+  if (claims.coverageDetails && claims.coverageDetails.length > 0) {
+    const statusEmoji: Record<string, string> = {
+      included: '✅', excluded: '❌', optional: '⚙️', not_applicable: '—',
+    };
+    response += `📋 Garanties applicables :\n`;
+    for (const d of claims.coverageDetails) {
+      const emoji = statusEmoji[d.coverage_status] ?? '❓';
+      let line = `${emoji} ${d.guarantee_label}`;
+      if (d.coverage_amount) line += ` — Plafond : ${d.coverage_amount}`;
+      if (d.franchise)       line += ` — Franchise : ${d.franchise}`;
+      response += `${line}\n`;
+    }
+    response += '\n';
+  }
+
+  // ── Garanties depuis coverageFacts (fallback LLM path) ───────────────────
+  const stepsAlreadyEmbedFacts = claims.coverageDetails != null;
 
   if (!stepsAlreadyEmbedFacts && coverageFacts.length > 0) {
     const sTypeNorm = claims.sinisterType
@@ -118,16 +130,12 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
       return sKeywords.some(kw => label.includes(kw) || key.includes(kw));
     });
 
-    // N'afficher le fallback générique que si on a des faits pertinents — pas de bruit
     const factsToShow = relevant.slice(0, 6);
 
     if (factsToShow.length > 0) {
       response += `📋 Garanties applicables :\n`;
       const statusEmoji: Record<string, string> = {
-        included:       '✅',
-        excluded:       '❌',
-        optional:       '⚙️',
-        not_applicable: '—',
+        included: '✅', excluded: '❌', optional: '⚙️', not_applicable: '—',
       };
       factsToShow.forEach((f: any) => {
         const emoji = statusEmoji[f.coverage_status] ?? '❓';
@@ -367,7 +375,7 @@ export class OrchestratorAgent {
         logAgent(claimsAgent.name);
         const sinisterType = intent.subtype || message;
         const [claimsResult, coverageFacts] = await Promise.all([
-          claimsAgent.guide({ sinisterType, policies, userId }),
+          claimsAgent.guide({ sinisterType, policies, userId, originalMessage: message }),
           resolveCoverageFacts(storage, policies, 'Orchestrator/sinistre').catch(() => []),
         ]);
         if (coverageFacts.length > 0) {
