@@ -8,6 +8,8 @@ import { fetchCsrfToken } from './authService';
 import type { CoverageData } from '../components/CoverageDetailPage';
 import { API_URL } from './apiUrl';
 
+const TOKEN_KEY = 'assurclair_token';
+
 /**
  * Effectue une requête vers le backend
  */
@@ -22,9 +24,12 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
     const csrfToken = await fetchCsrfToken();
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
   }
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const response = await fetch(`${API_URL}/api${endpoint}`, {
     method,
     headers,
+    credentials: 'include',
     ...options,
   });
 
@@ -121,6 +126,7 @@ export const sendMessageToAssistantStream = async (
   try {
     // Récupérer le token CSRF
     const csrfToken = await fetchCsrfToken();
+    const token = localStorage.getItem(TOKEN_KEY);
     
     const headers: any = {
       'Content-Type': 'application/json',
@@ -128,6 +134,9 @@ export const sendMessageToAssistantStream = async (
     
     if (csrfToken) {
       headers['X-CSRF-Token'] = csrfToken;
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
     
     const response = await fetch(`${API_URL}/api/ai/chat/stream`, {

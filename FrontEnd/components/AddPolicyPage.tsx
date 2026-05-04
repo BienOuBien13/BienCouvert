@@ -261,6 +261,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     setError('');
 
     try {
+      const token = localStorage.getItem('assurclair_token');
       const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
       const { csrfToken } = await csrfRes.json();
       
@@ -277,7 +278,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
 
       const response = await fetch(`${API_URL}/api/cg/user/upload`, {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken },
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: formData,
         credentials: 'include'
       });
@@ -307,7 +311,10 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           }
 
           try {
-            const statusRes = await fetch(`${API_URL}/api/cg/user/status/${cgId}`, { credentials: 'include' });
+            const statusRes = await fetch(`${API_URL}/api/cg/user/status/${cgId}`, {
+              credentials: 'include',
+              headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
 
             if (statusRes.status === 429) {
               // Rate limit — attendre plus longtemps
@@ -340,7 +347,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
               if (shareConsent && docType === 'CG') {
                 fetch(`${API_URL}/api/cg/user/promote-to-central/${cgId}`, {
                   method: 'POST',
-                  credentials: 'include'
+                  credentials: 'include',
+                  headers: token ? { Authorization: `Bearer ${token}` } : {}
                 }).catch(e => console.warn('[promote-to-central] non-bloquant:', e));
               }
               resolve();
@@ -381,6 +389,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
     setError('');
 
     try {
+      const token = localStorage.getItem('assurclair_token');
       const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
       const { csrfToken } = await csrfRes.json();
 
@@ -399,7 +408,8 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
+            'X-CSRF-Token': csrfToken,
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
           },
           body: JSON.stringify({
             userId: userId,

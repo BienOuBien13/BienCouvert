@@ -23,6 +23,8 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
 
       {/* ── Navbar ── same padding conventions as app Header */}
       <header className="fixed top-0 inset-x-0 bg-white/90 backdrop-blur-md z-50 border-b border-slate-100">
+        {/* Spacer safe-area pour les téléphones avec encoche/barre de statut */}
+        <div style={{height: "env(safe-area-inset-top, 0px)"}} />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <img src="/logo_biencouvert.png" alt="BienCouvert" className="h-10 w-auto" />
           <button
@@ -35,7 +37,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
       </header>
 
       {/* ── Hero ── */}
-      <section className="pt-24 pb-16 px-4 sm:px-6 lg:px-8">
+      <section className="pb-16 px-4 sm:px-6 lg:px-8" style={{paddingTop: "calc(4rem + env(safe-area-inset-top, 0px) + 2rem)"}}>  
         <div className="max-w-3xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold uppercase tracking-widest mb-6">
             <Sparkles className="w-3 h-3" />
@@ -105,21 +107,21 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
                 step: '1',
                 icon: <BookOpen className="w-6 h-6" />,
                 title: 'Ajoutez vos contrats',
-                desc: 'Sélectionnez vos assurances depuis notre catalogue de + 500 CG, ou importez vos conditions particulières en PDF.',
+                desc: 'Sélectionnez vos assurances depuis notre catalogue de + 500 Conditions Générales, ou importez vos conditions particulières.',
                 color: 'bg-blue-50 text-blue-600',
               },
               {
                 step: '2',
                 icon: <MessageSquare className="w-6 h-6" />,
                 title: 'Posez vos questions',
-                desc: "Demandez en langage naturel : « Suis-je couvert si je renverse mon téléphone ? » et obtenez une réponse immédiate.",
+                desc: "Demandez simplement : « J'ai perdu mes clés de maison, suis-je couvert ? » et obtenez une réponse précise, issue de l'analyse automatique de vos contrats.",
                 color: 'bg-violet-50 text-violet-600',
               },
               {
                 step: '3',
                 icon: <TrendingDown className="w-6 h-6" />,
                 title: 'Optimisez votre budget',
-                desc: "Identifiez les garanties en double, les lacunes et économisez sur vos primes grâce à des recommandations personnalisées.",
+                desc: "Voyez en coup d'oeil les garanties superflues, les lacunes et économisez sur vos primes grâce à des recommandations personnalisées.",
                 color: 'bg-emerald-50 text-emerald-600',
               },
             ].map((item, i) => (
@@ -136,41 +138,6 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* ── Features ── */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-slate-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Ce que vous pouvez faire</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            <FeatureCard
-              icon={<Search className="w-6 h-6" />}
-              color="text-blue-600 bg-blue-50"
-              title="Catalogue complet"
-              description="Accédez à + 500 conditions générales déjà indexées et enrichissez-les avec vos propres documents."
-            />
-            <FeatureCard
-              icon={<MessageSquare className="w-6 h-6" />}
-              color="text-violet-600 bg-violet-50"
-              title="Assistant IA"
-              description="Posez n'importe quelle question sur vos garanties et obtenez une réponse précise, issue de vos contrats."
-            />
-            <FeatureCard
-              icon={<Zap className="w-6 h-6" />}
-              color="text-amber-600 bg-amber-50"
-              title="Détection des doublons"
-              description="Voyez en un coup d'œil les garanties superflues et celles qui manquent à votre protection."
-            />
-            <FeatureCard
-              icon={<BookOpen className="w-6 h-6" />}
-              color="text-indigo-600 bg-indigo-50"
-              title="Garanties en détail"
-              description="Consultez le détail complet de chaque garantie de vos contrats directement depuis l'app."
-            />
-          </div>
-        </div>
-      </section>
-
       {/* ── Trust signals ── */}
       <section className="py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl mx-auto">
@@ -179,7 +146,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
               'Aucune donnée personnelle vendue ni partagée',
               'Vos contrats restent strictement privés',
               'Accès 100 % gratuit, sans abonnement caché',
-              "Outil d'aide à la décision – complété par des experts agréés",
+              "Outil d'aide à la décision, pas un conseil juridique : consultez un courtier pour toute décision importante",
             ].map(item => (
               <li key={item} className="flex items-start gap-3 text-sm text-slate-600">
                 <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
@@ -194,7 +161,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
       <section className="py-16 px-4 sm:px-6 lg:px-8 bg-blue-600">
         <div className="max-w-xl mx-auto text-center">
           <h2 className="text-2xl sm:text-3xl font-black text-white mb-4">Prêt à y voir plus clair ?</h2>
-          <p className="text-blue-100 mb-8 text-sm sm:text-base">Gratuit, sans inscription longue, résultats en 2 minutes.</p>
+          <p className="text-blue-100 mb-8 text-sm sm:text-base">Gratuit, résultats en 2 minutes.</p>
           <button
             onClick={onStart}
             className="inline-flex items-center gap-2 px-8 py-4 bg-white text-blue-600 rounded-2xl font-bold text-base hover:bg-blue-50 transition-all shadow-xl active:scale-95 group"
@@ -206,7 +173,7 @@ export const LandingPage: React.FC<Props> = ({ onStart }) => {
       </section>
 
       {/* ── Footer ── */}
-      <footer className="py-6 px-4 sm:px-6 lg:px-8 border-t border-slate-100 bg-white">
+      <footer className="pt-6 px-4 sm:px-6 lg:px-8 border-t border-slate-100 bg-white" style={{paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))"}}>  
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-slate-300" />
