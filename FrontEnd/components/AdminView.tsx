@@ -3,9 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Database, Plus, Trash2, Globe, FileText, CheckCircle, Search, 
   ExternalLink, AlertCircle, RefreshCw, Filter, ShieldCheck, ArrowUpRight, 
-  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2, FlaskConical, Settings
+  Cpu, Sparkles, Wand2, Loader2, ListChecks, Pencil, X, Tag, BarChart2, ChevronDown, Save, Users, Share2, Settings
 } from 'lucide-react';
-import ControlCheckPage from './ControlCheckPage';
 import CataloguePanel from './CataloguePanel';
 import IngestionMonitorPanel from './IngestionMonitorPanel';
 import TokenStatsPanel from './TokenStatsPanel';
@@ -115,7 +114,7 @@ export const AdminView: React.FC = () => {
   const [factsIsUser, setFactsIsUser] = useState(false);
 
   // --- État de l'onglet User CG ---
-  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'controlCheck' | 'catalogue'>('central');
+  const [activeTab, setActiveTab] = useState<'central' | 'userCg' | 'catalogue'>('central');
   const [userCgList, setUserCgList] = useState<UserCgEntry[]>([]);
   const [userCgLoading, setUserCgLoading] = useState(false);
   const [userCgSearchTerm, setUserCgSearchTerm] = useState('');
@@ -524,16 +523,7 @@ export const AdminView: React.FC = () => {
         >
           <Users className="w-3.5 h-3.5" /> CG Utilisateurs
         </button>
-        <button
-          onClick={() => setActiveTab('controlCheck')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-            activeTab === 'controlCheck'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <FlaskConical className="w-3.5 h-3.5" /> Non-régression
-        </button>
+
         <button
           onClick={() => setActiveTab('catalogue')}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
@@ -1354,13 +1344,6 @@ export const AdminView: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* =================================================================
-          ONGLET : Non-régression
-      =================================================================== */}
-      {activeTab === 'controlCheck' && (
-        <ControlCheckPage />
       )}
 
       {activeTab === 'catalogue' && (

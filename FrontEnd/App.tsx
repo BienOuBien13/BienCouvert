@@ -59,6 +59,14 @@ function App() {
     const currentUser = authService.getCurrentUser();
     if (currentUser) handleLogin(currentUser);
 
+    // Détection des routes CGU / confidentialité (accès direct via URL)
+    const pathname = window.location.pathname;
+    if (pathname === '/cgu') {
+      setShowTerms(true);
+    } else if (pathname === '/confidentialite') {
+      setShowPrivacy(true);
+    }
+
     // Détection des paramètres URL spéciaux
     const params = new URLSearchParams(window.location.search);
     const resetToken = params.get('reset');

@@ -97,17 +97,7 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
     response += '⚠️ Aucun contrat identifié pour ce type de sinistre. Vérifiez votre portefeuille.\n\n';
   }
 
-  if (claims.steps.length > 0) {
-    response += `Procédure à suivre :\n\n`;
-    claims.steps.forEach((s) => {
-      response += `**Étape ${s.step} — ${s.title}**\n${s.description}\n`;
-      if (s.deadline) response += `⏱ Délai : ${s.deadline}\n`;
-      if (s.contact) response += `📞 Contact : ${s.contact}\n`;
-      response += '\n';
-    });
-  }
-
-  // ── Détails de garantie depuis coverage_facts ────────────────────────────
+  // ── Garanties AVANT la procédure ─────────────────────────────────────────
   // On n'affiche cette section que si les étapes n'embarquent pas déjà les
   // garanties (cas buildStepsFromFacts qui injecte "✅ Garanties applicables" dans step 2)
   const stepsAlreadyEmbedFacts = claims.steps.some(
@@ -115,14 +105,12 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
   );
 
   if (!stepsAlreadyEmbedFacts && coverageFacts.length > 0) {
-    // Filtrer les faits liés au type de sinistre (mots-clés du sinistre dans guarantee_label/key)
     const sTypeNorm = claims.sinisterType
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '');
 
-    // Mots-clés liés au sinistre for matching
-    const sKeywords = sTypeNorm.split(/\s+/).filter(w => w.length > 3);
+    const sKeywords = sTypeNorm.split(/[\s_]+/).filter(w => w.length > 3);
 
     const relevant = coverageFacts.filter((f: any) => {
       const label = (f.guarantee_label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -130,13 +118,11 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
       return sKeywords.some(kw => label.includes(kw) || key.includes(kw));
     });
 
-    // Si aucun fait spécifique, on prend les 5 premiers faits du contrat concerné
-    const factsToShow = relevant.length > 0
-      ? relevant.slice(0, 8)
-      : coverageFacts.slice(0, 5);
+    // N'afficher le fallback générique que si on a des faits pertinents — pas de bruit
+    const factsToShow = relevant.slice(0, 6);
 
     if (factsToShow.length > 0) {
-      response += `\n📋 Détails de garantie :\n`;
+      response += `📋 Garanties applicables :\n`;
       const statusEmoji: Record<string, string> = {
         included:       '✅',
         excluded:       '❌',
@@ -145,15 +131,24 @@ function formatClaimsResponse(claims: ClaimsResult, coverageFacts: any[] = []): 
       };
       factsToShow.forEach((f: any) => {
         const emoji = statusEmoji[f.coverage_status] ?? '❓';
-        let line = `${emoji} **${f.guarantee_label}**`;
+        let line = `${emoji} ${f.guarantee_label}`;
         if (f.formula_label) line += ` _(${f.formula_label})_`;
         if (f.coverage_amount) line += ` — Plafond : ${f.coverage_amount}`;
         if (f.franchise)       line += ` — Franchise : ${f.franchise}`;
-        if (f.coverage_notes)  line += `\n   ${f.coverage_notes}`;
         response += `${line}\n`;
       });
       response += '\n';
     }
+  }
+
+  if (claims.steps.length > 0) {
+    response += `Procédure à suivre :\n\n`;
+    claims.steps.forEach((s) => {
+      response += `**Étape ${s.step} — ${s.title}**\n${s.description}\n`;
+      if (s.deadline) response += `⏱ Délai : ${s.deadline}\n`;
+      if (s.contact) response += `📞 Contact : ${s.contact}\n`;
+      response += '\n';
+    });
   }
 
   // ── Liens vers les conditions générales ───────────────────────────────────

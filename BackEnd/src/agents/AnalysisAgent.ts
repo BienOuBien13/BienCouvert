@@ -55,9 +55,15 @@ function buildFactsContext(facts: CoverageFact[]): string {
 function buildPolicySummary(policies: Policy[]): string {
   return policies
     .map(
-      (p) =>
-        `- "${p.name}" chez ${p.provider} — formule: ${p.coverageDetail || 'non précisée'}` +
-        (p.summary ? ` — résumé: ${p.summary.slice(0, 200)}` : ''),
+      (p) => {
+        let line = `- "${p.name}" chez ${p.provider} — formule: ${p.coverageDetail || 'non précisée'}`;
+        const opts = p.options?.filter(Boolean);
+        if (opts && opts.length > 0) {
+          line += ` — options souscrites: ${opts.join(', ')}`;
+        }
+        if (p.summary) line += ` — résumé: ${p.summary.slice(0, 200)}`;
+        return line;
+      },
     )
     .join('\n');
 }

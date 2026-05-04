@@ -242,6 +242,8 @@ export class ClaimsAgent {
         keywords: ['vol', 'effraction', 'cambriolage', 'vandalisme'] },
       { triggers: ['telephone', 'smartphone', 'mobile', 'portable', 'ecran'],
         keywords: ['mobile', 'telephone', 'appareil', 'ecran', 'casse'] },
+      { triggers: ['cle perdue', 'cles perdues', 'perte cle', 'serrure', 'serrurier', 'cle'],
+        keywords: ['cle', 'serrure', 'serrurier', 'effraction', 'remplacement'] },
     ];
 
     const match = KEYWORD_MAP.find(e => e.triggers.some(t => sin.includes(normalize(t))));
@@ -383,7 +385,12 @@ export class ClaimsAgent {
     if (ai) {
       const hasCoverage = coveringPolicies.length > 0;
       const policyContext = hasCoverage
-        ? coveringPolicies.map((p) => `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || '?'})`).join('\n')
+        ? coveringPolicies.map((p) => {
+            let line = `- ${p.name} chez ${p.provider} (formule: ${p.coverageDetail || '?'})`;
+            const opts = p.options?.filter(Boolean);
+            if (opts && opts.length > 0) line += ` — options: ${opts.join(', ')}`;
+            return line;
+          }).join('\n')
         : '';
 
       const prompt = hasCoverage
@@ -392,16 +399,16 @@ export class ClaimsAgent {
 CONTRATS COUVRANT CE SINISTRE :
 ${policyContext}
 ${guaranteeFacts}
-Génère une procédure de déclaration étape par étape, précise et TRÈS personnalisée.
-Si des détails de garanties sont fournis ci-dessus (franchise, plafond, statut), mentionne-les EXPLICITEMENT.
-Inclus les délais légaux français (code des assurances).
+Génère une procédure de déclaration en 3 étapes MAXIMUM, courtes et pratiques.
+Chaque étape = 1-2 phrases maximum. Pas d'introduction, pas de rappel des garanties (elles sont déjà affichées).
+Inclus les délais légaux français (code des assurances) dans le champ deadline.
 Urgence = high si risque pour personnes, medium si dommages matériels importants, low sinon.
 
 Réponds UNIQUEMENT en JSON :
 {
   "urgencyLevel": "low" | "medium" | "high",
   "steps": [
-    { "step": 1, "title": "Titre", "description": "Description détaillée", "deadline": "Délai ou null", "contact": "Numéro ou null" }
+    { "step": 1, "title": "Titre court", "description": "1-2 phrases max", "deadline": "Délai ou null", "contact": "Contact ou null" }
   ]
 }`
         : `Tu es un expert sinistres. Sinistre signalé : "${sinisterType}". Aucun contrat ne couvre ce sinistre.
