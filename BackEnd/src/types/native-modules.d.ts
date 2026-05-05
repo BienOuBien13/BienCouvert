@@ -12,7 +12,7 @@ declare module 'pdf-lib' {
 
 declare module 'pdfjs-dist/legacy/build/pdf' {
   export const GlobalWorkerOptions: { workerSrc: any };
-  export function getDocument(params: { data: Uint8Array }): {
+  export function getDocument(params: { data: Uint8Array; standardFontDataUrl?: string; cMapUrl?: string; cMapPacked?: boolean }): {
     promise: Promise<{
       numPages: number;
       getPage(pageNum: number): Promise<any>;

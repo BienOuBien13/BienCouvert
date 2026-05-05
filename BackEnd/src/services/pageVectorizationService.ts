@@ -3,6 +3,7 @@
  * Remplace la vectorisation monolithique par une approche granulaire
  */
 
+import path from 'path';
 import { Pool } from 'pg';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
@@ -15,6 +16,10 @@ import { runFormulaPostProcessing, runFormulaPostProcessingForUserCg } from './f
 
 // Configuration pdf.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = require('pdfjs-dist/legacy/build/pdf.worker.entry');
+
+// URL vers les polices standard bundlées avec pdfjs-dist (résout les warnings FoxitSerif / LiberationSans / Helvetica)
+const _pdfjsRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
+const STANDARD_FONT_DATA_URL = 'file://' + _pdfjsRoot.replace(/\\/g, '/') + '/standard_fonts/';
 
 // ─────────────────────────────────────────────────────────────
 // Mécanisme de STOP : permet d'annuler une vectorisation en cours
@@ -53,7 +58,7 @@ interface PageData {
  */
 async function extractPage(pdfData: Uint8Array, pageNum: number): Promise<PageData | null> {
   try {
-    const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+    const loadingTask = pdfjsLib.getDocument({ data: pdfData, standardFontDataUrl: STANDARD_FONT_DATA_URL });
     const pdfDoc = await loadingTask.promise;
     
     if (pageNum > pdfDoc.numPages) {
@@ -297,7 +302,7 @@ export async function vectorizeCgByPages(
     const pdfUint8Array = new Uint8Array(pdfBuffer);
     
     // Compter les pages
-    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array });
+    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array, standardFontDataUrl: STANDARD_FONT_DATA_URL });
     const pdfDoc = await loadingTask.promise;
     const numPages = pdfDoc.numPages;
     
@@ -639,7 +644,7 @@ export async function vectorizeUserCgByPages(
     const pdfUint8Array = new Uint8Array(pdfBuffer);
 
     // Compter les pages
-    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array });
+    const loadingTask = pdfjsLib.getDocument({ data: pdfUint8Array, standardFontDataUrl: STANDARD_FONT_DATA_URL });
     const pdfDoc = await loadingTask.promise;
     const numPages = pdfDoc.numPages;
 
