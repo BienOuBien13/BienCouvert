@@ -508,6 +508,7 @@ router.get('/me', authMiddleware, async (req: any, res) => {
         lastName: u.lastName,
         profile: u.profile || {},
         isAdmin: u.isAdmin || false,
+        isPartner: u.isPartner || false,
         geminiAiConsent: u.geminiAiConsent || false
       }
     });
@@ -598,7 +599,7 @@ router.put('/me', authMiddleware, async (req: any, res) => {
     
     console.log('â Updated user retrieved:', { id: updatedUser.id, firstName: updatedUser.firstName, lastName: updatedUser.lastName, email: updatedUser.email });
     
-    // Retourne les donnÃ©es mises Ã  jour (sans le mot de passe) avec la structure attendue
+    // Retourne les données mises à jour (sans le mot de passe) avec la structure attendue
     res.json({ 
       user: {
         id: updatedUser.id, 
@@ -607,6 +608,7 @@ router.put('/me', authMiddleware, async (req: any, res) => {
         lastName: updatedUser.lastName,
         profile: updatedUser.profile,
         isAdmin: updatedUser.isAdmin || false,
+        isPartner: updatedUser.isPartner || false,
         geminiAiConsent: updatedUser.geminiAiConsent || false
       }
     });

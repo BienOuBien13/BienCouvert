@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, Trash2, PlusCircle, ArrowLeft, Loader2, AlertTriangle,
-  CheckCircle, ChevronDown, ChevronUp, Upload, X, Shield
+  CheckCircle, ChevronDown, ChevronUp, Upload, X, Shield, Users
 } from 'lucide-react';
 import { fetchCsrfToken } from '../services/authService';
 import { API_URL } from '../services/apiUrl';
@@ -77,6 +77,13 @@ export const MyPersonalContractsPage: React.FC<Props> = ({ onBack, onPolicyAdded
   const [addSuccess, setAddSuccess] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
+  // Share/promote modal state
+  const [shareModal, setShareModal] = useState<UserCg | null>(null);
+  const [shareConsent, setShareConsent] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
   const loadContracts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -148,6 +155,31 @@ export const MyPersonalContractsPage: React.FC<Props> = ({ onBack, onPolicyAdded
     }
   };
 
+  const openShareModal = (cg: UserCg) => {
+    setShareModal(cg);
+    setShareConsent(false);
+    setShareSuccess(false);
+    setShareError(null);
+  };
+
+  const handlePromoteToCentral = async () => {
+    if (!shareModal || !shareConsent) return;
+    setShareLoading(true);
+    setShareError(null);
+    try {
+      await apiFetch(`/cg/user/promote-to-central/${shareModal.id}`, { method: 'POST' });
+      setShareSuccess(true);
+      setTimeout(() => {
+        setShareModal(null);
+        setShareSuccess(false);
+      }, 2500);
+    } catch (e: any) {
+      setShareError(e.message || 'Erreur lors du partage');
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-20 animate-fadeIn">
       {/* Header */}
@@ -157,7 +189,7 @@ export const MyPersonalContractsPage: React.FC<Props> = ({ onBack, onPolicyAdded
         </button>
         <div className="flex-1">
           <h2 className="text-2xl font-black text-slate-900 tracking-tight">Mes contrats perso</h2>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">Documents que vous avez uploadés</p>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">Documents que vous avez chargés</p>
         </div>
         <button
           onClick={loadContracts}
@@ -282,6 +314,14 @@ export const MyPersonalContractsPage: React.FC<Props> = ({ onBack, onPolicyAdded
                     Ajouter au portefeuille
                   </button>
                   <button
+                    onClick={() => openShareModal(cg)}
+                    disabled={cg.vectorization_status !== 'done'}
+                    className="p-3 bg-white border border-indigo-100 text-indigo-500 rounded-2xl hover:bg-indigo-50 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Partager avec la communauté"
+                  >
+                    <Users className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => handleDelete(cg.id)}
                     disabled={deletingId === cg.id}
                     className="p-3 bg-white border border-red-100 text-red-500 rounded-2xl hover:bg-red-50 active:scale-95 transition-all"
@@ -374,6 +414,86 @@ export const MyPersonalContractsPage: React.FC<Props> = ({ onBack, onPolicyAdded
                       {addLoading
                         ? <><Loader2 className="w-4 h-4 animate-spin" /> Ajout…</>
                         : <><Shield className="w-4 h-4" /> Ajouter</>
+                      }
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share / promote-to-central modal */}
+      {shareModal && (
+        <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-slideUp">
+            <div className="p-8 space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-black text-xl text-slate-900">Partager avec la communauté</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{shareModal.insurer_label} · {shareModal.insurance_type_label}</p>
+                </div>
+                <button onClick={() => setShareModal(null)} className="p-2 text-slate-400 hover:text-slate-700 rounded-xl transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {shareSuccess ? (
+                <div className="flex flex-col items-center gap-3 py-6">
+                  <CheckCircle className="w-12 h-12 text-emerald-500" />
+                  <p className="font-black text-emerald-700 text-center">Document partagé avec la communauté !</p>
+                  <p className="text-xs text-slate-500 text-center">Il sera visible dans la base de référence après traitement.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                      <p className="text-sm font-black text-indigo-900">Ce document deviendra une référence publique</p>
+                    </div>
+                    <p className="text-xs text-indigo-700 leading-relaxed">
+                      Les conditions générales seront transférées dans la base de référence commune (tables <code className="bg-indigo-100 px-1 rounded">central_cg</code>, <code className="bg-indigo-100 px-1 rounded">central_cg_pages</code>, <code className="bg-indigo-100 px-1 rounded">coverage_facts</code>) et accessibles à tous les utilisateurs de BienCouvert.
+                    </p>
+                    <p className="text-xs text-slate-500 leading-relaxed mt-1">
+                      Aucune donnée personnelle ne sera partagée.
+                    </p>
+                  </div>
+
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={shareConsent}
+                      onChange={e => setShareConsent(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded accent-indigo-600 cursor-pointer flex-shrink-0"
+                    />
+                    <span className="text-xs text-slate-700 leading-relaxed group-hover:text-slate-900 transition-colors">
+                      En cochant cette case, j'autorise le partage de ce document en lecture seule avec les autres utilisateurs, afin d'enrichir la base de référence commune. Aucune donnée personnelle ne sera partagée.
+                    </span>
+                  </label>
+
+                  {shareError && (
+                    <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-2xl text-red-700 text-sm">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      {shareError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => setShareModal(null)}
+                      className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={handlePromoteToCentral}
+                      disabled={shareLoading || !shareConsent}
+                      className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 transition-all active:scale-[0.98]"
+                    >
+                      {shareLoading
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Partage…</>
+                        : <><Users className="w-4 h-4" /> Partager</>
                       }
                     </button>
                   </div>

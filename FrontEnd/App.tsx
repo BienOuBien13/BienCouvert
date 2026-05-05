@@ -461,7 +461,7 @@ function App() {
       case 'experts':
         return null; // Réseau d'experts en construction — masqué
       case 'profile':
-        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={setUser} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} onNavigateToTerms={() => setShowTerms(true)} onNavigateToPrivacy={() => setShowPrivacy(true)} /></div>;
+        return <div className="animate-fadeIn"><UserProfile user={user} onUpdateUser={(u) => setUser(prev => prev ? { ...prev, ...u } : u)} onUpdateProfile={handleUpdateProfile} onClose={() => setActiveView('home')} onDeleteAccount={handleDeleteAccount} onNavigateToTerms={() => setShowTerms(true)} onNavigateToPrivacy={() => setShowPrivacy(true)} /></div>;
       case 'admin':
         return <AdminView />;
       case 'monitoring':

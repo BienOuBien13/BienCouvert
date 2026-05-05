@@ -176,9 +176,12 @@ export const authService = {
       body: JSON.stringify(data),
     });
     
-    localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+    // Merge with stored user to preserve fields not returned by the server (e.g. isPartner)
+    const stored = (() => { try { return JSON.parse(localStorage.getItem(USER_KEY) || '{}'); } catch { return {}; } })();
+    const merged = { ...stored, ...response.user };
+    localStorage.setItem(USER_KEY, JSON.stringify(merged));
     
-    return response.user;
+    return merged as User;
   },
 
   /**

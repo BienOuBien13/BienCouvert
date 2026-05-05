@@ -47,8 +47,6 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
     setErrorMessage('');
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
       const updatedUser = await authService.updateUser(user.id, {
         firstName,
         lastName,
