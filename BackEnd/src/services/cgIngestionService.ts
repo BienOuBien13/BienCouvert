@@ -250,8 +250,15 @@ async function agentHunter(
     const parsedUrl = new URL(url);
     const lib = parsedUrl.protocol === 'https:' ? https : http;
     const req = lib.get(
-      url,
-      { timeout: 15000, headers: { 'User-Agent': 'AssurClair-Ingestion-Bot/1.0 (contact@assurclair.fr)' } },
+      parsedUrl.href,
+      {
+        timeout: 15000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,*/*',
+          'Accept-Language': 'fr-FR,fr;q=0.9',
+        }
+      },
       (res) => {
         if (res.statusCode === 301 || res.statusCode === 302) {
           const location = res.headers.location;
@@ -484,9 +491,17 @@ async function agentFetcher(url: string): Promise<{
   return new Promise((resolve) => {
     const parsedUrl = new URL(url);
     const lib = parsedUrl.protocol === 'https:' ? https : http;
+    // parsedUrl.href is percent-encoded (handles accented chars like "Générales" → "G%C3%A9n%C3%A9rales")
     const req = lib.get(
-      url,
-      { timeout: 30000, headers: { 'User-Agent': 'AssurClair-Ingestion-Bot/1.0 (contact@assurclair.fr)' } },
+      parsedUrl.href,
+      {
+        timeout: 30000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/pdf,*/*',
+          'Accept-Language': 'fr-FR,fr;q=0.9',
+        }
+      },
       async (res) => {
         if (res.statusCode === 301 || res.statusCode === 302) {
           const location = res.headers.location;
