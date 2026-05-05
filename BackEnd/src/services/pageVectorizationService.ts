@@ -71,7 +71,8 @@ async function extractPage(pdfData: Uint8Array, pageNum: number): Promise<PageDa
     const textContent = await page.getTextContent();
     const contentText = textContent.items
       .map((item: any) => item.str)
-      .join(' ');
+      .join(' ')
+      .replace(/\x00/g, '');  // PostgreSQL refuse les null bytes dans TEXT
     
     // Layout text (préserve position relative)
     const layoutText = textContent.items
@@ -82,7 +83,8 @@ async function extractPage(pdfData: Uint8Array, pageNum: number): Promise<PageDa
       })
       .sort((a: any, b: any) => b.y - a.y) // Trier de haut en bas
       .map((item: any) => item.text)
-      .join('\n');
+      .join('\n')
+      .replace(/\x00/g, '');  // PostgreSQL refuse les null bytes dans TEXT
     
     // Render page en image PNG
     const viewport = page.getViewport({ scale: 2.0 }); // 2x pour meilleure qualité
