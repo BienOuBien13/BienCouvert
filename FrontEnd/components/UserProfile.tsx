@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserProfileData } from '../types';
 import { authService } from '../services/authService';
 // Import Loader2 which was missing and causing a compilation error
@@ -33,6 +33,13 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
   
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Sync form fields if the user prop is updated externally (e.g. after successful save)
+  useEffect(() => {
+    setFirstName(user.firstName || '');
+    setLastName(user.lastName || '');
+    setEmail(user.email);
+  }, [user.firstName, user.lastName, user.email]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,26 +170,38 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
             </div>
 
           {/* Action Footer */}
-          <div className="pt-10 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-3 text-slate-400">
-               <Info className="w-5 h-5" />
-               <p className="text-[10px] font-bold uppercase tracking-widest">Dernière mise à jour : Aujourd'hui</p>
+          <div className="pt-10 border-t border-slate-100 space-y-4">
+            {status === 'error' && (
+              <div className="p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100 flex items-center gap-3 animate-fadeIn">
+                <ShieldAlert className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-bold">{errorMessage}</p>
+              </div>
+            )}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+              <div className="flex items-center gap-3 text-slate-400">
+                 <Info className="w-5 h-5" />
+                 <p className="text-[10px] font-bold uppercase tracking-widest">Dernière mise à jour : Aujourd'hui</p>
+              </div>
+              
+              <button
+                type="submit"
+                disabled={status === 'saving'}
+                className={`w-full sm:w-auto flex items-center justify-center gap-3 px-10 py-5 rounded-2xl font-black text-sm transition-all shadow-xl active:scale-95 disabled:opacity-70 ${
+                  status === 'error'
+                    ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/20'
+                    : 'bg-primary-600 hover:bg-primary-700 text-white shadow-primary-900/20'
+                }`}
+              >
+                {status === 'saving' ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : status === 'success' ? (
+                  <Check className="w-5 h-5" />
+                ) : (
+                  <Save className="w-5 h-5" />
+                )}
+                {status === 'saving' ? 'Enregistrement...' : status === 'success' ? 'Profil Sauvegardé' : 'Enregistrer les modifications'}
+              </button>
             </div>
-            
-            <button
-              type="submit"
-              disabled={status === 'saving'}
-              className="w-full sm:w-auto flex items-center justify-center gap-3 px-10 py-5 bg-primary-600 text-white rounded-2xl font-black text-sm hover:bg-primary-700 transition-all shadow-xl shadow-primary-900/20 active:scale-95 disabled:opacity-70"
-            >
-              {status === 'saving' ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : status === 'success' ? (
-                <Check className="w-5 h-5" />
-              ) : (
-                <Save className="w-5 h-5" />
-              )}
-              {status === 'saving' ? 'Enregistrement...' : status === 'success' ? 'Profil Sauvegardé' : 'Enregistrer les modifications'}
-            </button>
           </div>
         </form>
 
@@ -292,12 +311,6 @@ export const UserProfile: React.FC<Props> = ({ user, onUpdateUser, onUpdateProfi
         </div>
       </div>
 
-      {status === 'error' && (
-        <div className="p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100 flex items-center gap-3 animate-fadeIn">
-          <ShieldAlert className="w-5 h-5" />
-          <p className="text-sm font-bold">{errorMessage}</p>
-        </div>
-      )}
     </div>
   );
 };

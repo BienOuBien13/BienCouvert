@@ -102,8 +102,6 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
   const [coverageData, setCoverageData] = useState<CoverageData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'details' | 'alternatives'>('overview');
 
   const policyColor = getPolicyColor(policy.type as PolicyType);
   const PolicyIcon = getPolicyIcon(policy.type as PolicyType);
@@ -160,6 +158,7 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
     <div className="fixed inset-0 z-[80] flex flex-col bg-slate-50 overflow-y-auto animate-slideUp">
       {/* ── Header fixe ─────────────────────────────────────────────── */}
       <div className={`bg-gradient-to-r ${policyColor.gradient} text-white sticky top-0 z-10 shadow-xl`}>
+        <div style={{height: 'env(safe-area-inset-top, 0px)'}} />
         <div className="max-w-2xl mx-auto px-4 py-5">
           <div className="flex items-center gap-3 mb-4">
             <button
@@ -206,24 +205,6 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
           </div>
         </div>
 
-        {/* Onglets */}
-        <div className="max-w-2xl mx-auto px-4 pb-1">
-          <div className="flex gap-1">
-            {(['overview', 'details', 'alternatives'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-t-2xl transition-all ${
-                  activeTab === tab
-                    ? 'bg-slate-50 text-slate-900'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {tab === 'overview' ? 'Synthèse' : tab === 'details' ? 'Garanties' : 'Formules'}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* ── Contenu ──────────────────────────────────────────────────── */}
@@ -261,9 +242,8 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
 
         {coverageData && !isLoading && (
           <>
-            {/* ── Onglet SYNTHÈSE ──────────────────────────────────── */}
-            {activeTab === 'overview' && (
-              <div className="space-y-5 animate-fadeIn">
+            {/* ── Synthèse ─────────────────────────────────────────── */}
+            <div className="space-y-5 animate-fadeIn">
                 {/* Score global */}
                 <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm space-y-6">
                   <div className="flex items-center justify-between">
@@ -375,196 +355,7 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
                   </div>
                 )}
               </div>
-            )}
-
-            {/* ── Onglet GARANTIES ─────────────────────────────────── */}
-            {activeTab === 'details' && (
-              <div className="space-y-4 animate-fadeIn">
-                {Object.entries(coveragesByCategory).map(([category, items]) => {
-                  const isExpanded = expandedCategory === category;
-                  const includedInCat = items.filter(i => i.included).length;
-                  return (
-                    <div
-                      key={category}
-                      className={`bg-white rounded-[2rem] border overflow-hidden shadow-sm transition-all ${
-                        isExpanded ? 'border-primary-200 shadow-lg' : 'border-slate-100'
-                      }`}
-                    >
-                      {/* En-tête de catégorie */}
-                      <button
-                        onClick={() => setExpandedCategory(isExpanded ? null : category)}
-                        className="w-full p-6 flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${isExpanded ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                            <Shield className="w-5 h-5" />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-black text-slate-900 text-sm">{category}</p>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                              {includedInCat}/{items.length} garanties couvertes
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {/* Mini barre de taux */}
-                          <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden hidden sm:block">
-                            <div
-                              className="h-full bg-emerald-500 rounded-full transition-all"
-                              style={{ width: `${Math.round((includedInCat / items.length) * 100)}%` }}
-                            />
-                          </div>
-                          {isExpanded
-                            ? <ChevronUp className="w-5 h-5 text-primary-400" />
-                            : <ChevronDown className="w-5 h-5 text-slate-300" />
-                          }
-                        </div>
-                      </button>
-
-                      {/* Garanties */}
-                      {isExpanded && (
-                        <div className="px-6 pb-6 space-y-3 animate-fadeIn border-t border-slate-50 pt-5">
-                          {items.map((item, idx) => (
-                            <div
-                              key={idx}
-                              className={`${IMPORTANCE_COLORS[item.importance]} bg-slate-50 rounded-2xl p-5 flex items-start gap-4`}
-                            >
-                              <div className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                                item.included ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-400'
-                              }`}>
-                                {item.included
-                                  ? <CheckCircle className="w-4 h-4" />
-                                  : <XCircle className="w-4 h-4" />
-                                }
-                              </div>
-                              <div className="flex-1 min-w-0 space-y-1">
-                                <div className="flex items-start justify-between gap-2">
-                                  <p className={`text-sm font-black ${item.included ? 'text-slate-900' : 'text-slate-400 line-through'}`}>
-                                    {item.guarantee}
-                                  </p>
-                                  <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg whitespace-nowrap flex-shrink-0 ${
-                                    item.importance === 'key'
-                                      ? 'bg-primary-100 text-primary-600'
-                                      : item.importance === 'standard'
-                                      ? 'bg-slate-200 text-slate-500'
-                                      : 'bg-slate-100 text-slate-400'
-                                  }`}>
-                                    {IMPORTANCE_LABELS[item.importance]}
-                                  </span>
-                                </div>
-                                {item.limit && (
-                                  <p className="text-[11px] text-slate-500 font-bold">Plafond : {item.limit}</p>
-                                )}
-                                {item.note && (
-                                  <p className="text-[11px] text-slate-400 italic">{item.note}</p>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {Object.keys(coveragesByCategory).length === 0 && (
-                  <div className="text-center py-12 text-slate-400">
-                    <Shield className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p className="font-bold text-sm">Aucune garantie détaillée disponible</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Onglet FORMULES ALTERNATIVES ─────────────────────── */}
-            {activeTab === 'alternatives' && (
-              <div className="space-y-5 animate-fadeIn">
-                <div className="bg-white rounded-[2.5rem] p-7 border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-primary-50 rounded-2xl flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-primary-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight">Formule actuelle</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{coverageData.formulaName}</p>
-                    </div>
-                  </div>
-                  {policy.annualPremium && (
-                    <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Prime annuelle actuelle</span>
-                        <span className="text-xl font-black text-slate-900">{policy.annualPremium} €</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {(coverageData.alternativeFormulas ?? []).length > 0 ? (
-                  <div className="space-y-4">
-                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Alternatives disponibles</p>
-                    {coverageData.alternativeFormulas!.map((alt, i) => (
-                      <div
-                        key={i}
-                        className={`bg-white rounded-[2.5rem] p-7 border shadow-sm space-y-4 ${
-                          alt.recommended ? 'border-primary-300 ring-4 ring-primary-50' : 'border-slate-100'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h4 className="font-black text-slate-900 text-base">{alt.name}</h4>
-                            {alt.recommended && (
-                              <span className="text-[9px] font-black uppercase tracking-widest px-3 py-1 bg-primary-600 text-white rounded-full mt-2 inline-block">
-                                ✦ Recommandé
-                              </span>
-                            )}
-                          </div>
-                          <span className={`text-sm font-black px-4 py-2 rounded-2xl border ${
-                            alt.priceVariation.startsWith('+')
-                              ? 'bg-red-50 border-red-100 text-red-600'
-                              : 'bg-emerald-50 border-emerald-100 text-emerald-600'
-                          }`}>
-                            {alt.priceVariation}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                          {alt.mainDifference}
-                        </p>
-                        {alt.recommended && (
-                          <div className="flex items-center gap-2 text-[10px] font-black text-primary-600">
-                            <ArrowRight className="w-4 h-4" />
-                            Demandez un devis lors de votre prochain rendez-vous
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-10 text-center space-y-3">
-                    <Info className="w-10 h-10 text-slate-300 mx-auto" />
-                    <p className="font-bold text-slate-500 text-sm">Aucune alternative identifiée pour cette formule.</p>
-                    <p className="text-xs text-slate-400">Ajoutez le document de conditions générales pour une analyse complète.</p>
-                  </div>
-                )}
-
-                {/* CTA courtier */}
-                <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-8 text-white space-y-4 shadow-2xl relative overflow-hidden">
-                  <div className="relative z-10 space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-primary-400">Un doute sur votre formule ?</p>
-                    <h4 className="text-xl font-black tracking-tight">Demandez un regard expert</h4>
-                    <p className="text-sm text-slate-400 font-medium leading-relaxed">
-                      Un courtier spécialisé peut comparer les offres du marché et négocier pour vous gratuitement.
-                    </p>
-                  </div>
-                  <button
-                    onClick={onClose}
-                    className="w-full py-4 bg-primary-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary-700 transition-all relative z-10 active:scale-95"
-                  >
-                    Contacter un expert
-                  </button>
-                  <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-primary-500/10 rounded-full blur-[60px]" />
-                </div>
-              </div>
-            )}
+            </div>
           </>
         )}
       </div>

@@ -158,7 +158,7 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
         // Ajouter l'option "Autre" en fin de liste
         const autreAlreadyPresent = insurers.some((i: Insurer) => i.code === 'AUTRE');
         if (!autreAlreadyPresent) {
-          insurers.push({ code: 'AUTRE', label: 'Autre', fullName: 'Autre assureur', color: '#6B7280', logoUrl: undefined });
+          insurers.push({ code: 'AUTRE', label: 'Autre', fullName: 'Autre assureur', color: '#D97706', logoUrl: undefined });
         }
       }
       setAvailableInsurers(insurers);
@@ -678,14 +678,14 @@ const AddPolicyPage: React.FC<AddPolicyPageProps> = ({ onCancel, onAdd }) => {
                 onClick={() => !isLoadingSubTypesStandard && handleSelectInsurer(insurer)}
                 disabled={isLoadingSubTypesStandard}
                 className={`p-4 rounded-xl border-2 hover:border-blue-500 hover:shadow-lg transition-all text-left bg-white disabled:opacity-60 disabled:cursor-wait ${
-                  insurer.code === 'AUTRE' ? 'border-dashed border-gray-300' : 'border-gray-200'
+                  insurer.code === 'AUTRE' ? 'border-dashed border-amber-400 bg-amber-50' : 'border-gray-200'
                 }`}
                 style={{ borderColor: selectedInsurer?.code === insurer.code ? insurer.color : undefined }}
               >
                 <div className="flex items-center gap-3">
                   <div 
                     className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden bg-white border border-gray-100 shadow-sm"
-                    style={{ backgroundColor: insurer.logoUrl ? 'white' : (insurer.code === 'AUTRE' ? '#F3F4F6' : insurer.color) }}
+                    style={{ backgroundColor: insurer.logoUrl ? 'white' : (insurer.code === 'AUTRE' ? '#FDE68A' : insurer.color) }}
                   >
                     {insurer.code === 'AUTRE' ? (
                       <span className="text-3xl">🏢</span>

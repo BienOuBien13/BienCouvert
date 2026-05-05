@@ -23,6 +23,7 @@ import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import IngestionJobBadge from './components/IngestionJobBadge';
 import CoverageView from './components/CoverageView';
+import MyPersonalContractsPage from './components/MyPersonalContractsPage';
 import { Policy, Message, User, AppView, UserProfileData, PolicyType } from './types';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
@@ -353,6 +354,22 @@ function App() {
                 </div>
               </>
             )}
+
+            {/* Footer informatif mobile */}
+            <div className="px-2 pt-4 pb-2 space-y-3">
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                <span className="text-amber-600 text-base leading-none mt-0.5">⚠️</span>
+                <p className="text-xs text-amber-800 leading-relaxed">
+                  <strong>Avertissement :</strong> Outil d'aide à la décision par IA. Informations non vérifiées par un professionnel. Consultez un courtier agréé pour toute décision importante.
+                </p>
+              </div>
+              <div className="flex flex-col items-center gap-1 text-center">
+                <p className="text-[10px] text-slate-400">© {new Date().getFullYear()} BienCouvert</p>
+                <a href="mailto:contact@biencouvert.fr" className="text-[10px] text-slate-400 hover:text-primary-600 transition-colors">
+                  contact@biencouvert.fr
+                </a>
+              </div>
+            </div>
           </div>
         );
       
@@ -360,10 +377,7 @@ function App() {
         return (
           <div className="space-y-6 animate-fadeIn">{/* Header avec navigation */}
             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-3xl font-black text-slate-900 mb-2">Mon Portefeuille</h2>
-                <p className="text-slate-600 font-medium">{policies.length} / 10 contrat(s)</p>
-              </div>
+              <p className="text-slate-600 font-medium">{policies.length} / 10 contrat(s)</p>
               {policies.length >= 10 ? (
                 <div className="flex items-center gap-2 px-6 py-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl">
                   <span className="text-xs font-black uppercase tracking-widest">Limite atteinte (10 max)</span>
@@ -378,6 +392,23 @@ function App() {
                 </button>
               )}
             </div>
+
+            {/* Mes contrats perso */}
+            <button
+              onClick={() => setActiveView('my-cg')}
+              className="w-full flex items-center justify-between px-5 py-4 bg-indigo-50 border border-indigo-100 rounded-2xl hover:bg-indigo-100 active:scale-[0.99] transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center">
+                  <Database className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="text-left">
+                  <p className="font-black text-sm text-indigo-900">Mes contrats perso</p>
+                  <p className="text-[10px] text-indigo-500 font-medium">Documents que j'ai uploadés</p>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-indigo-400 group-hover:translate-x-1 transition-transform" />
+            </button>
 
             <PolicyList 
               policies={policies} 
@@ -439,6 +470,8 @@ function App() {
         return <div className="animate-fadeIn"><PartnerDashboard /></div>;
       case 'sinistre':
         return <div className="animate-fadeIn"><ClaimAssistant user={user} policies={policies} /></div>;
+      case 'my-cg':
+        return <div className="px-4 pt-6 animate-fadeIn"><MyPersonalContractsPage onBack={() => setActiveView('policies')} onPolicyAdded={async () => { try { const p = await storageService.getPolicies(user.id); setPolicies(p); } catch {} }} /></div>;
       default: return null;
     }
   };

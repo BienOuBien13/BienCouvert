@@ -5,6 +5,7 @@ import {
   ExternalLink, Loader2, Wifi, WifiOff, X
 } from 'lucide-react';
 import { fetchCsrfToken } from '../services/authService';
+import { API_URL } from '../services/apiUrl';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ interface CatalogueJob {
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const API   = (import.meta as any).env?.VITE_API_URL ?? '';
+const API   = API_URL;
 const TOKEN = () => localStorage.getItem('assurclair_token') || '';
 
 const DOC_TYPES = ['CG', 'IPID', 'notice', 'tableau_garanties'];

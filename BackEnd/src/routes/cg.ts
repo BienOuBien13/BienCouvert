@@ -1210,4 +1210,63 @@ router.post('/user/promote-to-central/:userCgId', authMiddleware, async (req: an
   }
 });
 
+// -----------------------------------------------------------------------------
+// GET /api/cg/user/list
+// Liste les CG uploadées par l'utilisateur connecté (sans le PDF)
+// -----------------------------------------------------------------------------
+router.get('/user/list', authMiddleware, async (req: any, res: Response) => {
+  try {
+    const userEmail: string = req.user.email;
+    const result = await query(
+      `SELECT uc.id,
+              uc.insurer_code,
+              COALESCE(i.label, uc.insurer_code)           AS insurer_label,
+              uc.insurance_type_code,
+              COALESCE(it.label_fr, uc.insurance_type_code) AS insurance_type_label,
+              uc.target_filename,
+              uc.status,
+              uc.vectorization_status,
+              uc.metadata,
+              uc.created_at,
+              uc.vectorized_at,
+              COUNT(DISTINCT p.id)::int AS linked_policies_count
+       FROM user_cg uc
+       LEFT JOIN insurers        i   ON i.code  = uc.insurer_code
+       LEFT JOIN insurance_types it  ON it.code = uc.insurance_type_code
+       LEFT JOIN policies        p   ON p.user_cg_id = uc.id
+       WHERE uc.owner = $1
+       GROUP BY uc.id, i.label, it.label_fr
+       ORDER BY uc.created_at DESC`,
+      [userEmail]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('[CG/user/list GET]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// DELETE /api/cg/user/:id
+// Supprime une CG utilisateur (ownership check)
+// -----------------------------------------------------------------------------
+router.delete('/user/:id', authMiddleware, async (req: any, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
+
+    const ownerCheck = await query('SELECT owner FROM user_cg WHERE id = $1', [id]);
+    if (ownerCheck.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
+    if (!req.user?.isAdmin && ownerCheck.rows[0].owner !== req.user.email) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    await query('DELETE FROM user_cg WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[CG/user DELETE]', err.message);
+    res.status(500).json({ error: 'Erreur serveur', details: err.message });
+  }
+});
+
 export default router;

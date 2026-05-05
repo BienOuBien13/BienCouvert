@@ -11,7 +11,7 @@ export enum PolicyType {
   OTHER = 'Autre'
 }
 
-export type AppView = 'home' | 'add' | 'smart-add' | 'policies' | 'chat' | 'analysis' | 'coverage' | 'experts' | 'profile' | 'admin' | 'monitoring' | 'sync' | 'contact' | 'partner' | 'sinistre';
+export type AppView = 'home' | 'add' | 'smart-add' | 'policies' | 'chat' | 'analysis' | 'coverage' | 'experts' | 'profile' | 'admin' | 'monitoring' | 'sync' | 'contact' | 'partner' | 'sinistre' | 'my-cg';
 
 export interface User {
   id: string;

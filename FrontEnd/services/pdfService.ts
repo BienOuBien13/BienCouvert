@@ -8,16 +8,30 @@ const isNativePlatform = (): boolean =>
   !!(window as any).Capacitor?.isNativePlatform?.();
 
 const shareOrSavePDF = async (doc: jsPDF, fileName: string): Promise<void> => {
-  if (isNativePlatform() && navigator.share) {
-    try {
-      const blob = doc.output('blob');
-      const file = new File([blob], fileName, { type: 'application/pdf' });
-      await navigator.share({ files: [file], title: fileName });
-      return;
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') return; // user cancelled
-      console.warn('Web Share API failed, falling back to download', err);
+  if (isNativePlatform()) {
+    // Sur mobile natif : essayer Web Share API (partage fichier)
+    if (navigator.share) {
+      try {
+        const blob = doc.output('blob');
+        const file = new File([blob], fileName, { type: 'application/pdf' });
+        // Vérifier la prise en charge du partage de fichiers si l'API canShare est disponible
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: fileName });
+          return;
+        }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return; // annulé par l'utilisateur
+        console.warn('Web Share API failed', err);
+      }
     }
+    // Fallback mobile : ouvrir en data URI (déclenche le lecteur PDF du système)
+    try {
+      const dataUri = doc.output('datauristring');
+      window.open(dataUri, '_blank');
+    } catch {
+      doc.save(fileName); // dernier recours
+    }
+    return;
   }
   doc.save(fileName);
 };
