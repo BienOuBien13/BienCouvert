@@ -354,7 +354,6 @@ export const CoverageDetailPage: React.FC<Props> = ({ policy, onClose }) => {
                     </ul>
                   </div>
                 )}
-              </div>
             </div>
           </>
         )}
