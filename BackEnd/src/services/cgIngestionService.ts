@@ -20,6 +20,10 @@ import { Pool } from 'pg';
 import pool from '../db';
 import { getAiClient } from './geminiService';
 import { vectorizeCgByPages } from './pageVectorizationService';
+import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -537,6 +541,52 @@ async function agentFetcher(url: string): Promise<{
   });
 }
 
+/**
+ * Fallback curl pour les sites avec TLS fingerprinting (WAF Cloudflare/Akamai).
+ * curl utilise un JA3 différent de Node.js — souvent accepté là où https.get est bloqué.
+ * Retourne null si curl n'est pas disponible ou si le téléchargement échoue.
+ */
+async function agentFetcherCurl(url: string): Promise<{ buffer: Buffer; sha256: string } | null> {
+  return new Promise((resolve) => {
+    const tmpFile = path.join(os.tmpdir(), `cg-fetch-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+    const encodedUrl = new URL(url).href;
+    const args = [
+      '-L', '-s', '--fail',
+      '--max-time', '30',
+      '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '-H', 'Accept: application/pdf,*/*',
+      '-H', 'Accept-Language: fr-FR,fr;q=0.9',
+      '-o', tmpFile,
+      encodedUrl,
+    ];
+    execFile('curl', args, { timeout: 35000 }, (err) => {
+      if (err) {
+        fs.unlink(tmpFile, () => {});
+        return resolve(null);
+      }
+      try {
+        const buffer = fs.readFileSync(tmpFile);
+        fs.unlink(tmpFile, () => {});
+        if (buffer.length < 10 || buffer.slice(0, 5).toString('ascii') !== '%PDF-') return resolve(null);
+        const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+        resolve({ buffer, sha256 });
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Télécharge un PDF : essaie d'abord https.get (Node), puis curl en fallback (TLS fingerprint différent).
+ */
+async function fetchPdf(url: string): Promise<{ buffer: Buffer; sha256: string } | null> {
+  const result = await agentFetcher(url);
+  if (result) return result;
+  console.log(`[FETCHER] https.get échoué → fallback curl pour ${url}`);
+  return agentFetcherCurl(url);
+}
+
 // ─── AGENT 3 : CLASSIFIER ─────────────────────────────────────────────────────
 /**
  * Analyse les 3 premières pages du PDF avec Gemini Vision pour identifier :
@@ -806,7 +856,7 @@ export async function runIngestion(scope: IngestionScope): Promise<{
             // ── Agent FETCHER ────────────────────────────────────────────
             console.log(`[FETCHER] Téléchargement: ${candidate.url}`);
             await updateJob(jobId, { status: 'fetching' });
-            const fetched = await agentFetcher(candidate.url);
+            const fetched = await fetchPdf(candidate.url);
 
             if (!fetched) {
               await updateJob(jobId, { status: 'error', error_message: 'Téléchargement échoué ou non-PDF' });
@@ -1031,7 +1081,7 @@ export async function ingestDocumentForCatalogue(params: {
 
     // ── FETCHER ──────────────────────────────────────────────────────────────
     progress('fetching', `Téléchargement du PDF : ${pdfUrl.slice(0, 70)}…`);
-    const fetched = await agentFetcher(pdfUrl);
+    const fetched = await fetchPdf(pdfUrl);
 
     if (!fetched) {
       await pool.query(

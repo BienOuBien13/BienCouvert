@@ -9,8 +9,18 @@ import { AgentIntent, IntentResult } from './types';
 
 const INTENT_EXAMPLES: Record<AgentIntent, string[]> = {
   QUESTION_GARANTIE: [
+    // Questions directes sur la couverture
     'suis-je couvert', 'est-ce que mon assurance couvre', 'ma garantie',
     'couverture', 'remboursement', 'est couvert', 'garantit',
+    // Tournures indirectes fréquentes
+    'si je', 'en cas de', 'que se passe', 'que couvre', 'prise en charge',
+    'pris en charge', 'indemnise', 'indemnisation', 'protège', 'protege',
+    'prendraient en charge', 'prend en charge', 'paye', 'paierait',
+    'suis protégé', 'suis protege', 'couvert pour', 'couvert si',
+    'mes garanties', 'quelle garantie', 'quelles garanties', 'quel contrat couvre',
+    'quels contrats', 'assure', 'est assuré', 'est assure',
+    'franchise', 'plafond', 'montant maximum', 'jusqu\'à combien',
+    'dommages', 'réparation', 'réparée', 'vol de', 'bris de',
   ],
   SINISTRE: [
     'sinistre', 'accident', 'inondation', 'vol', 'incendie', 'dégâts',

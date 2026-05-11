@@ -330,6 +330,30 @@ export class OrchestratorAgent {
           console.log(`[Orchestrator] ${coverageFacts.length} faits structurés chargés depuis coverage_facts`);
         }
 
+        // ── Réduction du contexte envoyé à l'AnalysisAgent ────────────────
+        // Limiter à MAX_FACTS_FOR_LLM faits pour éviter les prompts trop lourds (>8000 tokens).
+        // Stratégie : mots de la question → score de pertinence sur guarantee_label/key,
+        // puis tri décroissant, avec les faits non scorés retenus en queue (jusqu'à la limite).
+        const MAX_FACTS_FOR_LLM = 80;
+        let factsForAnalysis = coverageFacts;
+        if (coverageFacts.length > MAX_FACTS_FOR_LLM) {
+          const normalize = (s: string) =>
+            s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const stopWords = new Set(['votre', 'avec', 'pour', 'dans', 'estce', 'etes',
+            'vous', 'suisje', 'couvre', 'garantie', 'assurance', 'contrat']);
+          const qWords = normalize(message).split(/\s+/)
+            .filter(w => w.length > 3 && !stopWords.has(w));
+          const scored = coverageFacts.map(f => {
+            const label = normalize(f.guarantee_label || '');
+            const key   = (f.guarantee_key || '').toLowerCase();
+            const score = qWords.filter(w => label.includes(w) || key.includes(w)).length;
+            return { f, score };
+          });
+          scored.sort((a, b) => b.score - a.score);
+          factsForAnalysis = scored.slice(0, MAX_FACTS_FOR_LLM).map(x => x.f);
+          console.log(`[Orchestrator] Faits filtrés: ${coverageFacts.length} → ${factsForAnalysis.length} (max ${MAX_FACTS_FOR_LLM})`);
+        }
+
         // Optimisation circuit
         const metrics: PipelineMetrics = {
           ragCacheHit: ragResult.fromCache,
@@ -341,7 +365,7 @@ export class OrchestratorAgent {
         circuitOptimizations.push(...optimizerAgent.analyzeCircuit(metrics));
 
         logAgent(analysisAgent.name);
-        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts, history });
+        const analysis = await analysisAgent.analyze({ question: message, ragResult, policies, userProfile, coverageFacts: factsForAnalysis, history });
 
         let advisor: AdvisorResult | undefined;
         // AdvisorAgent uniquement pour les demandes de CONSEIL explicites.

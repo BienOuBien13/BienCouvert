@@ -734,6 +734,11 @@ export const chunkText = (text: string, maxChars: number = 3000): string[] => {
 // Les coverage_facts sont stables (modifiés uniquement via PATCH admin), donc le
 // cache est sûr et accélère significativement l'assistant pour requêtes répétées.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Cache mémoire Node.js (fallback si Redis indisponible) — TTL 5 min
+const _factsMemCache = new Map<string, { data: any[]; exp: number }>();
+const FACTS_MEM_TTL_MS = 5 * 60 * 1000;
+
 function buildCoverageFactsCacheKey(policies: any[]): string {
   // Clé déterministe : tri pour stabilité, on inclut tous les axes utilisés par la résolution
   const parts = policies
@@ -757,14 +762,23 @@ export async function resolveCoverageFacts(storage: any, policies: any[], label 
   const cacheKey = buildCoverageFactsCacheKey(policies);
   const cached = await cacheGet<any[]>(cacheKey);
   if (cached) {
-    console.log(`${tag}🎯 Cache hit coverage_facts (${cached.length} faits)`);
+    console.log(`${tag}🎯 Cache hit coverage_facts Redis (${cached.length} faits)`);
     return cached;
+  }
+
+  // ── Cache mémoire Node.js (fallback si Redis indisponible) ──
+  const memEntry = _factsMemCache.get(cacheKey);
+  if (memEntry && memEntry.exp > Date.now()) {
+    console.log(`${tag}🎯 Cache hit coverage_facts mémoire (${memEntry.data.length} faits)`);
+    return memEntry.data;
   }
 
   const result = await resolveCoverageFactsImpl(storage, policies, label);
 
-  // TTL 10 min — coverage_facts sont stables (modifiés uniquement par admin)
+  // TTL 10 min Redis — coverage_facts sont stables (modifiés uniquement par admin)
   await cacheSet(cacheKey, result, 600);
+  // TTL 5 min mémoire — toujours actif même si Redis est down
+  _factsMemCache.set(cacheKey, { data: result, exp: Date.now() + FACTS_MEM_TTL_MS });
   return result;
 }
 
